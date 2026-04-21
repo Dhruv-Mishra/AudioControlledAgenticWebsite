@@ -102,7 +102,7 @@ Each becomes:
 ```js
 export const route = {
   name: 'carriers',
-  title: 'Carriers — HappyRobot FreightOps',
+  title: 'Carriers — Dhruv FreightOps',
   async enter(root) {
     // DOM is already injected. Just wire event handlers and data.
     await loadData();

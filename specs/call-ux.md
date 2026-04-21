@@ -91,8 +91,8 @@ FIRST time `setup_complete` fires after a placeCall:
 
 ```
 <call_initiated>
-The user just placed a call and is now connected. They are on /carriers.html ("Carriers — HappyRobot FreightOps").
-Greet them ONCE, briefly, in one short sentence — introduce yourself as Jarvis from HappyRobot FreightOps and ask how you can help. Start speaking immediately; do not wait for them. Keep your persona. End with a question.
+The user just placed a call and is now connected. They are on /carriers.html ("Carriers — Dhruv FreightOps").
+Greet them ONCE, briefly, in one short sentence — introduce yourself as Jarvis from Dhruv FreightOps and ask how you can help. Start speaking immediately; do not wait for them. Keep your persona. End with a question.
 </call_initiated>
 ```
 
@@ -110,25 +110,51 @@ success or `call_start ignored — upstream not ready` if the browser
 somehow sends it before setup_complete (shouldn't happen; the client
 only sends in `_onSetupComplete`).
 
-## Ambient noise — state-machine driven
+## Ambient noise — single-invariant state-machine
 
-Ambient plays while the user perceives a call as "live":
+**Invariant: ambient ON ⟺ `VoiceAgent.isInCall()` returns true AND the
+user hasn't picked noiseMode=off.** One rule. No per-state exceptions.
+
+Concretely, `CALL_ACTIVE_STATES` is:
 
 ```
-Ambient ON  ← {DIALING, LIVE_OPENING, LIVE_READY, MODEL_*, TOOL_EXECUTING, RECONNECTING}
-Ambient OFF ← {IDLE, ARMING, CLOSING, ERROR}
+{ DIALING, LIVE_OPENING, LIVE_READY, MODEL_THINKING, MODEL_SPEAKING,
+  TOOL_EXECUTING, RECONNECTING }
 ```
 
-Fade-in = 220 ms, fade-out = 300 ms.
+`isInCall()` is the ONE public predicate that wraps membership in this
+set. `_updateAmbient()` is the ONE private method that maps the
+predicate to `AudioPipeline.setAmbientOn()`. `_setState()` calls
+`_updateAmbient()` on every transition — no other code path in the
+agent touches ambient directly.
+
+Fade-in on call start = 220 ms. Fade-out on end/error = 300 ms.
+Transitions BETWEEN active states ramp at 40 ms (near-instant) because
+the target is unchanged — the setTargetAtTime anchor stays at 1 and
+the gain stays pinned at 1 the whole time. No pumping, no gaps, no
+re-creation of the BufferSource.
 
 `setAmbientOn(true)` lazily starts the noise source if one hasn't been
 built yet — for the "Place Call is the user's first gesture" path, the
 AudioContext came up in the same tick and no other code has called
-`setNoiseMode` yet.
+`setNoiseMode` yet. `setNoiseMode` is idempotent: if the mode hasn't
+changed AND a source is already running, it's a no-op (no click from
+stop-restart).
 
-Noise plays through an INDEPENDENT branch (`noiseBusGain →
-noiseEnvelopeGain → ctx.destination`) so it survives agent silence and
-isn't coloured by the phone-line bandpass.
+Noise plays through an INDEPENDENT branch (`noiseSource → noiseBusGain
+→ noiseEnvelopeGain → ctx.destination`) so it survives agent silence
+and isn't coloured by the phone-line bandpass. Muting your mic does
+NOT affect ambient — it's the room you're sitting in, not the line
+you're talking over.
+
+### Why this replaces the previous "per-state set" approach
+
+The previous implementation kept a separate `AMBIENT_ON_STATES` set
+and sprinkled `setAmbientOn` calls across `placeCall`, `_gracefullyEndCall`,
+`_tearDownCall`, and `setPersona`. Any new state (or any state the
+set didn't explicitly list) silenced the ambient. The user reported
+drops during `USER_SPEAKING` / `MODEL_THINKING`. Now there is exactly
+one rule, one predicate, one driver.
 
 ## Mute mic (call-scoped)
 
@@ -175,7 +201,7 @@ Place Call UX:
 
 Client → Server (new):
 ```
-{ type: "call_start",  page: "/carriers.html", title: "Carriers — HappyRobot FreightOps" }
+{ type: "call_start",  page: "/carriers.html", title: "Carriers — Dhruv FreightOps" }
 { type: "call_end" }
 ```
 

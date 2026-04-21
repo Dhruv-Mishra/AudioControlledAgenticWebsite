@@ -1,5 +1,5 @@
 {
-  "name": "happyrobot-freightops-demo",
+  "name": "dhruv-freightops-demo",
   "version": "0.1.0",
   "private": true,
   "description": "Live voice agent navigation demo — Gemini Live API + tool calling over a dispatcher console.",
@@ -14,7 +14,8 @@
     "smoke:live-mode": "node evals/live-mode-smoke.js",
     "smoke:session-resume": "node evals/session-resume-smoke.js",
     "smoke:cold-start-live": "node evals/cold-start-live-smoke.js",
-    "smoke:greeting-injection": "node evals/greeting-injection-smoke.js"
+    "smoke:greeting-injection": "node evals/greeting-injection-smoke.js",
+    "smoke:fill-datetime": "node evals/fill-datetime-smoke.mjs"
   },
   "engines": {
     "node": ">=20"

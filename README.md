@@ -1,6 +1,6 @@
-# HappyRobot FreightOps — Voice Agent Demo
+# Dhruv FreightOps — Voice Agent Demo
 
-A working demo of a voice agent (Google Gemini Live API) that takes real actions on a mock freight dispatcher console via tool calling. Built to showcase the exact product surface HappyRobot sells: natural-sounding voice agents for dispatch, customer service, and rate negotiation.
+A working demo of a voice agent (Google Gemini Live API) that takes real actions on a mock freight dispatcher console via tool calling. Showcases natural-sounding voice agents for dispatch, customer service, and rate negotiation.
 
 ## Highlights
 
@@ -224,7 +224,7 @@ You'll get per-frame logs on both sides.
 Server stdout:
 ```
 [server] GEMINI_API_KEY detected (len=39)
-HappyRobot FreightOps listening on http://localhost:3001
+Dhruv FreightOps listening on http://localhost:3001
 [live <sid>] attach complete — awaiting hello
 [live <sid>] hello persona=professional page=/ elements=57
 [live <sid>] upstream connect requested model=gemini-3.1-flash-live-preview voice=Kore persona=professional
@@ -289,6 +289,10 @@ npm run smoke:cold-start-live
 # message after setup_complete triggers a <call_initiated> block via
 # sendClientContent. No real key needed (we test the wire guard).
 npm run smoke:greeting-injection
+
+# Pure-node unit test of the `fill` tool's input-type coercion (datetime-
+# local, date, time, month, week, number, tel, etc.). No server needed.
+npm run smoke:fill-datetime
 
 # When the key IS valid, run it explicitly for end-to-end proof:
 GEMINI_API_KEY=$YOUR_KEY node evals/simulated-browser-smoke.js

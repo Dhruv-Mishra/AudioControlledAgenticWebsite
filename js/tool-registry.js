@@ -120,6 +120,166 @@ async function waitForIdle(ms = 120) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+const DEBUG = (() => {
+  try {
+    if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('debug') === '1') return true;
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('jarvis.debug') === '1') return true;
+  } catch {}
+  return false;
+})();
+function dlog(...args) {
+  if (!DEBUG) return;
+  // eslint-disable-next-line no-console
+  console.log('[tool-registry]', ...args);
+}
+
+/** Pad a number to 2 digits. */
+function pad2(n) { return String(n).padStart(2, '0'); }
+function pad3(n) { return String(n).padStart(3, '0'); }
+function pad4(n) { return String(n).padStart(4, '0'); }
+
+/** ISO week number (Mon-start) per RFC 3339 §4.1 / ISO 8601. Returns
+ *  `YYYY-Www` where Www is 01-53. */
+function isoWeekString(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${pad2(week)}`;
+}
+
+/**
+ * Coerce a raw value into the format a given `<input type="...">` will
+ * accept. Returns `{ value, ok, reason }`. When `ok === false`, `value`
+ * is the best-effort string we tried (often '') and `reason` explains
+ * the expected format.
+ *
+ * Pure function — exported for unit tests. Does NOT touch the DOM.
+ *
+ * Supported input types: datetime-local, date, time, month, week,
+ * number, range, tel, email, url, search, password, text, textarea
+ * (pass 'textarea' as the type). Any other type falls through to a
+ * trimmed string.
+ */
+export function coerceFillValue(rawValue, inputType) {
+  const type = String(inputType || 'text').toLowerCase();
+  if (rawValue == null) return { ok: true, value: '' };
+  const raw = String(rawValue);
+
+  // Fast-path: empty value.
+  if (!raw.length) return { ok: true, value: '' };
+
+  switch (type) {
+    case 'datetime-local': {
+      // Accept any ISO-8601-ish string. <input type="datetime-local">
+      // requires `YYYY-MM-DDTHH:MM` or `YYYY-MM-DDTHH:MM:SS` in LOCAL
+      // time (no `Z`, no offset). We reformat to the minute-precision
+      // form which is the most widely supported.
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) {
+        return {
+          ok: false, value: '',
+          reason: 'Could not parse as a date-time. Send ISO 8601 like 2027-04-05T13:30 or 2027-04-05T13:30:00Z.'
+        };
+      }
+      const s = `${pad4(d.getFullYear())}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      return { ok: true, value: s };
+    }
+    case 'date': {
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) {
+        return { ok: false, value: '', reason: 'Could not parse as a date. Send YYYY-MM-DD or any ISO 8601 date-time.' };
+      }
+      return { ok: true, value: `${pad4(d.getFullYear())}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` };
+    }
+    case 'time': {
+      // Accept `HH:MM` / `HH:MM:SS` / `H:MM (AM|PM)` / a full datetime.
+      const trimmed = raw.trim();
+      // Try a direct HH:MM(:SS) match first.
+      const direct = /^([0-1]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/.exec(trimmed);
+      if (direct) {
+        return { ok: true, value: `${pad2(direct[1])}:${pad2(direct[2])}` };
+      }
+      // Try AM/PM.
+      const ampm = /^([0-1]?\d):([0-5]\d)\s*(am|pm)$/i.exec(trimmed);
+      if (ampm) {
+        let h = Number(ampm[1]);
+        if (/pm/i.test(ampm[3]) && h < 12) h += 12;
+        if (/am/i.test(ampm[3]) && h === 12) h = 0;
+        return { ok: true, value: `${pad2(h)}:${pad2(ampm[2])}` };
+      }
+      // Fallback: parse as a full datetime and take HH:MM.
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) {
+        return { ok: true, value: `${pad2(d.getHours())}:${pad2(d.getMinutes())}` };
+      }
+      return { ok: false, value: '', reason: 'Could not parse as a time. Send HH:MM in 24-hour time.' };
+    }
+    case 'month': {
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) {
+        return { ok: false, value: '', reason: 'Could not parse as a month. Send YYYY-MM.' };
+      }
+      return { ok: true, value: `${pad4(d.getFullYear())}-${pad2(d.getMonth() + 1)}` };
+    }
+    case 'week': {
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) {
+        return { ok: false, value: '', reason: 'Could not parse as a week. Send YYYY-Www.' };
+      }
+      return { ok: true, value: isoWeekString(d) };
+    }
+    case 'number':
+    case 'range': {
+      // Strip common noise: currency symbols, commas, trailing text.
+      // Keep the first signed-number match.
+      const cleaned = raw.replace(/[^\d.\-eE+]/g, '');
+      const n = Number(cleaned);
+      if (!Number.isFinite(n)) {
+        return { ok: false, value: '', reason: `Could not parse "${raw}" as a number.` };
+      }
+      return { ok: true, value: String(n) };
+    }
+    case 'tel': {
+      // Allow digits, +, -, (, ), space, and a leading plus. Strip
+      // everything else (e.g. "ext. 123" or parenthetical notes).
+      const cleaned = raw.replace(/[^\d+\-()\s]/g, '').trim();
+      return { ok: true, value: cleaned };
+    }
+    case 'email': {
+      return { ok: true, value: raw.trim() };
+    }
+    case 'url': {
+      return { ok: true, value: raw.trim() };
+    }
+    case 'search':
+    case 'password':
+    case 'text':
+    case 'textarea':
+    default: {
+      return { ok: true, value: raw };
+    }
+  }
+}
+
+/** Human-readable hint for the error payload when a set is rejected. */
+export function formatHintFor(inputType) {
+  switch (String(inputType || '').toLowerCase()) {
+    case 'datetime-local': return 'YYYY-MM-DDTHH:MM (local time, no Z)';
+    case 'date':           return 'YYYY-MM-DD';
+    case 'time':           return 'HH:MM (24-hour)';
+    case 'month':          return 'YYYY-MM';
+    case 'week':           return 'YYYY-Www';
+    case 'number':
+    case 'range':          return 'a numeric string, no thousands separators or currency symbols';
+    case 'tel':            return 'digits with optional +, -, (, ), spaces';
+    case 'email':          return 'a valid email address';
+    case 'url':            return 'a valid URL';
+    default:               return 'plain text';
+  }
+}
+
 export class ToolRegistry {
   /**
    * @param {object} opts
@@ -164,7 +324,12 @@ export class ToolRegistry {
     } catch (err) {
       const msg = (err && err.message) || String(err);
       this.onToolNote(`${name} failed: ${msg}`);
-      reply({ ok: false, error: msg });
+      // Attach structured fillFailure so the model sees what format we
+      // expected. If present we also bundle it into `result` (on the
+      // ok:false side of the envelope) for richer context.
+      const envelope = { ok: false, error: msg };
+      if (err && err.fillFailure) envelope.result = { fill_failure: err.fillFailure };
+      reply(envelope);
     }
   }
 
@@ -190,12 +355,60 @@ export class ToolRegistry {
         if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
           throw new Error(`Element "${args.agent_id}" is not an input/textarea.`);
         }
+        const rawValue = args.value == null ? '' : String(args.value);
+        const inputType = el.tagName === 'TEXTAREA'
+          ? 'textarea'
+          : (el.getAttribute('type') || 'text').toLowerCase();
+        const coerced = coerceFillValue(rawValue, inputType);
+        dlog('fill', args.agent_id, 'type=' + inputType, 'requested=' + JSON.stringify(rawValue), 'coerced=' + JSON.stringify(coerced));
+
+        if (!coerced.ok) {
+          // Coercion failed — tell the model exactly what went wrong.
+          const err = new Error(
+            `fill_failed: input "${args.agent_id}" type=${inputType} rejected "${rawValue}". ${coerced.reason} Try again with the required format.`
+          );
+          err.fillFailure = {
+            agent_id: args.agent_id,
+            input_type: inputType,
+            requested: rawValue,
+            actual: '',
+            reason: coerced.reason
+          };
+          throw err;
+        }
+
         emitFlash(el);
         await waitForIdle();
         el.focus();
-        el.value = String(args.value ?? '');
+        el.value = coerced.value;
         fireInputEvent(el);
-        return { filled: args.agent_id, value: el.value };
+
+        // Verify-back read: if the DOM rejected our value (empty after
+        // set despite non-empty input), surface a descriptive error so
+        // the model can retry with a different format rather than
+        // silently continuing on a lie.
+        const actual = String(el.value == null ? '' : el.value);
+        if (rawValue !== '' && actual === '') {
+          dlog('fill', args.agent_id, 'value rejected by DOM — actual empty');
+          const err = new Error(
+            `fill_failed: input "${args.agent_id}" type=${inputType} accepted "${coerced.value}" but its value stayed empty — the browser rejected the format. Required format: ${formatHintFor(inputType)}.`
+          );
+          err.fillFailure = {
+            agent_id: args.agent_id,
+            input_type: inputType,
+            requested: rawValue,
+            coerced: coerced.value,
+            actual: '',
+            reason: `Browser rejected the coerced value. Required format: ${formatHintFor(inputType)}.`
+          };
+          throw err;
+        }
+        return {
+          filled: args.agent_id,
+          input_type: inputType,
+          requested: rawValue,
+          value: actual
+        };
       }
       case 'select': {
         const el = findByAgentId(args.agent_id);

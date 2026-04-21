@@ -1,6 +1,6 @@
 # Examples-Repo Audit
 
-Cross-reference of our `HappyRobotFreightOps` implementation against the official
+Cross-reference of our `DhruvFreightOps` implementation against the official
 Gemini Live examples at https://github.com/google-gemini/gemini-live-api-examples.
 
 Sources inspected (all at `main` as of 2026-04-21):

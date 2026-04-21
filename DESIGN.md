@@ -1,4 +1,4 @@
-# DESIGN.md — HappyRobot FreightOps
+# DESIGN.md — Dhruv FreightOps
 
 Active design system. All tokens are CSS custom properties defined in `css/tokens.css`. No hardcoded hex, radius, or spacing values in component styles.
 
@@ -34,7 +34,7 @@ All colors via CSS custom properties. No hex in component styles.
 --color-text-dim      : #5D6573  (tertiary / placeholders)
 --color-text-inverse  : #0B0D10  (on accents)
 
---color-accent        : #6EE7B7  (HappyRobot-adjacent green — signal positive, live, active)
+--color-accent        : #6EE7B7  (call-center green — signal positive, live, active)
 --color-accent-strong : #34D399
 --color-accent-soft   : #064E3B  (accent bg tint)
 
@@ -135,7 +135,7 @@ Respect `prefers-reduced-motion: reduce` — disable all non-essential animation
 ## Components
 
 ### Nav bar (`<header class="app-header">`)
-48 px tall, full width, border-bottom hairline. Left: product name "HappyRobot FreightOps" with a small pulsing-dot logo. Center: page tabs. Right: voice-agent status pill + persona select + session count.
+48 px tall, full width, border-bottom hairline. Left: product name "Dhruv FreightOps" with a small pulsing-dot logo. Center: page tabs. Right: voice-agent status pill + persona select + session count.
 
 ### Voice-agent dock (fixed bottom-right)
 Floating card, 340 px wide, 16 px from edge, elevated with `--shadow-overlay`. Three sections stacked: transcript log (scrolls), status strip, control strip (wake-word/PTT, persona select, noise select, volume).

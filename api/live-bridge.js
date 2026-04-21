@@ -91,7 +91,7 @@ function buildCallInitiatedText({ page, title }) {
   const lines = [
     '<call_initiated>',
     `The user just placed a call and is now connected. They are on ${safePage} ("${niceTitle}").`,
-    'Greet them ONCE, briefly, in one short sentence — introduce yourself as Jarvis from HappyRobot FreightOps and ask how you can help. Start speaking immediately; do not wait for them. Keep your persona. End with a question.',
+    'Greet them ONCE, briefly, in one short sentence — introduce yourself as Jarvis from Dhruv FreightOps and ask how you can help. Start speaking immediately; do not wait for them. Keep your persona. End with a question.',
     '</call_initiated>'
   ];
   return lines.join('\n');
@@ -246,7 +246,16 @@ function attach(browserWs, req, env) {
   function normaliseToolResponse(payload) {
     if (!payload || typeof payload !== 'object') return { result: 'ok' };
     if (payload.ok === false) {
-      return { error: String(payload.error || 'Tool call failed.') };
+      // Canonical shape is `{ error }`. When the browser attaches a
+      // structured `result.fill_failure` (or similar), flatten it into
+      // the error string so the model sees exactly what format the
+      // input expected — the `error` value can be any JSON-able thing,
+      // but making it a descriptive string is the most portable shape.
+      const msg = String(payload.error || 'Tool call failed.');
+      const extra = payload.result && typeof payload.result === 'object'
+        ? ' DETAIL: ' + JSON.stringify(payload.result)
+        : '';
+      return { error: msg + extra };
     }
     if (payload.result === undefined || payload.result === null) {
       return { result: 'ok' };

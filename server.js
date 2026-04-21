@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * HappyRobot FreightOps demo server.
+ * Dhruv FreightOps demo server.
  *
  * - Serves static HTML/CSS/JS.
  * - /api/health   : liveness + GEMINI_API_KEY presence indicator.
@@ -232,7 +232,7 @@ server.on('upgrade', (req, socket, head) => {
 server.listen(PORT, () => {
   const hasKey = !!process.env.GEMINI_API_KEY;
   process.stdout.write(
-    `HappyRobot FreightOps listening on http://localhost:${PORT}\n` +
+    `Dhruv FreightOps listening on http://localhost:${PORT}\n` +
     `  GEMINI_API_KEY: ${hasKey ? 'set' : 'NOT SET (voice features will error)'}\n` +
     `  WS endpoint:    ws://localhost:${PORT}/api/live\n`
   );

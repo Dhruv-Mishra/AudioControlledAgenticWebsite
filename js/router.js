@@ -17,31 +17,31 @@
 const ROUTES = Object.freeze({
   '/': {
     name: 'dispatch',
-    title: 'Dispatch Board — HappyRobot FreightOps',
+    title: 'Dispatch Board — Dhruv FreightOps',
     partial: '/partials/dispatch.html',
     load: () => import('./page-dispatch.js')
   },
   '/index.html': {
     name: 'dispatch',
-    title: 'Dispatch Board — HappyRobot FreightOps',
+    title: 'Dispatch Board — Dhruv FreightOps',
     partial: '/partials/dispatch.html',
     load: () => import('./page-dispatch.js')
   },
   '/carriers.html': {
     name: 'carriers',
-    title: 'Carriers — HappyRobot FreightOps',
+    title: 'Carriers — Dhruv FreightOps',
     partial: '/partials/carriers.html',
     load: () => import('./page-carriers.js')
   },
   '/negotiate.html': {
     name: 'negotiate',
-    title: 'Rate Negotiation — HappyRobot FreightOps',
+    title: 'Rate Negotiation — Dhruv FreightOps',
     partial: '/partials/negotiate.html',
     load: () => import('./page-negotiate.js')
   },
   '/contact.html': {
     name: 'contact',
-    title: 'Contact Support — HappyRobot FreightOps',
+    title: 'Contact Support — Dhruv FreightOps',
     partial: '/partials/contact.html',
     load: () => import('./page-contact.js')
   }

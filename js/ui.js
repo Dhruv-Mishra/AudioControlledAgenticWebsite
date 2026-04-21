@@ -170,7 +170,7 @@ function buildHeader() {
   header.innerHTML = `
     <div class="app-brand" data-agent-id="nav.brand">
       <span class="dot" aria-hidden="true"></span>
-      <span>HappyRobot FreightOps</span>
+      <span>Dhruv FreightOps</span>
     </div>
     <nav class="app-nav" aria-label="Primary">
       <a href="/" data-agent-id="nav.dispatch">Dispatch</a>

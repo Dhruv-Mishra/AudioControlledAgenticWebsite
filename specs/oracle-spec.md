@@ -3,7 +3,7 @@
 ## Decision 1: Demo scenario
 
 ### Recommendation
-**HappyRobot FreightOps** — a mock freight dispatch & carrier-relations portal. The agent is "Jarvis," a dispatch co-pilot on a call-center seat. Three pages:
+**Dhruv FreightOps** — a mock freight dispatch & carrier-relations portal. The agent is "Jarvis," a dispatch co-pilot on a call-center seat. Three pages:
 
 1. **Dispatch Board** (`/`) — live table of in-transit loads, a map panel placeholder, quick-action toolbar ("Assign carrier", "Request status update", "Escalate"). Filters, search, row click-through.
 2. **Carrier Directory** (`/carriers.html`) — searchable list of carriers (name, MC number, lanes, rating, availability). Detail cards, contact buttons.
