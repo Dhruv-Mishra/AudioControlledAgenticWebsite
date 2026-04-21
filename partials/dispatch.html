@@ -1,0 +1,68 @@
+<section class="page-header">
+  <div>
+    <h1 class="page-title">Dispatch Board</h1>
+    <div class="page-subtitle muted">Live view of active loads. Click any row or ask Jarvis to take an action.</div>
+  </div>
+  <div class="toolbar">
+    <button class="btn" data-agent-id="dispatch.action.new_load">New load</button>
+    <button class="btn btn--primary" data-agent-id="dispatch.action.export">Export CSV</button>
+  </div>
+</section>
+
+<div class="summary-grid" id="summary-grid" aria-label="Key metrics"></div>
+
+<div class="filter-bar" role="region" aria-label="Filter loads">
+  <div class="field">
+    <label class="field-label" for="filter-q">Search</label>
+    <input id="filter-q" class="input" type="search" placeholder="Load ID, city, carrier, commodity" data-agent-id="dispatch.filters.search" />
+  </div>
+  <div class="field">
+    <label class="field-label" for="filter-status">Status</label>
+    <select id="filter-status" class="select" data-agent-id="dispatch.filters.status">
+      <option value="all">All</option>
+      <option value="in_transit">In transit</option>
+      <option value="booked">Booked</option>
+      <option value="pending">Pending</option>
+      <option value="delayed">Delayed</option>
+      <option value="delivered">Delivered</option>
+    </select>
+  </div>
+  <div class="field">
+    <label class="field-label" for="filter-lane">Lane contains</label>
+    <input id="filter-lane" class="input" type="text" placeholder="e.g. TX, Chicago" data-agent-id="dispatch.filters.lane" />
+  </div>
+</div>
+
+<div class="grid-2">
+  <section class="panel" aria-label="Loads table">
+    <header class="panel-header">
+      <div class="panel-title">Loads</div>
+      <div class="row-sm">
+        <span class="muted" style="font-size: var(--fs-xs);">Click a row for details</span>
+      </div>
+    </header>
+    <div class="table-wrap" role="region">
+      <table class="table" aria-label="Active loads">
+        <thead>
+          <tr>
+            <th scope="col">Load ID</th>
+            <th scope="col">Route</th>
+            <th scope="col">Carrier</th>
+            <th scope="col">Status</th>
+            <th scope="col">Miles</th>
+            <th scope="col">Rate</th>
+            <th scope="col">ETA</th>
+          </tr>
+        </thead>
+        <tbody id="loads-tbody" data-agent-id="dispatch.loads_tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="stack">
+    <div class="detail-panel" id="detail-panel" aria-label="Load detail">
+      <div class="muted">Select a load to see details.</div>
+    </div>
+    <div class="map-placeholder" aria-label="Map (placeholder)">Map view coming soon</div>
+  </aside>
+</div>

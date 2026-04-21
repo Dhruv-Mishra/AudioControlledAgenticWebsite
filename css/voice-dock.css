@@ -1,0 +1,562 @@
+/* Voice agent dock — phone-call metaphor.
+ *
+ * Three main regions:
+ *   .voice-dock-header        brand + status pill + icon actions (settings/collapse)
+ *   .voice-dock-body          transcript feed + vu status strip
+ *   .voice-dock-action        THE BIG Place/End Call button + mute mic + hint
+ * Plus:
+ *   .voice-settings-sheet     advanced options (persona, mode, noise, compression)
+ *                             — slides in from bottom of dock (or full-height on mobile)
+ */
+
+.voice-dock {
+  position: fixed;
+  bottom: var(--sp-4);
+  right: var(--sp-4);
+  width: 380px;
+  max-width: calc(100vw - var(--sp-6));
+  background: var(--color-bg-elev-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  overflow: hidden;
+  transition: transform var(--dur-base) var(--ease-out-expo);
+}
+
+.voice-dock.is-collapsed {
+  width: auto;
+  height: 48px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.voice-dock.is-collapsed .voice-dock-body,
+.voice-dock.is-collapsed .voice-dock-action,
+.voice-dock.is-collapsed .voice-settings-sheet { display: none; }
+
+/* ---- Header ---- */
+.voice-dock-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-elev-1);
+}
+
+.voice-dock.is-collapsed .voice-dock-header {
+  border: 0;
+  height: 48px;
+  padding: 0 var(--sp-4);
+}
+
+.voice-dock-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+  flex-wrap: wrap;
+  row-gap: var(--sp-1);
+  min-width: 0;
+}
+.voice-dock-brand-name { white-space: nowrap; }
+.voice-dock-title .chip { flex-shrink: 0; }
+
+.voice-dock-header-actions {
+  display: flex;
+  gap: var(--sp-1);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Small circular icon button shared by settings/collapse. 44×44 tap target. */
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out-expo),
+              color var(--dur-fast) var(--ease-out-expo),
+              border-color var(--dur-fast) var(--ease-out-expo);
+  touch-action: manipulation;
+}
+.icon-btn:hover { background: var(--color-bg-elev-2); color: var(--color-text); }
+.icon-btn:focus-visible { outline: none; box-shadow: var(--shadow-focus-ring-accent); }
+
+/* ---- Body (transcript + status strip) ---- */
+.voice-dock-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+  min-height: 240px;
+}
+
+.voice-transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  background: var(--color-bg);
+  -webkit-overflow-scrolling: touch;
+}
+
+.voice-transcript:empty::before {
+  content: "Tap Place Call to talk to Jarvis. Your transcript appears here.";
+  color: var(--color-text-dim);
+  font-style: italic;
+  padding: var(--sp-3);
+  text-align: center;
+  display: block;
+}
+
+.voice-line {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+.voice-line-tag {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-text-dim);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  padding-top: 2px;
+}
+.voice-line[data-from="user"]   .voice-line-tag { color: var(--color-accent); }
+.voice-line[data-from="agent"]  .voice-line-tag { color: var(--color-info); }
+.voice-line[data-from="system"] .voice-line-tag { color: var(--color-text-muted); }
+.voice-line[data-from="tool"]   .voice-line-tag { color: var(--color-state-tool); }
+
+.voice-line-text { color: var(--color-text); word-break: break-word; }
+.voice-line-text.is-interim { color: var(--color-text-muted); font-style: italic; }
+.voice-line[data-from="tool"] .voice-line-text {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+/* Session-handoff divider */
+.voice-line--divider {
+  grid-template-columns: 1fr;
+  align-items: center;
+  padding: var(--sp-1) 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  text-align: center;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+.voice-line--divider .voice-line-text {
+  color: var(--color-text-muted);
+  font-style: italic;
+  position: relative;
+  display: inline-block;
+  padding: 0 var(--sp-2);
+}
+.voice-line--divider .voice-line-text::before,
+.voice-line--divider .voice-line-text::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: var(--sp-4);
+  height: 1px;
+  background: var(--color-border);
+}
+.voice-line--divider .voice-line-text::before { right: 100%; }
+.voice-line--divider .voice-line-text::after  { left:  100%; }
+
+.voice-line.is-hydrated.is-stale .voice-line-text,
+.voice-line.is-hydrated.is-stale .voice-line-tag { opacity: 0.55; }
+
+/* Status strip */
+.voice-status-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--color-bg-elev-2);
+  border-top: 1px solid var(--color-border);
+}
+.voice-vu { display: flex; align-items: flex-end; gap: 2px; height: 20px; width: 36px; }
+.voice-vu .bar {
+  width: 4px;
+  background: var(--color-state-idle);
+  border-radius: 1px;
+  transition: height var(--dur-fast) var(--ease-out-expo),
+              background var(--dur-fast) var(--ease-out-expo);
+  height: 4px;
+}
+
+.voice-status-strip[data-state="listening"]      .voice-vu .bar,
+.voice-status-strip[data-state="live_ready"]     .voice-vu .bar { background: var(--color-state-listening); }
+.voice-status-strip[data-state="model_speaking"] .voice-vu .bar,
+.voice-status-strip[data-state="speaking"]       .voice-vu .bar { background: var(--color-state-speaking); }
+.voice-status-strip[data-state="model_thinking"] .voice-vu .bar,
+.voice-status-strip[data-state="thinking"]       .voice-vu .bar { background: var(--color-state-thinking); }
+.voice-status-strip[data-state="tool_executing"] .voice-vu .bar { background: var(--color-state-tool); }
+.voice-status-strip[data-state="dialing"]        .voice-vu .bar,
+.voice-status-strip[data-state="live_opening"]   .voice-vu .bar,
+.voice-status-strip[data-state="reconnecting"]   .voice-vu .bar { background: var(--color-warn); }
+
+.voice-status-text {
+  font-size: var(--fs-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: var(--fw-medium);
+}
+
+/* ---- Action panel (the big Place Call button) ---- */
+.voice-dock-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-elev-1);
+}
+
+.call-btn {
+  width: 100%;
+  min-height: 56px;
+  padding: 0 var(--sp-5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-wide);
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out-expo),
+              color var(--dur-fast) var(--ease-out-expo),
+              border-color var(--dur-fast) var(--ease-out-expo),
+              transform var(--dur-fast) var(--ease-out-expo);
+  touch-action: manipulation;
+  color: var(--color-text-inverse);
+}
+.call-btn:active { transform: translateY(1px); }
+.call-btn:focus-visible { outline: none; box-shadow: var(--shadow-focus-ring-accent); }
+.call-btn[disabled] { opacity: 0.65; cursor: not-allowed; }
+
+.call-btn .call-btn-icon { display: none; }
+.call-btn--place .call-btn-icon--phone,
+.call-btn--end   .call-btn-icon--end,
+.call-btn--cancel .call-btn-icon--end,
+.call-btn--reconnect .call-btn-icon--end,
+.call-btn--closing .call-btn-icon--end { display: inline-block; }
+
+/* Phone-call green for Place Call. */
+.call-btn--place {
+  background: var(--color-accent-strong);
+  border-color: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+.call-btn--place:hover { filter: brightness(1.08); }
+
+/* Phone-call red for End / Cancel / Reconnecting. */
+.call-btn--end,
+.call-btn--cancel,
+.call-btn--reconnect {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: #fff;
+}
+.call-btn--end:hover,
+.call-btn--cancel:hover,
+.call-btn--reconnect:hover { filter: brightness(1.08); }
+
+.call-btn--reconnect { animation: call-pulse 1.4s ease-in-out infinite; }
+@keyframes call-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.45); }
+  50%      { box-shadow: 0 0 0 8px rgba(248, 113, 113, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .call-btn--reconnect { animation: none; }
+}
+
+.call-btn--closing {
+  background: var(--color-bg-elev-3);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+/* The small Mute Mic button, in-line with the big call button */
+.mic-btn.mic-btn--inline {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-elev-2);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out-expo),
+              color var(--dur-fast) var(--ease-out-expo),
+              border-color var(--dur-fast) var(--ease-out-expo);
+  touch-action: manipulation;
+}
+.mic-btn.mic-btn--inline[hidden] { display: none !important; }
+.mic-btn.mic-btn--inline:hover { background: var(--color-bg-elev-3); }
+.mic-btn.mic-btn--inline:focus-visible { outline: none; box-shadow: var(--shadow-focus-ring-accent); }
+.mic-btn .mic-icon { width: 18px; height: 18px; }
+.mic-btn .mic-icon--off { display: none; }
+.mic-btn.is-muted .mic-icon--on { display: none; }
+.mic-btn.is-muted .mic-icon--off { display: inline-block; }
+.mic-btn.is-muted {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.call-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* Live chip with pulsing dot */
+.chip .live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-accent);
+  animation: live-pulse 1.1s ease-in-out infinite;
+  display: inline-block;
+}
+@keyframes live-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.5); opacity: 0.5; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chip .live-dot { animation: none; }
+}
+
+/* ---- Settings sheet (advanced options) ---- */
+.voice-settings-sheet {
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-elev-2);
+  max-height: 70vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.voice-settings-sheet[hidden] { display: none; }
+
+.voice-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.voice-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.voice-settings-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.voice-settings-actions {
+  justify-content: flex-end;
+  border-top: 1px dashed var(--color-border);
+  padding-top: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.voice-control-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.voice-control-label {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--color-text-muted);
+  min-width: 60px;
+}
+
+.mode-seg,
+.persona-seg {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-elev-3);
+  padding: 2px;
+  border-radius: var(--radius-pill);
+}
+.mode-seg button,
+.persona-seg button {
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 0;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out-expo),
+              color var(--dur-fast) var(--ease-out-expo);
+}
+.mode-seg button.is-active,
+.mode-seg button[aria-checked="true"],
+.persona-seg button[aria-pressed="true"] {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.mode-seg button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mode-seg button:focus-visible,
+.persona-seg button:focus-visible { outline: none; box-shadow: var(--shadow-focus-ring-accent); }
+
+/* Debug metrics panel */
+.debug-panel pre.debug-metrics {
+  flex: 1;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  background: var(--color-bg-elev-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+}
+.debug-panel[hidden] { display: none; }
+
+/* Error banner */
+.voice-error-banner {
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-size: var(--fs-xs);
+  border-top: 1px solid rgba(248, 113, 113, 0.3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.voice-error-banner[hidden] { display: none; }
+.voice-error-banner a,
+.voice-error-banner button {
+  color: var(--color-danger);
+  text-decoration: underline;
+  font-weight: var(--fw-semibold);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+}
+
+.noise-row .select { flex: 1; min-width: 120px; }
+
+/* ---- Tablet (≤ 900px): narrower dock, still bottom-right. ---- */
+@media (max-width: 900px) {
+  .voice-dock {
+    width: 340px;
+  }
+}
+
+/* ---- Mobile (≤ 640px): full-width bottom drawer. ---- */
+@media (max-width: 640px) {
+  .voice-dock {
+    width: 100%;
+    max-width: 100%;
+    right: 0;
+    left: 0;
+    bottom: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    /* Safe-area inset for iOS notch/home indicator. */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .voice-dock.is-collapsed {
+    width: auto;
+    margin: 0 auto var(--sp-2) auto;
+    left: 50%;
+    right: auto;
+    bottom: calc(var(--sp-2) + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    padding: 0;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--color-border);
+  }
+
+  .voice-dock-body { max-height: 42vh; min-height: 160px; }
+
+  /* Bigger tap targets. */
+  .icon-btn { width: 44px; height: 44px; }
+  .call-btn { min-height: 56px; font-size: var(--fs-lg); }
+  .mic-btn.mic-btn--inline { width: 48px; height: 48px; }
+
+  /* Header wraps when pill + chip + brand squeeze too tight. */
+  .voice-dock-header { padding: var(--sp-2) var(--sp-3); }
+  .voice-dock-title { font-size: var(--fs-xs); }
+  .voice-dock-brand-name { display: none; }
+
+  .voice-dock-action {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: var(--sp-3);
+    padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
+  }
+  .voice-dock-action .call-btn { flex: 1 1 auto; min-width: 60%; }
+  .voice-dock-action .call-hint { flex: 1 0 100%; margin-top: var(--sp-1); }
+
+  .voice-settings-sheet { max-height: 55vh; }
+  .voice-settings-body { padding: var(--sp-3); }
+}
+
+/* Extra-small (≤ 380px): keep controls stacked + readable. */
+@media (max-width: 380px) {
+  .voice-dock-title .chip { display: none; }
+  .voice-dock-title .status-pill { padding: 2px 8px; }
+}

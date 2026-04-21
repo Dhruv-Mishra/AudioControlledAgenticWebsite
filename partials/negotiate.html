@@ -1,0 +1,65 @@
+<section class="page-header">
+  <div>
+    <h1 class="page-title">Rate Negotiation</h1>
+    <div class="page-subtitle muted">Load <span class="mono" id="load-id-readout" data-agent-id="negotiate.load_id"></span>. Ask Jarvis to set a counter, submit, or accept.</div>
+  </div>
+</section>
+
+<div class="negotiate-grid">
+  <form class="panel" id="negotiate-form" data-agent-id="negotiate.form" aria-label="Negotiation form">
+    <header class="panel-header">
+      <div class="panel-title">Quote</div>
+      <span class="chip chip--info">Draft</span>
+    </header>
+    <div class="panel-body">
+      <div class="form-grid">
+        <div class="field">
+          <label class="field-label" for="field-pickup">Pickup</label>
+          <input id="field-pickup" name="pickup" class="input" type="text" data-agent-id="negotiate.form.pickup" />
+        </div>
+        <div class="field">
+          <label class="field-label" for="field-dropoff">Dropoff</label>
+          <input id="field-dropoff" name="dropoff" class="input" type="text" data-agent-id="negotiate.form.dropoff" />
+        </div>
+        <div class="field">
+          <label class="field-label" for="field-commodity">Commodity</label>
+          <input id="field-commodity" name="commodity" class="input" type="text" data-agent-id="negotiate.form.commodity" />
+        </div>
+        <div class="field">
+          <label class="field-label" for="field-weight">Weight (lb)</label>
+          <input id="field-weight" name="weight" class="input" type="number" min="0" data-agent-id="negotiate.form.weight" />
+        </div>
+        <div class="field">
+          <label class="field-label" for="field-target-rate">Target rate (USD)</label>
+          <input id="field-target-rate" name="target_rate" class="input" type="number" min="0" step="25" placeholder="1850" data-agent-id="negotiate.form.target_rate" />
+        </div>
+        <div class="field">
+          <label class="field-label" for="field-note">Note for carrier</label>
+          <input id="field-note" name="note" class="input" type="text" placeholder="Optional context" data-agent-id="negotiate.form.note" />
+        </div>
+        <div class="field field--wide">
+          <div class="rate-readout">
+            <span class="amount" id="rate-readout-amount" data-agent-id="negotiate.readout.amount">—</span>
+            <span class="unit">USD offered</span>
+          </div>
+        </div>
+        <div class="field field--wide">
+          <div class="row">
+            <button class="btn btn--primary" type="submit" data-agent-id="negotiate.submit">Submit quote</button>
+            <button class="btn" type="button" id="btn-counter" data-agent-id="negotiate.counter">Log carrier counter</button>
+            <button class="btn btn--ghost" type="button" id="btn-accept" data-agent-id="negotiate.accept">Accept</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <section class="panel" aria-label="Negotiation log">
+    <header class="panel-header">
+      <div class="panel-title">Negotiation log</div>
+    </header>
+    <div class="panel-body">
+      <div class="convo-log" id="convo-log" data-agent-id="negotiate.log"></div>
+    </div>
+  </section>
+</div>

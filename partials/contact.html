@@ -1,0 +1,45 @@
+<section class="page-header">
+  <div>
+    <h1 class="page-title">Contact Support</h1>
+    <div class="page-subtitle muted">Send a message or ask Jarvis to schedule a callback.</div>
+  </div>
+</section>
+
+<div class="contact-layout">
+  <form class="panel" id="contact-form" data-agent-id="contact.form" aria-label="Contact form">
+    <header class="panel-header">
+      <div class="panel-title">Send a message</div>
+    </header>
+    <div class="panel-body stack">
+      <div class="field">
+        <label class="field-label" for="contact-name">Name</label>
+        <input id="contact-name" name="name" class="input" type="text" autocomplete="name" data-agent-id="contact.form.name" required />
+      </div>
+      <div class="field">
+        <label class="field-label" for="contact-email">Email</label>
+        <input id="contact-email" name="email" class="input" type="email" autocomplete="email" data-agent-id="contact.form.email" required />
+      </div>
+      <div class="field">
+        <label class="field-label" for="contact-preferred">Preferred callback</label>
+        <input id="contact-preferred" name="preferred-time" class="input" type="datetime-local" data-agent-id="contact.form.preferred_time" />
+      </div>
+      <div class="field">
+        <label class="field-label" for="contact-message">Message</label>
+        <textarea id="contact-message" name="message" class="textarea" rows="4" placeholder="What do you need help with?" data-agent-id="contact.form.message" required></textarea>
+      </div>
+      <div class="row">
+        <button type="submit" class="btn btn--primary" data-agent-id="contact.form.submit">Send message</button>
+        <span class="muted" id="contact-feedback" aria-live="polite"></span>
+      </div>
+    </div>
+  </form>
+
+  <aside class="panel" aria-label="Scheduled callbacks">
+    <header class="panel-header">
+      <div class="panel-title">Scheduled callbacks</div>
+    </header>
+    <div class="panel-body">
+      <div class="callback-list" id="callback-list" data-agent-id="contact.callback_list"></div>
+    </div>
+  </aside>
+</div>

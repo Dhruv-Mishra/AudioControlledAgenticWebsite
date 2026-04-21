@@ -1,0 +1,45 @@
+<section class="page-header">
+  <div>
+    <h1 class="page-title">Carrier Directory</h1>
+    <div class="page-subtitle muted">Ask Jarvis to filter or shortlist carriers for a lane.</div>
+  </div>
+  <div class="toolbar">
+    <button class="btn" data-agent-id="carriers.action.import">Import carriers</button>
+    <button class="btn btn--primary" data-agent-id="carriers.action.new">Add carrier</button>
+  </div>
+</section>
+
+<div class="filter-bar" role="region" aria-label="Filter carriers">
+  <div class="field">
+    <label class="field-label" for="carrier-q">Search</label>
+    <input id="carrier-q" class="input" type="search" placeholder="Name, MC, lane" data-agent-id="carriers.filters.search" />
+  </div>
+  <div class="field">
+    <label class="field-label" for="carrier-eq">Equipment</label>
+    <select id="carrier-eq" class="select" data-agent-id="carriers.filters.equipment">
+      <option value="all">Any</option>
+      <option value="dry van">Dry van</option>
+      <option value="reefer">Reefer</option>
+      <option value="flatbed">Flatbed</option>
+      <option value="tanker">Tanker</option>
+    </select>
+  </div>
+  <div class="field">
+    <label class="field-label" for="carrier-available">Availability</label>
+    <select id="carrier-available" class="select" data-agent-id="carriers.filters.available">
+      <option value="all">Any</option>
+      <option value="yes">Available now</option>
+      <option value="no">Unavailable</option>
+    </select>
+  </div>
+</div>
+
+<section class="panel" aria-label="Carrier cards">
+  <header class="panel-header">
+    <div class="panel-title">Carriers</div>
+    <div class="row-sm muted" style="font-size: var(--fs-xs);">Click Call to dial, Shortlist to pin</div>
+  </header>
+  <div class="panel-body">
+    <div class="carrier-grid" id="carrier-grid" data-agent-id="carriers.grid"></div>
+  </div>
+</section>

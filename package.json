@@ -1,0 +1,27 @@
+{
+  "name": "happyrobot-freightops-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Live voice agent navigation demo — Gemini Live API + tool calling over a dispatcher console.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "eval": "node evals/voice-eval.js",
+    "smoke:invalid-key": "node evals/invalid-key-smoke.js",
+    "smoke:upstream-handshake": "node evals/upstream-handshake-smoke.js",
+    "smoke:browser-sim": "node evals/simulated-browser-smoke.js",
+    "smoke:live-mode": "node evals/live-mode-smoke.js",
+    "smoke:session-resume": "node evals/session-resume-smoke.js",
+    "smoke:cold-start-live": "node evals/cold-start-live-smoke.js",
+    "smoke:greeting-injection": "node evals/greeting-injection-smoke.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/genai": "^1.50.1",
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  }
+}

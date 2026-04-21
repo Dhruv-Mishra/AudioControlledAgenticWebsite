@@ -1,0 +1,82 @@
+[
+  {
+    "id": "C-088",
+    "name": "Liberty Freight",
+    "mc": "MC-554812",
+    "lanes": ["NJ-NC", "NY-GA", "PA-FL"],
+    "rating": 4.6,
+    "equipment": ["Dry van", "Reefer"],
+    "available": true,
+    "phone": "+1 (201) 555-0188"
+  },
+  {
+    "id": "C-118",
+    "name": "Peach Express",
+    "mc": "MC-671044",
+    "lanes": ["GA-FL", "GA-TN", "AL-FL"],
+    "rating": 4.3,
+    "equipment": ["Reefer"],
+    "available": true,
+    "phone": "+1 (404) 555-0118"
+  },
+  {
+    "id": "C-204",
+    "name": "Midwest Haulage",
+    "mc": "MC-448790",
+    "lanes": ["IL-TX", "IL-MO", "WI-OH"],
+    "rating": 4.8,
+    "equipment": ["Dry van", "Flatbed"],
+    "available": false,
+    "phone": "+1 (312) 555-0204"
+  },
+  {
+    "id": "C-302",
+    "name": "Cascade Transit",
+    "mc": "MC-889203",
+    "lanes": ["WA-CO", "OR-UT", "WA-CA"],
+    "rating": 4.1,
+    "equipment": ["Dry van"],
+    "available": true,
+    "phone": "+1 (206) 555-0302"
+  },
+  {
+    "id": "C-410",
+    "name": "Delta Roadways",
+    "mc": "MC-221503",
+    "lanes": ["TN-KY", "TN-MS", "TN-AL"],
+    "rating": 4.5,
+    "equipment": ["Dry van", "Reefer"],
+    "available": true,
+    "phone": "+1 (901) 555-0410"
+  },
+  {
+    "id": "C-511",
+    "name": "North Star Logistics",
+    "mc": "MC-334812",
+    "lanes": ["MN-MO", "MN-IA", "WI-KS"],
+    "rating": 4.4,
+    "equipment": ["Dry van", "Flatbed"],
+    "available": true,
+    "phone": "+1 (612) 555-0511"
+  },
+  {
+    "id": "C-722",
+    "name": "Gulf Coast Carriers",
+    "mc": "MC-120034",
+    "lanes": ["TX-LA", "TX-MS", "LA-FL"],
+    "rating": 4.7,
+    "equipment": ["Tanker", "Flatbed"],
+    "available": true,
+    "phone": "+1 (713) 555-0722"
+  },
+  {
+    "id": "C-845",
+    "name": "Sierra West Freight",
+    "mc": "MC-998123",
+    "lanes": ["CA-AZ", "CA-NV", "CA-UT"],
+    "rating": 4.2,
+    "equipment": ["Dry van"],
+    "available": false,
+    "phone": "+1 (213) 555-0845"
+  }
+]
