@@ -1,56 +1,29 @@
 # Run Multi-Agent Workflow
 
-Execute the full multi-agent workflow pipeline for the given task. This workflow operates autonomously with minimal user interruption.
+Execute the full website-development pipeline autonomously. Defers to CLAUDE.md for project rules and agent roster.
 
-## Instructions
+## How to run
 
-You are the entry point for the multi-agent workflow. Follow these steps:
+Act as (or delegate to) `orchestrator` — run the main session as `claude --agent orchestrator` so it can spawn teammates. Default to an **agent team**; fall back to a single subagent only for trivial, single-role, ≤2-file tasks.
 
-### Phase 1: Prompt Refinement
-1. Act as `@prompt-engineer` (defined in `.github/agents/prompt-engineer.agent.md`).
-2. Analyze the user's prompt for ambiguity, missing details, and implicit assumptions.
-3. Explore the codebase to gather relevant context (act as `@explorer` per `.github/agents/explorer.agent.md`).
-4. Auto-resolve gaps using codebase context. Only ask the user for critical, unresolvable ambiguity — batch all questions into a single interaction.
-5. Produce a refined specification with acceptance criteria.
+## Phases
 
-### Phase 2: Orchestration
-6. Act as `@orchestrator` (defined in `.github/agents/orchestrator.agent.md`).
-7. Decompose the specification into discrete, ordered tasks.
-8. For complex decisions, perform deep analysis as `@oracle` (per `.github/agents/oracle.agent.md`).
+Skip any phase that doesn't apply to the task.
 
-### Phase 3: Design
-9. Act as `@architect` (per `.github/agents/architect.agent.md`) to design the solution structure.
-10. Produce a file-by-file change plan with interfaces and data flow.
+1. **Refine.** Read the task. Skim CLAUDE.md and the relevant files. Auto-resolve ambiguity from code. Batch any unresolvable questions into one message.
+2. **Plan.** Decompose into ordered tasks. Identify parallelizable sub-parts. Hard architectural choices → `oracle`.
+3. **Design (UI).** `designer` produces a spec grounded in the active design system. Skip if no visual surface.
+4. **Design (AI).** `ai-engineer` defines model, prompt, call shape, caching, failure modes, and the contract the frontend will consume. Skip if no LLM feature.
+5. **Implement in parallel.** Spawn a team: `frontend-dev` owns UI files; `ai-engineer` owns server routes + prompts. Assign explicit file ownership. Run lint / typecheck / build.
+6. **Review.** `reviewer` audits. Route Critical/Warning items back to the owning teammate; re-review.
+7. **Validate.** `designer` confirms visual fidelity; `ai-engineer` runs an eval and a forced-failure smoke test. Exercise the feature in a browser for interactive changes.
+8. **Summary.** Report changes, decisions, review status, and follow-ups.
 
-### Phase 4: Implementation
-11. Act as `@programmer` (per `.github/agents/programmer.agent.md`) to implement changes.
-12. Follow all coding standards defined in CLAUDE.md and the programmer agent spec.
-13. Run `npm run lint` after implementation.
+## Autonomy
 
-### Phase 5: Testing
-14. Act as `@tester` (per `.github/agents/tester.agent.md`) to write and run tests.
-15. If tests fail, fix the implementation and re-test.
-
-### Phase 6: Review
-16. Act as `@reviewer` (per `.github/agents/reviewer.agent.md`) to review all code changes.
-17. If changes are requested, fix the issues and re-review.
-
-### Phase 7: Audit
-18. Act as `@auditor` (per `.github/agents/auditor.agent.md`) to audit security and performance.
-19. If critical/high findings exist, fix them and re-audit.
-
-### Phase 8: Documentation
-20. Act as `@documentation-writer` (per `.github/agents/documentation-writer.agent.md`) to update docs.
-
-### Phase 9: Final Summary
-21. Produce a final summary including: all changes made, decisions taken, test results, review status, audit status, and documentation updates.
-
-## Autonomy Rules
-- Do NOT ask the user for permission to proceed between phases.
-- Do NOT ask the user to verify URLs, check links, or confirm resources.
-- Do NOT pause for approval at any stage — the review/audit loop catches issues.
-- If user input is genuinely needed, batch all questions into a single interaction.
-- Use all tools (file operations, terminal, search) freely without confirmation.
+- Don't pause for inter-phase approval — the review/validate loop catches issues.
+- Batch any required user questions into a single interaction.
+- Destructive operations (data deletion, force-push, schema drops) still require explicit user confirmation.
 
 ## User's Task
 
