@@ -69,6 +69,8 @@ function buildDockMarkup() {
     <div class="voice-error-banner" id="voice-error" role="alert" hidden></div>
     <div class="voice-dock-body">
       <div class="voice-transcript" id="voice-transcript" aria-live="polite" aria-label="Conversation transcript"></div>
+      <p class="voice-transcript-hint" id="voice-transcript-hint" hidden>Agent speech not transcribed (configured to save credits).</p>
+      <p class="voice-transcript-hidden" id="voice-transcript-hidden" hidden>Transcripts hidden by configuration (SHOW_TEXT=false).</p>
       <div class="voice-status-strip" id="voice-status-strip" data-state="idle">
         <div class="voice-vu" aria-hidden="true">
           <span class="bar"></span><span class="bar"></span><span class="bar"></span>
@@ -651,7 +653,38 @@ export async function bootstrapVoiceShell() {
     }
   } catch {}
 
+  // Apply feature flags as soon as /api/config lands. init() emits
+  // flags-ready immediately after, so this handler fires once per page.
+  agent.addEventListener('flags-ready', (e) => applyFlags(e.detail.flags));
+  // In case the agent already read flags before this listener attached.
+  applyFlags(agent.getFlags());
+
   return agent;
+}
+
+/** Reflect the server-issued feature flags into the DOM. Called once on
+ *  `flags-ready`. Idempotent. */
+function applyFlags(flags) {
+  const transcript = document.getElementById('voice-transcript');
+  const hint = document.getElementById('voice-transcript-hint');
+  const hidden = document.getElementById('voice-transcript-hidden');
+  if (!transcript) return;
+
+  if (!flags.showText) {
+    // Transcript content stays out of the DOM entirely. We hide the
+    // scrollable panel and show a short note so the user isn't confused
+    // by the absence of a transcript.
+    transcript.hidden = true;
+    if (hint) hint.hidden = true;
+    if (hidden) hidden.hidden = false;
+    return;
+  }
+  transcript.hidden = false;
+  if (hidden) hidden.hidden = true;
+  // SHOW_TEXT=true but Gemini transcription is off → the user side is
+  // transcribed locally (Web Speech); the agent side is NOT transcribed.
+  // Show a small muted hint so the user understands the asymmetry.
+  if (hint) hint.hidden = !!flags.geminiTranscription;
 }
 
 function debounce(fn, ms) {

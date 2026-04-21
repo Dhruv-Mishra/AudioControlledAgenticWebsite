@@ -3,12 +3,20 @@
 /**
  * Dhruv FreightOps demo server.
  *
- * - Serves static HTML/CSS/JS.
+ * - Serves static HTML/CSS/JS. In production (NODE_ENV=production) serves
+ *   from `dist/` (built by `npm run build`); otherwise serves source.
  * - /api/health   : liveness + GEMINI_API_KEY presence indicator.
  * - /api/config   : client config (model id, persona list, wake word).
  * - /api/eval     : text-mode probe for the eval harness (POST).
  * - /api/transcript: append-only transcript logger (POST).
  * - /api/live (WS): Gemini Live ↔ browser audio + tool-call bridge.
+ *
+ * Perf middleware:
+ *   - compression(): gzip/brotli negotiation on text/*, JSON, JS, CSS.
+ *   - Long-lived Cache-Control on versioned/built assets (dist/ mode) and
+ *     no-cache on the HTML shell + partials (always).
+ *   - ETag on every static response (via file size + mtime hash) so even
+ *     un-versioned assets revalidate cheaply.
  */
 
 const http = require('http');
@@ -16,6 +24,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const { WebSocketServer } = require('ws');
+const compression = require('compression');
 
 // Load .env first, then .env.local with override — matches the convention used
 // in the user's Python prototype (GeminiFlashAgentTest uses .env.local) AND the
@@ -45,9 +54,20 @@ const {
   releaseSession,
   ipFromRequest
 } = require('./api/rate-limit');
+const { SHOW_TEXT } = require('./api/server-flags');
 
-const PORT = Number(process.env.PORT) || 3001;
+const PORT = Number(process.env.PORT) || 3011;
+const IS_PROD = process.env.NODE_ENV === 'production';
 const ROOT = __dirname;
+const DIST_ROOT = path.join(ROOT, 'dist');
+// In prod mode we serve the compiled bundle. If the dist/ dir is missing,
+// emit a loud warning (but keep serving from source) — the deploy script is
+// supposed to run `npm run build` before starting the service.
+const SERVE_ROOT = IS_PROD && fs.existsSync(DIST_ROOT) ? DIST_ROOT : ROOT;
+if (IS_PROD && SERVE_ROOT === ROOT) {
+  process.stdout.write(`[server] NODE_ENV=production but dist/ missing — falling back to source. Run \`npm run build\`.\n`);
+}
+
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -81,6 +101,35 @@ const SPA_ROUTES = new Set([
   '/contact.html'
 ]);
 
+// Assets under these paths are content-addressed (esbuild hashes chunks) or
+// aggressively cacheable because their URLs never change. We set
+// `immutable, max-age=31536000` so CDNs + browsers hard-cache. On a
+// source-tree deploy (NODE_ENV=dev), we fall back to a short max-age.
+function cacheControlFor(pathname) {
+  // HTML shell + partials: always revalidate so a deploy takes effect.
+  if (pathname === '/' || pathname.endsWith('.html') || pathname.startsWith('/partials/')) {
+    return 'no-cache';
+  }
+  // Versioned chunk bundles (dist/js/chunks/NAME-HASH.js): treat as immutable.
+  if (/^\/js\/chunks\//.test(pathname)) {
+    return 'public, max-age=31536000, immutable';
+  }
+  // Top-level JS/CSS: no content hash today, but safe to cache for a day.
+  // Long-tail static assets (favicon, data fixtures, fonts) — 1 day is fine.
+  if (/\.(?:js|css|svg|png|jpg|ico|woff|woff2)$/i.test(pathname)) {
+    return IS_PROD
+      ? 'public, max-age=86400, must-revalidate'
+      : 'no-cache';
+  }
+  // JSON fixtures + everything else: no-cache.
+  return 'no-cache';
+}
+
+// Lightweight ETag using inode/size/mtime — avoids streaming whole file to hash.
+function weakEtag(stat) {
+  return `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+}
+
 function safeJoin(root, reqPath) {
   const p = path.posix.normalize(reqPath).replace(/^\/+/, '');
   const abs = path.join(root, p);
@@ -89,7 +138,7 @@ function safeJoin(root, reqPath) {
   return abs;
 }
 
-async function serveFile(abs, res) {
+async function serveFile(abs, req, res) {
   try {
     const stat = await fsp.stat(abs);
     if (stat.isDirectory()) {
@@ -97,10 +146,27 @@ async function serveFile(abs, res) {
       return;
     }
     const ext = path.extname(abs).toLowerCase();
+    // Determine URL path for Cache-Control lookup: strip SERVE_ROOT and
+    // normalise to posix.
+    const relUrl = '/' + path.relative(SERVE_ROOT, abs).split(path.sep).join('/');
+    const etag = weakEtag(stat);
+
+    // 304 fast-path: if client already has a fresh copy, skip the transfer.
+    const ifNoneMatch = req.headers['if-none-match'];
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      res.writeHead(304, {
+        'Cache-Control': cacheControlFor(relUrl),
+        ETag: etag
+      });
+      res.end();
+      return;
+    }
     const data = await fsp.readFile(abs);
     res.writeHead(200, {
       'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': 'no-store'
+      'Cache-Control': cacheControlFor(relUrl),
+      ETag: etag,
+      'X-Content-Type-Options': 'nosniff'
     });
     res.end(data);
   } catch (err) {
@@ -114,20 +180,20 @@ function resolveStaticPath(pathname) {
   // bookmarkable (deep-linking works) while the browser never fully
   // reloads during in-app navigation.
   if (SPA_ROUTES.has(pathname) || pathname === '') {
-    return path.join(ROOT, 'index.html');
+    return path.join(SERVE_ROOT, 'index.html');
   }
   // Partials (served under /partials/*.html) are the section bodies that
   // the client router injects into the shell's <main> element.
   if (pathname.startsWith('/partials/') && pathname.endsWith('.html')) {
-    return safeJoin(ROOT, pathname);
+    return safeJoin(SERVE_ROOT, pathname);
   }
   // Static asset under known top-level dir
   const parts = pathname.split('/').filter(Boolean);
   if (parts.length && STATIC_DIRS.includes(parts[0])) {
-    return safeJoin(ROOT, pathname);
+    return safeJoin(SERVE_ROOT, pathname);
   }
   // Special case: /favicon.ico
-  if (pathname === '/favicon.ico') return path.join(ROOT, 'public', 'favicon.svg');
+  if (pathname === '/favicon.ico') return path.join(SERVE_ROOT, 'public', 'favicon.svg');
   return null;
 }
 
@@ -152,11 +218,18 @@ async function handleTranscript(req, res) {
     try {
       body = Buffer.concat(chunks).toString('utf8');
       const obj = JSON.parse(body || '{}');
-      // Log a compact line only. Retention policy: stdout + nowhere else.
+      // Compact log line only. Retention policy: stdout + nowhere else.
+      // When SHOW_TEXT=false we log the kind + length but NEVER the text
+      // body itself — the whole point of the flag is that transcript
+      // content stays out of server logs.
       const at = new Date().toISOString();
-      const text = String(obj.text || '').slice(0, 1000).replace(/\s+/g, ' ').trim();
       const kind = String(obj.kind || 'final').slice(0, 20);
-      process.stdout.write(`[transcript] ${at} kind=${kind} len=${text.length}\n`);
+      const textLen = obj && typeof obj.text === 'string' ? obj.text.length : 0;
+      if (SHOW_TEXT) {
+        process.stdout.write(`[transcript] ${at} kind=${kind} len=${textLen}\n`);
+      } else {
+        process.stdout.write(`[transcript] ${at} kind=${kind} len=${textLen} (text redacted: SHOW_TEXT=false)\n`);
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     } catch (err) {
@@ -176,8 +249,31 @@ function urlPathname(req) {
 }
 
 // --------- HTTP server ---------
+
+// Initialise compression middleware once — it returns a (req, res, next)
+// handler. We pass text/json/js/css to it; binary image content isn't
+// gzip-sensitive so we skip via the `filter`. Threshold 1 KB so tiny
+// responses aren't compressed (overhead > savings).
+const compressMw = compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    const ct = String(res.getHeader('Content-Type') || '');
+    return /text\/|application\/(?:json|javascript|xml)|image\/svg\+xml/i.test(ct);
+  }
+});
+
+function runCompression(req, res) {
+  return new Promise((resolve) => {
+    compressMw(req, res, () => resolve());
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   const pathname = urlPathname(req);
+
+  // Run compression middleware on every response. It's cheap — ~500 ns
+  // overhead when the response is excluded by threshold + filter.
+  await runCompression(req, res);
 
   // API
   if (pathname === '/api/health') return handleHealth(req, res);
@@ -188,7 +284,7 @@ const server = http.createServer(async (req, res) => {
   // Static
   if (req.method === 'GET') {
     const abs = resolveStaticPath(pathname);
-    if (abs) return serveFile(abs, res);
+    if (abs) return serveFile(abs, req, res);
   }
 
   res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -233,6 +329,8 @@ server.listen(PORT, () => {
   const hasKey = !!process.env.GEMINI_API_KEY;
   process.stdout.write(
     `Dhruv FreightOps listening on http://localhost:${PORT}\n` +
+    `  NODE_ENV:       ${process.env.NODE_ENV || 'development'}\n` +
+    `  serve root:     ${SERVE_ROOT === DIST_ROOT ? 'dist/' : 'source'}\n` +
     `  GEMINI_API_KEY: ${hasKey ? 'set' : 'NOT SET (voice features will error)'}\n` +
     `  WS endpoint:    ws://localhost:${PORT}/api/live\n`
   );

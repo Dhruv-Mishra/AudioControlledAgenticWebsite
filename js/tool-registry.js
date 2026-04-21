@@ -286,8 +286,9 @@ export class ToolRegistry {
    * @param {(msg: object) => void} opts.sendTextMessage  send JSON envelope back to server
    * @param {(route: string) => void} opts.onNavigate     called with new path; default uses the SPA router if present, else full reload
    * @param {(summary: string) => void} [opts.onToolNote] UI-side hook to log tool actions
+   * @param {() => boolean} [opts.showText] runtime flag: when false, onToolNote is called with the tool NAME only (no args, no results, no error messages).
    */
-  constructor({ sendTextMessage, onNavigate, onToolNote }) {
+  constructor({ sendTextMessage, onNavigate, onToolNote, showText }) {
     this.send = sendTextMessage;
     this.onNavigate = onNavigate || ((p) => {
       // Prefer the SPA router so the VoiceAgent survives the navigation
@@ -300,6 +301,8 @@ export class ToolRegistry {
       }
     });
     this.onToolNote = onToolNote || (() => {});
+    // Defaults to "text visible" — VoiceAgent overrides with a live getter.
+    this.showText = typeof showText === 'function' ? showText : () => true;
     this.domainHandlers = new Map();
   }
 
@@ -317,13 +320,24 @@ export class ToolRegistry {
     const reply = (payload) => {
       this.send({ type: 'tool_result', id, name, ...payload });
     };
+    const textVisible = !!this.showText();
     try {
       const result = await this._execute(name, args || {});
-      this.onToolNote(`${name}(${JSON.stringify(args || {})}) → ${safeJson(result)}`);
+      // When SHOW_TEXT=false the operator asked us to show tool NAMES only;
+      // args/values can contain user-spoken content.
+      if (textVisible) {
+        this.onToolNote(`${name}(${JSON.stringify(args || {})}) → ${safeJson(result)}`);
+      } else {
+        this.onToolNote(name);
+      }
       reply({ ok: true, result });
     } catch (err) {
       const msg = (err && err.message) || String(err);
-      this.onToolNote(`${name} failed: ${msg}`);
+      if (textVisible) {
+        this.onToolNote(`${name} failed: ${msg}`);
+      } else {
+        this.onToolNote(`${name} (failed)`);
+      }
       // Attach structured fillFailure so the model sees what format we
       // expected. If present we also bundle it into `result` (on the
       // ok:false side of the envelope) for richer context.

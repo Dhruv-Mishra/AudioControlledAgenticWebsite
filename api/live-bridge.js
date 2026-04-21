@@ -39,6 +39,7 @@ const {
 const { STATIC_TOOL_DECLARATIONS, buildSystemInstruction } = require('./tools');
 const { getPersona, publicPersonas, DEFAULT_PERSONA_ID } = require('./personas');
 const { makeFrameLimiter } = require('./rate-limit');
+const { SHOW_TEXT } = require('./server-flags');
 
 // Cap on how much of the visible-element list we include in a page-context
 // injection so the model sees the surface without blowing token budget.
@@ -215,7 +216,13 @@ function attach(browserWs, req, env) {
     const args = fc.args || {};
     const id = fc.id;
 
-    dlog(sessionId, 'tool_call', name, JSON.stringify(args).slice(0, 200));
+    // When SHOW_TEXT=false the operator asked us to log tool NAMES only —
+    // args can carry arbitrary user/agent text so we drop them from logs.
+    if (SHOW_TEXT) {
+      dlog(sessionId, 'tool_call', name, JSON.stringify(args).slice(0, 200));
+    } else {
+      dlog(sessionId, 'tool_call', name, '(args redacted: SHOW_TEXT=false)');
+    }
 
     if (name === 'list_elements') {
       let out = snapshotElementsAsToolContext();
@@ -444,27 +451,35 @@ function attach(browserWs, req, env) {
     if (msg.serverContent) {
       const sc = msg.serverContent;
 
+      // Transcripts — only surface to the client when SHOW_TEXT=true. When
+      // SHOW_TEXT=false we intentionally drop the deltas on the floor so the
+      // server never relays user/agent text to the browser (and the client
+      // doesn't render a transcript panel). Length-only logs either way.
       if (sc.inputTranscription && sc.inputTranscription.text) {
         const t = sc.inputTranscription.text;
         dlog(sessionId, 'input_tx delta len=' + t.length, 'finished=' + !!sc.inputTranscription.finished);
-        safeSendJson(browserWs, {
-          type: 'transcript_delta',
-          from: 'user',
-          delta: t,
-          finished: !!sc.inputTranscription.finished,
-          at: now()
-        });
+        if (SHOW_TEXT) {
+          safeSendJson(browserWs, {
+            type: 'transcript_delta',
+            from: 'user',
+            delta: t,
+            finished: !!sc.inputTranscription.finished,
+            at: now()
+          });
+        }
       }
       if (sc.outputTranscription && sc.outputTranscription.text) {
         const t = sc.outputTranscription.text;
         dlog(sessionId, 'output_tx delta len=' + t.length, 'finished=' + !!sc.outputTranscription.finished);
-        safeSendJson(browserWs, {
-          type: 'transcript_delta',
-          from: 'agent',
-          delta: t,
-          finished: !!sc.outputTranscription.finished,
-          at: now()
-        });
+        if (SHOW_TEXT) {
+          safeSendJson(browserWs, {
+            type: 'transcript_delta',
+            from: 'agent',
+            delta: t,
+            finished: !!sc.outputTranscription.finished,
+            at: now()
+          });
+        }
       }
 
       if (sc.modelTurn && Array.isArray(sc.modelTurn.parts)) {
@@ -475,7 +490,7 @@ function attach(browserWs, req, env) {
             safeSendBinary(browserWs, pcm);
             emitState('speaking');
           }
-          if (part.text && part.text.trim()) {
+          if (part.text && part.text.trim() && SHOW_TEXT) {
             safeSendJson(browserWs, {
               type: 'transcript_delta',
               from: 'agent',
@@ -644,6 +659,8 @@ function attach(browserWs, req, env) {
         if (!pending) return;
         clearTimeout(pending.timer);
         pendingToolResponses.delete(id);
+        // Log name + ok/fail status only. The result object can contain
+        // DOM text / read_text output — redact when SHOW_TEXT=false.
         dlog(sessionId, 'tool_result', data.name || pending.name, 'ok=' + (data.ok !== false));
         sendToolResponse(id, data.name || pending.name, {
           ok: data.ok !== false,
@@ -659,6 +676,9 @@ function attach(browserWs, req, env) {
         return;
       }
       case 'transcript_event': {
+        // Local Web Speech transcripts from the browser side. We never
+        // persist or log the text — only the kind + length so operators
+        // can see traffic without exposing conversation content.
         const t = String(data.text || '').slice(0, 500);
         dlog(sessionId, 'stt_event kind=' + (data.kind || '?'), 'len=' + t.length);
         return;

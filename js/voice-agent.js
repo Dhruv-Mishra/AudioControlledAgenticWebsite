@@ -48,6 +48,7 @@ import { WakeWordEngine } from './wake-word.js';
 import { TranscriptLog } from './stt-logger.js';
 import { ToolRegistry, scanAgentElements } from './tool-registry.js';
 import { DEFAULT_PERSONAS, DEFAULT_PERSONA_ID } from './personas.js';
+import { LocalStt } from './local-stt.js';
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 const MAX_RECONNECTS = 5;
@@ -227,6 +228,17 @@ export class VoiceAgent extends EventTarget {
     this.ws = null;
     this.wsUrl = null;
 
+    // Runtime feature flags — populated by init() from /api/config. Defaults
+    // match the server defaults so pre-flag UI doesn't flash the wrong state.
+    this.flags = {
+      geminiTranscription: false,
+      showText: true
+    };
+    // Local Web Speech transcriber — USER side only. Instantiated lazily in
+    // init() only when the server disabled Gemini transcription AND
+    // SHOW_TEXT=true; otherwise stays null.
+    this.localStt = null;
+
     this.personas = DEFAULT_PERSONAS.slice();
     this.personaId = DEFAULT_PERSONA_ID;
 
@@ -312,7 +324,10 @@ export class VoiceAgent extends EventTarget {
     this.toolRegistry = new ToolRegistry({
       sendTextMessage: (m) => this._sendJson(m),
       onNavigate: onNavigate || ((p) => { this._onAgentNavigate(p); }),
-      onToolNote: (s) => this._logTool(s)
+      onToolNote: (s) => this._logTool(s),
+      // Live getter so the flag change after init() takes effect without
+      // having to rebuild the registry.
+      showText: () => !!this.flags.showText
     });
 
     if (this.transcript && restored && Array.isArray(restored.transcript) && restored.transcript.length) {
@@ -347,6 +362,9 @@ export class VoiceAgent extends EventTarget {
   getNoiseMode() { return this.noiseMode; }
   getNoiseVolume() { return this.noiseVolume; }
   isResuming() { return !!this.resuming; }
+  /** Runtime feature flags fetched from /api/config. Clone so callers
+   *  can't mutate our copy. */
+  getFlags() { return { ...this.flags }; }
   /** True whenever the UI should treat the call as "in progress" — from
    *  Place Call click until teardown begins. Covers DIALING, LIVE_*,
    *  MODEL_*, TOOL_EXECUTING, RECONNECTING. Single source of truth for
@@ -439,6 +457,10 @@ export class VoiceAgent extends EventTarget {
       return false;
     }
 
+    // Start local STT (user side only) — only runs when server has
+    // GEMINI_TRANSCRIPTION=false AND SHOW_TEXT=true.
+    if (this.localStt && this.localStt.supported) this.localStt.start();
+
     // Open the WS (non-blocking — onopen handles the rest).
     this._connect();
     return true;
@@ -471,6 +493,7 @@ export class VoiceAgent extends EventTarget {
     this.closedByUser = true;
     clearTimeout(this.dialTimer); this.dialTimer = null;
     clearInterval(this.liveIdleTimer); this.liveIdleTimer = null;
+    if (this.localStt) this.localStt.stop();
 
     // Flush any in-flight playback (no more Jarvis audio).
     this.pipeline.flushPlayback();
@@ -513,6 +536,7 @@ export class VoiceAgent extends EventTarget {
   _tearDownCall() {
     clearTimeout(this.dialTimer); this.dialTimer = null;
     clearInterval(this.liveIdleTimer); this.liveIdleTimer = null;
+    if (this.localStt) this.localStt.stop();
     this.pipeline.flushPlayback();
     this.pipeline.stopCapture();
     try { if (this.ws) this.ws.close(); } catch {}
@@ -635,6 +659,8 @@ export class VoiceAgent extends EventTarget {
     if (next === this.muted) return;
     this.muted = next;
     this.pipeline.setMuted(next);
+    // Local STT follows mute — no need to transcribe silence.
+    if (this.localStt && this.isInCall()) this.localStt.setMuted(next);
     if (next && this.setupComplete) {
       this._sendJson({ type: 'stream_end' });
     }
@@ -1073,11 +1099,43 @@ export class VoiceAgent extends EventTarget {
       if (cfg.defaultPersona && !(this._restored && this._restored.persona)) {
         this.personaId = cfg.defaultPersona;
       }
+      if (cfg.flags && typeof cfg.flags === 'object') {
+        this.flags.geminiTranscription = !!cfg.flags.geminiTranscription;
+        this.flags.showText = cfg.flags.showText !== false; // default true
+      }
     } catch {}
     this._setupKeyHotkey();
     this._bootWakeWord();
+    this._initLocalStt();
     // No _connect() — WS opens only on placeCall.
+    this._publishEvent('flags-ready', { flags: { ...this.flags } });
     this._publishEvent('personas-ready', { personas: this.personas });
+  }
+
+  /** Configure the local (browser-native) STT engine that transcribes USER
+   *  speech when GEMINI_TRANSCRIPTION=false AND SHOW_TEXT=true. Idempotent. */
+  _initLocalStt() {
+    const needLocal = this.flags.showText && !this.flags.geminiTranscription;
+    if (!needLocal) {
+      if (this.localStt) { this.localStt.stop(); this.localStt = null; }
+      return;
+    }
+    if (this.localStt) return;
+    this.localStt = new LocalStt({ debug: DEBUG });
+    if (!this.localStt.supported) {
+      dlog('LocalStt unsupported — user-side transcript will be empty.');
+      return;
+    }
+    this.localStt.addEventListener('transcript', (ev) => {
+      const { text, finished } = ev.detail || {};
+      if (!this.transcript) return;
+      this.transcript.addDelta({ from: 'user', delta: text, finished: !!finished });
+      if (finished) {
+        // Mirror the Gemini-side contract — a finished line emits a
+        // transcript_event to the server for logging.
+        this._sendJson({ type: 'transcript_event', kind: 'final', text, at: Date.now() });
+      }
+    });
   }
 
   _setupKeyHotkey() {
@@ -1147,6 +1205,7 @@ export class VoiceAgent extends EventTarget {
     try { window.removeEventListener('beforeunload', this._onPageHide); } catch {}
     try { this.ws && this.ws.close(); } catch {}
     try { this.wake && this.wake.stop(); } catch {}
+    try { this.localStt && this.localStt.stop(); } catch {}
     await this.pipeline.close();
   }
 }

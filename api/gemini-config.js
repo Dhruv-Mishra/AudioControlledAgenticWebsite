@@ -5,6 +5,8 @@
  * The model ID is pinned here — update in exactly one place.
  */
 
+const { GEMINI_TRANSCRIPTION } = require('./server-flags');
+
 const LIVE_MODEL_ID = process.env.GEMINI_LIVE_MODEL || 'gemini-3.1-flash-live-preview';
 
 // If the pinned model is not served, we fall back to the SDK-documented alias.
@@ -42,7 +44,13 @@ const VAD_PRESETS = {
   }
 };
 
-/** Build the base config dict for `ai.live.connect()`. */
+/** Build the base config dict for `ai.live.connect()`.
+ *
+ *  `inputAudioTranscription` / `outputAudioTranscription` are gated on the
+ *  `GEMINI_TRANSCRIPTION` env var (default false, which saves STT token cost).
+ *  When both flags are omitted, Gemini Live only emits audio frames — no
+ *  server-side transcription. The browser falls back to the local Web
+ *  Speech API for the user side when SHOW_TEXT=true (see js/stt-logger.js). */
 function buildLiveConfig({ systemInstruction, voiceName, functionDeclarations, mode = 'wakeword', resumptionHandle }) {
   const vad = VAD_PRESETS[mode] || VAD_PRESETS.wakeword;
   const cfg = {
@@ -67,13 +75,18 @@ function buildLiveConfig({ systemInstruction, voiceName, functionDeclarations, m
       // as-is so barge-in works out of the box.
       turnCoverage: 'TURN_INCLUDES_ONLY_ACTIVITY'
     },
-    inputAudioTranscription: {},
-    outputAudioTranscription: {},
     sessionResumption: resumptionHandle ? { handle: resumptionHandle } : {},
     tools: functionDeclarations && functionDeclarations.length
       ? [{ functionDeclarations }]
       : undefined
   };
+  // Transcription is a paid feature — keep it off by default. Only include
+  // the keys at all when explicitly enabled; omitting them tells Gemini to
+  // skip the transcription pipeline entirely.
+  if (GEMINI_TRANSCRIPTION) {
+    cfg.inputAudioTranscription = {};
+    cfg.outputAudioTranscription = {};
+  }
   return cfg;
 }
 

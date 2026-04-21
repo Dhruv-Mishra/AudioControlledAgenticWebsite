@@ -6,7 +6,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:prod": "node scripts/start-prod.js",
     "dev": "node server.js",
+    "build": "node scripts/build.js",
+    "build:meta": "node scripts/build.js --metafile",
     "eval": "node evals/voice-eval.js",
     "smoke:invalid-key": "node evals/invalid-key-smoke.js",
     "smoke:upstream-handshake": "node evals/upstream-handshake-smoke.js",
@@ -15,14 +18,19 @@
     "smoke:session-resume": "node evals/session-resume-smoke.js",
     "smoke:cold-start-live": "node evals/cold-start-live-smoke.js",
     "smoke:greeting-injection": "node evals/greeting-injection-smoke.js",
-    "smoke:fill-datetime": "node evals/fill-datetime-smoke.mjs"
+    "smoke:fill-datetime": "node evals/fill-datetime-smoke.mjs",
+    "smoke:transcription-toggle": "node evals/transcription-toggle-smoke.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@google/genai": "^1.50.1",
+    "compression": "^1.8.1",
     "dotenv": "^16.4.5",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
   }
 }
