@@ -5,7 +5,7 @@
 // matching data-agent-id. No `eval`, no arbitrary CSS selectors. Every tool
 // that touches inputs emits native events so the page's own listeners react.
 
-const VALID_PATHS = new Set(['/', '/index.html', '/carriers.html', '/negotiate.html', '/contact.html']);
+const VALID_PATHS = new Set(['/', '/index.html', '/carriers.html', '/negotiate.html', '/contact.html', '/map.html']);
 
 function textOf(el) {
   if (!el) return '';
@@ -288,7 +288,7 @@ export class ToolRegistry {
    * @param {(summary: string) => void} [opts.onToolNote] UI-side hook to log tool actions
    * @param {() => boolean} [opts.showText] runtime flag: when false, onToolNote is called with the tool NAME only (no args, no results, no error messages).
    */
-  constructor({ sendTextMessage, onNavigate, onToolNote, showText }) {
+  constructor({ sendTextMessage, onNavigate, onToolNote, showText, transcriptMode }) {
     this.send = sendTextMessage;
     this.onNavigate = onNavigate || ((p) => {
       // Prefer the SPA router so the VoiceAgent survives the navigation
@@ -303,6 +303,10 @@ export class ToolRegistry {
     this.onToolNote = onToolNote || (() => {});
     // Defaults to "text visible" — VoiceAgent overrides with a live getter.
     this.showText = typeof showText === 'function' ? showText : () => true;
+    // Live getter for the transcript display mode. When it returns 'off'
+    // or 'captions', tool-note rendering is suppressed (tool execution
+    // itself is unaffected). Default 'full' for callers that don't pass one.
+    this.transcriptMode = typeof transcriptMode === 'function' ? transcriptMode : () => 'full';
     this.domainHandlers = new Map();
   }
 
@@ -321,22 +325,28 @@ export class ToolRegistry {
       this.send({ type: 'tool_result', id, name, ...payload });
     };
     const textVisible = !!this.showText();
+    // Mode-gated UI notes: off/captions modes skip transcript noise.
+    const renderNote = this.transcriptMode() === 'full';
     try {
       const result = await this._execute(name, args || {});
       // When SHOW_TEXT=false the operator asked us to show tool NAMES only;
       // args/values can contain user-spoken content.
-      if (textVisible) {
-        this.onToolNote(`${name}(${JSON.stringify(args || {})}) → ${safeJson(result)}`);
-      } else {
-        this.onToolNote(name);
+      if (renderNote) {
+        if (textVisible) {
+          this.onToolNote(`${name}(${JSON.stringify(args || {})}) → ${safeJson(result)}`);
+        } else {
+          this.onToolNote(name);
+        }
       }
       reply({ ok: true, result });
     } catch (err) {
       const msg = (err && err.message) || String(err);
-      if (textVisible) {
-        this.onToolNote(`${name} failed: ${msg}`);
-      } else {
-        this.onToolNote(`${name} (failed)`);
+      if (renderNote) {
+        if (textVisible) {
+          this.onToolNote(`${name} failed: ${msg}`);
+        } else {
+          this.onToolNote(`${name} (failed)`);
+        }
       }
       // Attach structured fillFailure so the model sees what format we
       // expected. If present we also bundle it into `result` (on the

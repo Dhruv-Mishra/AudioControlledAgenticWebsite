@@ -173,6 +173,62 @@ function assignCarrierLocal(loadId, carrierId) {
   return { ok: true, load };
 }
 
+function renderMapCard() {
+  const sub = document.getElementById('dispatch-map-sub');
+  const ul = document.getElementById('dispatch-map-lanes');
+  if (!ul) return;
+  const loads = Array.isArray(state.loads) ? state.loads : [];
+  const active = loads.filter((l) => l.status !== 'delivered');
+  if (sub) {
+    const delayed = loads.filter((l) => l.status === 'delayed').length;
+    sub.textContent = delayed
+      ? `${active.length} active · ${delayed} delayed`
+      : `${active.length} active lanes`;
+  }
+  ul.innerHTML = '';
+  active.slice(0, 6).forEach((l) => {
+    const li = document.createElement('li');
+    li.className = 'dispatch-map-lane';
+    li.setAttribute('data-agent-id', `dispatch.map_lane.${l.id}`);
+    li.setAttribute('data-status', l.status || 'booked');
+    li.setAttribute('data-load-id', l.id);
+    li.setAttribute('role', 'button');
+    li.setAttribute('tabindex', '0');
+    li.setAttribute('aria-label', `${l.id}, ${l.pickup} to ${l.dropoff}, ${l.status || 'booked'}`);
+    li.innerHTML = `
+      <span class="lane-dot" aria-hidden="true"></span>
+      <span class="lane-route">${escapeHtml(l.pickup)} → ${escapeHtml(l.dropoff)}</span>
+      <span class="lane-id">${escapeHtml(l.id)}</span>
+    `;
+    const openMap = () => {
+      if (typeof window !== 'undefined' && window.__router && typeof window.__router.navigate === 'function') {
+        window.__router.navigate('/map.html');
+        // After navigation lands, ask the widget to highlight this load.
+        setTimeout(() => {
+          document.dispatchEvent(new CustomEvent('map:highlight-load', { detail: { load_id: l.id } }));
+        }, 50);
+      } else {
+        location.href = '/map.html';
+      }
+    };
+    li.addEventListener('click', openMap);
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMap(); }
+    });
+    ul.appendChild(li);
+  });
+}
+
+function bindMapCard() {
+  const link = document.querySelector('a[data-agent-id="dispatch.open_map"]');
+  if (!link) return;
+  link.addEventListener('click', (e) => {
+    if (typeof window === 'undefined' || !window.__router || typeof window.__router.navigate !== 'function') return;
+    e.preventDefault();
+    window.__router.navigate('/map.html');
+  });
+}
+
 function bindFilters() {
   const q = document.getElementById('filter-q');
   const st = document.getElementById('filter-status');
@@ -197,6 +253,8 @@ export async function enter(root, { voiceAgent }) {
   renderSummary();
   renderTable();
   renderDetail();
+  renderMapCard();
+  bindMapCard();
   bindFilters();
 
   if (voiceAgent && voiceAgent.toolRegistry) {

@@ -83,16 +83,25 @@
   --shadow-overlay-strong: 0 20px 56px -12px rgba(0, 0, 0, 0.60), 0 4px 10px rgba(0, 0, 0, 0.35);
   --shadow-focus-ring-accent: 0 0 0 2px rgba(110, 231, 183, 0.35);
   --shadow-focus-ring-danger: 0 0 0 2px rgba(248, 113, 113, 0.35);
+  --shadow-pin: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --color-accent-outline: rgba(110, 231, 183, 0.35);
 
   /* Overlay surfaces (added 2026-04-22 for upgrade) */
   --color-overlay-bg: rgba(17, 21, 26, 0.92);
   --color-overlay-scrim: rgba(0, 0, 0, 0.55);
   --color-spotlight-mask: rgba(0, 0, 0, 0.70);
 
+  /* Map surfaces (v2 upgrade — Leaflet page) */
+  --color-map-bg: #0E1217;
+  --color-map-polyline: rgba(110, 231, 183, 0.65);
+  --color-map-polyline-pending: rgba(251, 191, 36, 0.55);
+  --color-map-pin-ring: rgba(11, 13, 16, 0.85);
+
   /* Z-index scale */
   --z-header: 100;
   --z-dock: 200;
   --z-captions: 250;
+  --z-map-ui: 300;
   --z-overlay: 500;
   --z-skip-link: 1000;
 

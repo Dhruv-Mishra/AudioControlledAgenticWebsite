@@ -63,6 +63,15 @@
     <div class="detail-panel" id="detail-panel" aria-label="Load detail">
       <div class="muted">Select a load to see details.</div>
     </div>
-    <div class="map-placeholder" aria-label="Map (placeholder)">Map view coming soon</div>
+    <aside class="dispatch-map-card" aria-label="Fleet map preview">
+      <header class="dispatch-map-card-header">
+        <div>
+          <div class="dispatch-map-card-title">Fleet map</div>
+          <div class="dispatch-map-card-sub" id="dispatch-map-sub">Active lanes across the network</div>
+        </div>
+        <a class="btn btn--primary btn--sm" href="/map.html" data-agent-id="dispatch.open_map">Open map →</a>
+      </header>
+      <ul class="dispatch-map-lanes" id="dispatch-map-lanes" data-agent-id="dispatch.map_lanes" aria-label="Active lanes"></ul>
+    </aside>
   </aside>
 </div>

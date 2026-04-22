@@ -106,19 +106,31 @@ async function buildCss() {
 }
 
 async function copyStatic() {
-  // Partials and public assets are served verbatim.
-  const dirs = ['partials', 'public', 'data'];
-  for (const d of dirs) {
+  // Partials and public assets are served verbatim. Recurse so
+  // subdirectories like public/leaflet/, public/leaflet/images/, and
+  // public/sounds/ ship intact.
+  async function copyTree(srcDir, dstDir) {
+    let entries;
+    try { entries = await fsp.readdir(srcDir, { withFileTypes: true }); }
+    catch { return; }
+    for (const ent of entries) {
+      const srcPath = path.join(srcDir, ent.name);
+      const dstPath = path.join(dstDir, ent.name);
+      if (ent.isDirectory()) {
+        await ensureDir(dstPath);
+        await copyTree(srcPath, dstPath);
+      } else {
+        await copyFile(srcPath, dstPath);
+      }
+    }
+  }
+  for (const d of ['partials', 'public', 'data']) {
     const src = path.join(ROOT, d);
     try {
       const stat = await fsp.stat(src);
       if (!stat.isDirectory()) continue;
     } catch { continue; }
-    const entries = await fsp.readdir(src, { withFileTypes: true });
-    for (const ent of entries) {
-      if (ent.isDirectory()) continue;
-      await copyFile(path.join(src, ent.name), path.join(DIST, d, ent.name));
-    }
+    await copyTree(src, path.join(DIST, d));
   }
 }
 
@@ -196,6 +208,7 @@ async function main() {
     path.join(ROOT, 'js/page-carriers.js'),
     path.join(ROOT, 'js/page-negotiate.js'),
     path.join(ROOT, 'js/page-contact.js'),
+    path.join(ROOT, 'js/page-map.js'),
     // STT pipeline — worker must be an explicit entry so `new URL(...,
     // import.meta.url)` in stt-controller can resolve it after build.
     // transformers.js is dynamically imported inside the worker and

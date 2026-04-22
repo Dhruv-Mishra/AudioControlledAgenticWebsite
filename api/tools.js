@@ -34,7 +34,7 @@ const STATIC_TOOL_DECLARATIONS = [
   {
     name: 'navigate',
     description:
-      'Navigate the browser to one of the known pages. Valid values: "/", "/carriers.html", "/negotiate.html", "/contact.html".',
+      'Navigate the browser to one of the known pages. Valid values: "/", "/carriers.html", "/negotiate.html", "/contact.html", "/map.html".',
     parameters: {
       type: 'object',
       properties: {
@@ -322,6 +322,61 @@ const STATIC_TOOL_DECLARATIONS = [
       },
       required: ['pref']
     }
+  },
+  // ---------------------------------------------------------------
+  // v2 tools — map navigation + continuous compression strength.
+  // Appended at the END to preserve the Gemini prompt cache prefix.
+  // ---------------------------------------------------------------
+  {
+    name: 'map_focus',
+    description:
+      'Center the map on a place or entity. Accepts a city like "Chicago, IL", a state abbreviation like "TX", a load id like "LD-10824", or a carrier id like "C-204" in `target`. If the place is NOT a known name, pass numeric `lat`+`lng` instead (do NOT put coordinates inside `target`). Calling this while NOT on /map.html auto-navigates there first. Returns {ok:false, code:"target_not_found"|"bad_input"} with a human-readable error when the string matches nothing — relay the error to the user and suggest an alternative, do not claim success.',
+    parameters: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'String target: city "Chicago, IL" | state "TX" | load_id "LD-10824" | carrier_id "C-204". MUST be a string. If you only have raw coordinates, omit this field and use lat+lng instead.' },
+        lat: { type: 'number', description: 'Numeric latitude fallback (-90..90). Use when target is unknown/empty. Pair with lng.' },
+        lng: { type: 'number', description: 'Numeric longitude fallback (-180..180). Use when target is unknown/empty. Pair with lat.' },
+        zoom: { type: 'number', description: 'Optional zoom 3–18. Default is 7 for cities, 5 for states.' }
+      }
+    }
+  },
+  {
+    name: 'map_highlight_load',
+    description:
+      'Flash the pickup and dropoff markers plus the lane polyline for a specific load, and open its popup. Auto-navigates to /map.html if you are elsewhere. Load ids take the form "LD-<digits>" (e.g. "LD-10824"); numbers are easy to mis-hear over a phone line, so if you are not certain of the id confirm it with the user BEFORE calling. Returns {ok:false, code:"load_not_found"|"bad_input"} if the id is unknown — relay the error verbatim instead of pretending it worked.',
+    parameters: {
+      type: 'object',
+      properties: {
+        load_id: { type: 'string', description: 'Load identifier matching "LD-<digits>", e.g. "LD-10824". If unsure (phonetics), confirm with user first.' }
+      },
+      required: ['load_id']
+    }
+  },
+  {
+    name: 'map_show_layer',
+    description:
+      'Show or hide one overlay on the map. Each call toggles ONE layer; call multiple times to compose (e.g. hide carriers + show lanes = two calls). Auto-navigates to /map.html if you are elsewhere. Returns {ok:false, code:"unknown_layer"|"bad_input"} when the layer name is not one of the accepted values — relay the error to the user.',
+    parameters: {
+      type: 'object',
+      properties: {
+        layer: { type: 'string', description: 'Strict enum. Exactly one of: "loads", "carriers", "lanes", "delayed". Case-insensitive but must be a string (not an array, not an id).' },
+        visible: { type: 'boolean', description: 'true to show the layer, false to hide it. Must be a boolean (true/false), not 0/1 or "true"/"false".' }
+      },
+      required: ['layer', 'visible']
+    }
+  },
+  {
+    name: 'set_compression_strength',
+    description:
+      'Adjust how much phone-line compression is applied to your voice. Range 0 (studio-clean) to 100 (heavy walkie-talkie). ~50 is the default phone sound. Use when the user says "sound crustier", "sound clearer", "more compression", "less filtering". Persists across reloads.',
+    parameters: {
+      type: 'object',
+      properties: {
+        strength: { type: 'number', description: 'Integer 0–100.' }
+      },
+      required: ['strength']
+    }
   }
 ];
 
@@ -348,7 +403,14 @@ UI helper tools (appended):
 - Use filter_loads / filter_carriers when the user asks to narrow a table ("show delayed loads on I-80", "reefer carriers only"). Prefer the filter tool over clicking individual filter inputs — it's one round-trip, the URL updates, and reload preserves the view.
 - Use set_quick_actions to offer 2–5 relevant follow-up taps ("Shortlist it", "Log counter"). Replace them when the context shifts.
 - Use open_palette or run_palette_action when the user wants to jump somewhere quickly; run_palette_action is better when you're confident of the action_id.
-- Use set_captions and set_theme ONLY when the user explicitly asks (e.g. "turn on captions", "dark mode"). Don't volunteer these.`;
+- Use set_captions and set_theme ONLY when the user explicitly asks (e.g. "turn on captions", "dark mode"). Don't volunteer these.
+- Use set_compression_strength when the user asks about how you sound ("crustier", "clearer", "more phone-line", "studio"). 0 is clean, 50 is default phone, 100 is heavy walkie-talkie.
+- Use map_focus / map_highlight_load / map_show_layer only on the Map page. map_focus accepts city, state, or load/carrier id; prefer load/carrier id when applicable.
+
+Map-tool usage (v2.1):
+- For spatial questions like "where is X", "show me the route for X", "what carriers cover the Texas lane", prefer the map tools over navigating manually — they auto-navigate to /map.html from any page and open the right view. If you are already on /map.html, don't re-navigate.
+- Load ids are phonetically fragile ("LD-10824" vs "LD-10284"): if you are less than sure, read the id back and get confirmation BEFORE calling map_highlight_load. Never guess digits.
+- Map tools may return {ok:false, error:"..."} with a human-readable message (e.g. "No city, state, or id matched 'Toronto, ON'"). Relay that sentence to the user in your next reply instead of claiming the map moved — and propose a recovery (ask for a different name, or suggest a known city).`;
 
 /** Sanitise strings that will be embedded in the system prompt. We trim to a
  *  short length and drop anything that looks like a prompt-injection marker

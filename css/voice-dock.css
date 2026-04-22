@@ -15,6 +15,8 @@
   right: var(--sp-4);
   width: 380px;
   max-width: calc(100vw - var(--sp-6));
+  max-height: calc(100vh - var(--sp-5) * 2);
+  max-height: calc(100dvh - var(--sp-5) * 2);
   background: var(--color-bg-elev-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -107,6 +109,7 @@
 .voice-transcript {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--sp-3) var(--sp-4);
   font-size: var(--fs-sm);
   line-height: 1.5;
@@ -115,6 +118,8 @@
   gap: var(--sp-2);
   background: var(--color-bg);
   -webkit-overflow-scrolling: touch;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .voice-transcript:empty::before {
@@ -378,15 +383,29 @@
   .chip .live-dot { animation: none; }
 }
 
-/* ---- Settings sheet (advanced options) ---- */
+/* ---- Settings sheet (advanced options) ----
+ * v2: absolutely-positioned overlay inside the dock instead of a sibling
+ * stacked below the body. Keeps the dock's max-height cap — the sheet can
+ * never push total height past the viewport. */
 .voice-settings-sheet {
-  border-top: 1px solid var(--color-border);
+  position: absolute;
+  inset: 0;
   background: var(--color-bg-elev-2);
-  max-height: 70vh;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateY(8px);
+  opacity: 0;
+  transition: transform var(--dur-base) var(--ease-out-expo),
+              opacity   var(--dur-base) var(--ease-out-expo);
 }
+.voice-settings-sheet.is-open { transform: translateY(0); opacity: 1; }
 .voice-settings-sheet[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-settings-sheet { transition: none; transform: none; }
+}
 
 .voice-settings-header {
   display: flex;
@@ -399,13 +418,17 @@
   color: var(--color-text);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 .voice-settings-body {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .voice-settings-note {
@@ -487,6 +510,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
+  overflow-x: hidden;
 }
 .debug-panel[hidden] { display: none; }
 
@@ -517,6 +541,37 @@
 
 .noise-row .select { flex: 1; min-width: 120px; }
 
+/* Compression-strength row — sits directly below the phone-compression
+ * toggle row. Parent toggle disables it via aria-disabled + the slider's
+ * own `disabled` attribute so focus also moves past it. */
+.compression-strength-row {
+  padding-left: var(--sp-5);
+  gap: var(--sp-3);
+}
+.compression-strength-row .slider {
+  flex: 1;
+  min-width: 80px;
+}
+.compression-strength-readout {
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+.compression-strength-row[aria-disabled="true"] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Ambient chip — static pill next to the live-timer chip in the dock
+ * header. No pulse, no animation; visibility flips on ambient-changed. */
+.voice-ambient-chip {
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
 /* ---- Tablet (≤ 900px): narrower dock, still bottom-right. ---- */
 @media (max-width: 900px) {
   .voice-dock {
@@ -529,6 +584,8 @@
   .voice-dock {
     width: 100%;
     max-width: 100%;
+    max-height: 85vh;
+    max-height: 85dvh;
     right: 0;
     left: 0;
     bottom: 0;
@@ -572,7 +629,6 @@
   .voice-dock-action .call-btn { flex: 1 1 auto; min-width: 60%; }
   .voice-dock-action .call-hint { flex: 1 0 100%; margin-top: var(--sp-1); }
 
-  .voice-settings-sheet { max-height: 55vh; }
   .voice-settings-body { padding: var(--sp-3); }
 }
 

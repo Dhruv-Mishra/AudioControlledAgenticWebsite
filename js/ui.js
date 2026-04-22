@@ -52,6 +52,7 @@ function buildDockMarkup() {
           <span class="live-dot" aria-hidden="true"></span>
           <span id="voice-live-timer">0:00</span>
         </span>
+        <span class="chip chip--neutral voice-ambient-chip" id="voice-ambient-chip" data-agent-id="voice.ambient_chip" hidden>Ambient</span>
       </div>
       <div class="voice-dock-header-actions">
         <button class="icon-btn" id="voice-settings" aria-label="Call settings" title="Call settings" data-agent-id="voice.settings">
@@ -138,6 +139,20 @@ function buildDockMarkup() {
           <div class="spacer"></div>
           <input class="slider" type="range" id="voice-volume" data-agent-id="voice.output_volume" min="0" max="150" value="100" aria-label="Agent output volume" />
         </div>
+        <div class="voice-control-row compression-strength-row">
+          <span class="voice-control-label">Strength</span>
+          <input
+            class="slider"
+            type="range"
+            id="voice-compression-strength"
+            data-agent-id="voice.compression_strength"
+            min="0" max="100" step="1" value="50"
+            aria-label="Phone-line compression strength"
+            aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"
+            aria-describedby="voice-compression-strength-readout"
+          />
+          <span class="compression-strength-readout" id="voice-compression-strength-readout" aria-live="polite">50%</span>
+        </div>
         <div class="voice-control-row" role="radiogroup" aria-label="Listening mode">
           <span class="voice-control-label">Mode</span>
           <div class="segmented mode-seg" id="voice-mode-seg">
@@ -195,6 +210,7 @@ function buildHeader() {
       <a href="/" data-agent-id="nav.dispatch">Dispatch</a>
       <a href="/carriers.html" data-agent-id="nav.carriers">Carriers</a>
       <a href="/negotiate.html" data-agent-id="nav.negotiate">Negotiate</a>
+      <a href="/map.html" data-agent-id="nav.map">Map</a>
       <a href="/contact.html" data-agent-id="nav.contact">Contact</a>
     </nav>
     <div class="app-header-right">
@@ -600,6 +616,63 @@ export async function bootstrapVoiceShell() {
   on(phoneToggle, 'change', () => agent.setCompressionEnabled(phoneToggle.checked));
   const volume = $('#voice-volume');
   on(volume, 'input', () => agent.pipeline.setOutputVolume(Number(volume.value) / 100));
+
+  // --- Compression-strength slider (child of phone-compression).
+  const strength = $('#voice-compression-strength');
+  const strengthRow = strength && strength.closest('.compression-strength-row');
+  const strengthReadout = $('#voice-compression-strength-readout');
+
+  function syncStrengthEnabled() {
+    if (!strength || !strengthRow) return;
+    const on = phoneToggle.checked;
+    strength.disabled = !on;
+    strengthRow.setAttribute('aria-disabled', on ? 'false' : 'true');
+  }
+
+  function reflectStrength(value) {
+    if (!strength || !strengthReadout) return;
+    const v = String(Math.max(0, Math.min(100, Math.round(Number(value) || 0))));
+    strength.value = v;
+    strength.setAttribute('aria-valuenow', v);
+    strengthReadout.textContent = `${v}%`;
+  }
+
+  if (strength) {
+    reflectStrength(typeof agent.getCompressionStrength === 'function' ? agent.getCompressionStrength() : 50);
+    syncStrengthEnabled();
+
+    on(strength, 'input', () => {
+      const v = Number(strength.value);
+      reflectStrength(v);
+      if (typeof agent.setCompressionStrength === 'function') {
+        agent.setCompressionStrength(v);
+      }
+    });
+    on(phoneToggle, 'change', syncStrengthEnabled);
+
+    // Keep the slider in sync when the agent (or a tool call) changes
+    // compression strength from elsewhere.
+    agent.addEventListener('compression-changed', (e) => {
+      const d = e && e.detail;
+      if (d && typeof d.strength === 'number') reflectStrength(d.strength);
+      syncStrengthEnabled();
+    });
+  }
+
+  // --- Ambient chip toggles on `ambient-changed` events from the agent.
+  const ambientChip = $('#voice-ambient-chip');
+  if (ambientChip) {
+    const reflectAmbient = (on) => { ambientChip.hidden = !on; };
+    agent.addEventListener('ambient-changed', (e) => {
+      reflectAmbient(!!(e && e.detail && e.detail.on));
+    });
+    // Mirror call-state transitions as a belt-and-suspenders: when the
+    // user ends a call, the chip should drop regardless of whether
+    // ambient-changed fires.
+    agent.addEventListener('state', () => {
+      if (!agent.isInCall()) reflectAmbient(false);
+    });
+  }
 
   // --- Dock collapse + clear
   const collapseBtn = $('#voice-dock-toggle');

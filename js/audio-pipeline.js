@@ -143,6 +143,54 @@ const NOISE_FACTORIES = {
 
 const FADE_MS_DEFAULT = 220;
 
+// Compression strength ladder (Oracle Decision 3). Indexed rows; we
+// linearly interpolate between them for any strength in [0..100].
+// HP 0 / LP 20000 / threshold 0 / ratio 1 / shaper=linear → pass-through at 0.
+const COMPRESSION_LADDER = [
+  { strength:   0, hp:    0, lp: 20000, threshold:   0, ratio: 1.0, attack: 0.003, release: 0.25, drive: 0.0 },
+  { strength:  25, hp:  200, lp:  6000, threshold: -12, ratio: 2.5, attack: 0.004, release: 0.22, drive: 1.1 },
+  { strength:  50, hp:  300, lp:  3400, threshold: -18, ratio: 4.5, attack: 0.006, release: 0.18, drive: 1.8 },
+  { strength:  75, hp:  360, lp:  3300, threshold: -22, ratio: 6.5, attack: 0.008, release: 0.14, drive: 2.4 },
+  { strength: 100, hp:  400, lp:  3200, threshold: -24, ratio: 8.0, attack: 0.010, release: 0.10, drive: 2.8 }
+];
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+/** Linear-interpolate ladder params for strength s in [0..100]. */
+function interpolateCompressionParams(s) {
+  const clamped = Math.max(0, Math.min(100, Number(s) || 0));
+  for (let i = 0; i < COMPRESSION_LADDER.length - 1; i++) {
+    const a = COMPRESSION_LADDER[i];
+    const b = COMPRESSION_LADDER[i + 1];
+    if (clamped >= a.strength && clamped <= b.strength) {
+      const t = (clamped - a.strength) / (b.strength - a.strength);
+      return {
+        hp:        lerp(a.hp,        b.hp,        t),
+        lp:        lerp(a.lp,        b.lp,        t),
+        threshold: lerp(a.threshold, b.threshold, t),
+        ratio:     lerp(a.ratio,     b.ratio,     t),
+        attack:    lerp(a.attack,    b.attack,    t),
+        release:   lerp(a.release,   b.release,   t),
+        drive:     lerp(a.drive,     b.drive,     t)
+      };
+    }
+  }
+  // Out-of-range: clamp to endpoints.
+  return clamped <= 0 ? COMPRESSION_LADDER[0] : COMPRESSION_LADDER[COMPRESSION_LADDER.length - 1];
+}
+
+/** 1024-sample tanh soft-clip curve. `drive` 0 = linear (pass-through). */
+function makeSaturationCurve(drive) {
+  const n = 1024;
+  const curve = new Float32Array(n);
+  const d = Math.max(0, Number(drive) || 0);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = d <= 0.001 ? x : Math.tanh(d * x);
+  }
+  return curve;
+}
+
 export class AudioPipeline extends EventTarget {
   constructor() {
     super();
@@ -159,9 +207,11 @@ export class AudioPipeline extends EventTarget {
     // Playback graph pieces.
     this.nextStartTime = 0;
     this.playbackGain = null;      // agent volume only
-    this.agentGain = null;         // feeds into playbackGain (with optional bandpass chain)
-    this.bandPass = null;
-    this.bandPassEnabled = false;
+    this.agentGain = null;         // ALWAYS connects through bandPass chain now
+    this.bandPass = null;          // persistent compression/filter graph
+    this.bandPassEnabled = false;  // derived from compressionStrength > 0
+    this.compressionStrength = 50; // 0..100 — default phone sound
+    this._lastShaperBucket = -1;
     this.outputVolume = 1.0;
 
     // Noise graph (INDEPENDENT — connects directly to ctx.destination):
@@ -174,6 +224,17 @@ export class AudioPipeline extends EventTarget {
     this.noiseNode = null;          // the current factory's node bundle
     this.noiseVolume = 0.5;
     this.ambientOn = false;
+
+    // Human-call layer (Oracle Decision 2). SIBLING branch to destination,
+    // independent of noiseBusGain and playbackGain. Runs continuously while
+    // isInCall(), layered under whichever primary noiseMode is selected.
+    //   [muffle/wind/breath sources] → humanLayerBusGain → humanLayerEnvelopeGain → ctx.destination
+    this.humanLayerBusGain = null;
+    this.humanLayerEnvelopeGain = null;
+    this.humanLayerVolume = 0.6;
+    this.humanLayerOn = false;
+    this.humanLayer = null;         // { muffle, wind, breathBuffer, muffleFilter, windFilter, windGain, windLFO, windLFOGain }
+    this._breathTimer = null;
 
     this._analyser = null;
     this._micAnalyser = null;
@@ -243,7 +304,10 @@ export class AudioPipeline extends EventTarget {
   _buildPlaybackGraph() {
     const ctx = this.ctx;
 
-    // Agent-output chain: agentGain → [bandPass optional] → playbackGain → destination
+    // Agent-output chain: agentGain → HP → LP → Compressor → WaveShaper → compOut → playbackGain → destination
+    // ALL nodes are persistent. setCompressionStrength(0) interpolates them
+    // to transparent pass-through; setCompressionStrength(100) to heavy
+    // walkie-talkie. No reconnects on strength changes — just param ramps.
     this.playbackGain = ctx.createGain();
     this.playbackGain.gain.value = this.outputVolume;
     this.playbackGain.connect(ctx.destination);
@@ -256,18 +320,32 @@ export class AudioPipeline extends EventTarget {
     this.agentGain = ctx.createGain();
     this.agentGain.gain.value = 1;
 
-    // Phone-line compression: HP 300 + LP 3400 + soft-clip WaveShaper.
-    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 300;
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';  lp.frequency.value = 3400;
-    const shaper = ctx.createWaveShaper();
-    shaper.curve = this._makePhoneCurve();
-    const bpOut = ctx.createGain();
-    bpOut.gain.value = 1;
-    hp.connect(lp).connect(shaper).connect(bpOut);
-    this.bandPass = { in: hp, out: bpOut, hp, lp };
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 0;
+    hp.Q.value = 0.7;
 
-    // Default wiring: bypass compression.
-    this.agentGain.connect(this.playbackGain);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 20000;
+    lp.Q.value = 0.7;
+
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = 0;
+    comp.ratio.value = 1;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.25;
+    comp.knee.value = 24;
+
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = makeSaturationCurve(0); // linear at strength 0
+
+    const compOut = ctx.createGain();
+    compOut.gain.value = 1;
+
+    this.agentGain.connect(hp).connect(lp).connect(comp).connect(shaper).connect(compOut).connect(this.playbackGain);
+    this.bandPass = { hp, lp, comp, shaper, out: compOut };
+    this._lastShaperBucket = 0;
 
     // NOISE: fully independent branch, direct to ctx.destination.
     //   noiseSource.node → noiseBusGain (user volume) → noiseEnvelopeGain (fade) → destination
@@ -276,16 +354,16 @@ export class AudioPipeline extends EventTarget {
     this.noiseEnvelopeGain = ctx.createGain();
     this.noiseEnvelopeGain.gain.value = 0; // starts muted — VoiceAgent fades it in
     this.noiseBusGain.connect(this.noiseEnvelopeGain).connect(ctx.destination);
-  }
 
-  _makePhoneCurve() {
-    const n = 1024;
-    const curve = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      const x = (i / (n - 1)) * 2 - 1;
-      curve[i] = Math.tanh(2.8 * x);
-    }
-    return curve;
+    // HUMAN-CALL LAYER: sibling branch. Lazy-built on first setHumanLayerOn(true).
+    this.humanLayerBusGain = ctx.createGain();
+    this.humanLayerBusGain.gain.value = this.humanLayerVolume;
+    this.humanLayerEnvelopeGain = ctx.createGain();
+    this.humanLayerEnvelopeGain.gain.value = 0;
+    this.humanLayerBusGain.connect(this.humanLayerEnvelopeGain).connect(ctx.destination);
+
+    // Apply any persisted compression strength NOW that the graph exists.
+    this.setCompressionStrength(this.compressionStrength);
   }
 
   /** Gentle watchdog: resumes the AudioContext if Chrome suspends it while
@@ -347,18 +425,190 @@ export class AudioPipeline extends EventTarget {
     if (this.noiseBusGain) this.noiseBusGain.gain.value = this.noiseVolume;
   }
 
+  /** Backwards-compat shim. Binary callers map to strength 50 (default
+   *  phone sound) or 0 (pass-through). The persistent graph means no
+   *  reconnects happen — we just ramp the nodes' params. */
   setBandPassEnabled(on) {
-    if (!this.agentGain) return;
+    this.setCompressionStrength(on ? 50 : 0);
     this.bandPassEnabled = !!on;
-    try { this.agentGain.disconnect(); } catch {}
-    if (on) {
-      this.agentGain.connect(this.bandPass.in);
-      try { this.bandPass.out.disconnect(); } catch {}
-      this.bandPass.out.connect(this.playbackGain);
-    } else {
-      try { this.bandPass.out.disconnect(); } catch {}
-      this.agentGain.connect(this.playbackGain);
+  }
+
+  /** Interpolate compression params for strength 0..100. Applied via
+   *  setTargetAtTime with 50 ms time constant so slider drags produce
+   *  smooth audible changes and zero clicks. */
+  setCompressionStrength(strength) {
+    const s = Math.max(0, Math.min(100, Number(strength) || 0));
+    this.compressionStrength = s;
+    this.bandPassEnabled = s > 0;
+    if (!this.bandPass || !this.ctx) return;
+    const p = interpolateCompressionParams(s);
+    const now = this.ctx.currentTime;
+    const tau = 0.05;
+    try { this.bandPass.hp.frequency.setTargetAtTime(p.hp, now, tau); } catch {}
+    try { this.bandPass.lp.frequency.setTargetAtTime(p.lp, now, tau); } catch {}
+    try { this.bandPass.comp.threshold.setTargetAtTime(p.threshold, now, tau); } catch {}
+    try { this.bandPass.comp.ratio.setTargetAtTime(p.ratio, now, tau); } catch {}
+    try { this.bandPass.comp.attack.setTargetAtTime(p.attack, now, tau); } catch {}
+    try { this.bandPass.comp.release.setTargetAtTime(p.release, now, tau); } catch {}
+    // Regenerate the saturation curve only when crossing a 10% bucket.
+    const bucket = Math.floor(s / 10);
+    if (bucket !== this._lastShaperBucket) {
+      try { this.bandPass.shaper.curve = makeSaturationCurve(p.drive); } catch {}
+      this._lastShaperBucket = bucket;
     }
+  }
+
+  getCompressionStrength() { return this.compressionStrength; }
+
+  // ----- Human-call layer (muffle + wind + breath) -----
+
+  /** Build the three procedural components once. Lazy — only on first
+   *  setHumanLayerOn(true). If the user never places a call, no
+   *  allocation happens. */
+  _buildHumanLayer() {
+    if (this.humanLayer || !this.ctx || !this.humanLayerBusGain) return;
+    const ctx = this.ctx;
+
+    // 1. Muffle: brown noise loop → lowpass 200 Hz → gain 0.12.
+    const muffleSrc = ctx.createBufferSource();
+    muffleSrc.buffer = makeNoiseBuffer(ctx, 10, 'brown');
+    muffleSrc.loop = true;
+    const muffleLp = ctx.createBiquadFilter();
+    muffleLp.type = 'lowpass';
+    muffleLp.frequency.value = 200;
+    muffleLp.Q.value = 0.5;
+    const muffleGain = ctx.createGain();
+    muffleGain.gain.value = 0.12;
+    muffleSrc.connect(muffleLp).connect(muffleGain).connect(this.humanLayerBusGain);
+
+    // 2. Wind: pink noise loop → bandpass 300 Hz Q 1.2 → gain 0.08.
+    //    LFO 0.08 Hz on gain adds slow breathing.
+    const windSrc = ctx.createBufferSource();
+    windSrc.buffer = makeNoiseBuffer(ctx, 10, 'pink');
+    windSrc.loop = true;
+    const windBp = ctx.createBiquadFilter();
+    windBp.type = 'bandpass';
+    windBp.frequency.value = 300;
+    windBp.Q.value = 1.2;
+    const windGain = ctx.createGain();
+    windGain.gain.value = 0.08;
+    windSrc.connect(windBp).connect(windGain).connect(this.humanLayerBusGain);
+    const windLfo = ctx.createOscillator();
+    windLfo.type = 'sine';
+    windLfo.frequency.value = 0.08;
+    const windLfoGain = ctx.createGain();
+    windLfoGain.gain.value = 0.06;
+    windLfo.connect(windLfoGain).connect(windGain.gain);
+
+    // 3. Breath: pre-render a 0.3s pink-noise burst with baked ADSR.
+    const breathBuffer = this._makeBreathBuffer(ctx);
+
+    try { muffleSrc.start(); } catch {}
+    try { windSrc.start(); } catch {}
+    try { windLfo.start(); } catch {}
+
+    this.humanLayer = {
+      muffleSrc, muffleLp, muffleGain,
+      windSrc, windBp, windGain, windLfo, windLfoGain,
+      breathBuffer
+    };
+  }
+
+  /** 0.3 s pink-noise burst with exp attack (30 ms) + exp decay (270 ms).
+   *  Shape baked into the buffer so runtime playback needs no gain ramps. */
+  _makeBreathBuffer(ctx) {
+    const sr = ctx.sampleRate;
+    const dur = 0.3;
+    const len = Math.round(dur * sr);
+    const buf = ctx.createBuffer(1, len, sr);
+    const data = buf.getChannelData(0);
+    const attackSamples = Math.round(0.03 * sr);
+    const decaySamples = len - attackSamples;
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < len; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      b3 = 0.86650 * b3 + white * 0.3104856;
+      b4 = 0.55000 * b4 + white * 0.5329522;
+      b5 = -0.7616 * b5 - white * 0.0168980;
+      const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+      b6 = white * 0.115926;
+      // ADSR envelope: exp attack, exp decay to zero.
+      let env;
+      if (i < attackSamples) {
+        const t = i / attackSamples;
+        env = 1 - Math.exp(-3 * t);
+      } else {
+        const t = (i - attackSamples) / decaySamples;
+        env = Math.exp(-3 * t);
+      }
+      data[i] = pink * 0.11 * env;
+    }
+    return buf;
+  }
+
+  _scheduleBreath() {
+    if (!this.humanLayer || !this.humanLayerOn || !this.ctx) return;
+    // Jittered interval 4000..8000 ms. setTimeout drift at these scales is
+    // inaudible; the layer is garnish, not load-bearing.
+    const nextMs = 4000 + Math.random() * 4000;
+    this._breathTimer = setTimeout(() => {
+      this._breathTimer = null;
+      if (!this.humanLayer || !this.humanLayerOn || !this.ctx) return;
+      try {
+        const src = this.ctx.createBufferSource();
+        src.buffer = this.humanLayer.breathBuffer;
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 900;
+        lp.Q.value = 0.4;
+        const g = this.ctx.createGain();
+        g.gain.value = 0.03;
+        src.connect(lp).connect(g).connect(this.humanLayerBusGain);
+        const offset = Math.random() * 0.05;
+        src.start(this.ctx.currentTime + 0.02 + offset);
+        src.onended = () => {
+          try { src.disconnect(); } catch {}
+          try { lp.disconnect(); } catch {}
+          try { g.disconnect(); } catch {}
+        };
+      } catch {}
+      this._scheduleBreath();
+    }, nextMs);
+  }
+
+  /** Toggle the muffle + wind + breath layer with a short fade. Mirrors
+   *  setAmbientOn; a mid-call re-assert is a cheap no-op ramp. */
+  setHumanLayerOn(on, { fadeMs = FADE_MS_DEFAULT } = {}) {
+    if (!this.ctx || !this.humanLayerEnvelopeGain) {
+      this.humanLayerOn = !!on;
+      return;
+    }
+    if (on && !this.humanLayer) {
+      try { this._buildHumanLayer(); } catch {}
+    }
+    this.humanLayerOn = !!on;
+    const gain = this.humanLayerEnvelopeGain.gain;
+    const now = this.ctx.currentTime;
+    try { gain.cancelScheduledValues(now); } catch {}
+    gain.setValueAtTime(gain.value, now);
+    const target = on ? 1 : 0;
+    const timeConst = Math.max(0.01, (fadeMs / 1000) / 3);
+    gain.setTargetAtTime(target, now, timeConst);
+    // Scheduler lifecycle: start when turning on (if not already running);
+    // clear on turn-off.
+    if (on) {
+      if (!this._breathTimer) this._scheduleBreath();
+    } else {
+      if (this._breathTimer) { clearTimeout(this._breathTimer); this._breathTimer = null; }
+    }
+  }
+
+  setHumanLayerVolume(v) {
+    this.humanLayerVolume = Math.max(0, Math.min(1, Number(v) || 0));
+    if (this.humanLayerBusGain) this.humanLayerBusGain.gain.value = this.humanLayerVolume;
   }
 
   setNoiseMode(mode) {
@@ -555,6 +805,14 @@ export class AudioPipeline extends EventTarget {
     }
     this._stopKeepAlive();
     this.stopCapture();
+    if (this._breathTimer) { clearTimeout(this._breathTimer); this._breathTimer = null; }
+    this.humanLayerOn = false;
+    if (this.humanLayer) {
+      try { this.humanLayer.muffleSrc.stop(); } catch {}
+      try { this.humanLayer.windSrc.stop(); } catch {}
+      try { this.humanLayer.windLfo.stop(); } catch {}
+      this.humanLayer = null;
+    }
     if (this.noiseNode) { try { this.noiseNode.stop(); } catch {} this.noiseNode = null; }
     if (this.ctx) { try { await this.ctx.close(); } catch {} this.ctx = null; }
   }

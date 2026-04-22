@@ -2,7 +2,7 @@
 
 const { LIVE_MODEL_ID } = require('./gemini-config');
 const { publicPersonas, DEFAULT_PERSONA_ID } = require('./personas');
-const { GEMINI_TRANSCRIPTION, SHOW_TEXT, STT_BACKEND } = require('./server-flags');
+const { GEMINI_TRANSCRIPTION, SHOW_TEXT, STT_BACKEND, HUMAN_CALL_LAYER } = require('./server-flags');
 
 /** Small JSON config endpoint so the client knows which persona list to render. */
 function handleConfig(req, res) {
@@ -22,7 +22,8 @@ function handleConfig(req, res) {
     // Feature flags — browser mirrors them to decide what to render.
     flags: {
       geminiTranscription: !!GEMINI_TRANSCRIPTION,
-      showText: !!SHOW_TEXT
+      showText: !!SHOW_TEXT,
+      humanCallLayer: !!HUMAN_CALL_LAYER
     }
   }));
 }

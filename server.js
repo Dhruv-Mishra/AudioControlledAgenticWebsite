@@ -98,7 +98,8 @@ const SPA_ROUTES = new Set([
   '/index.html',
   '/carriers.html',
   '/negotiate.html',
-  '/contact.html'
+  '/contact.html',
+  '/map.html'
 ]);
 
 // Assets under these paths are content-addressed (esbuild hashes chunks) or

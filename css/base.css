@@ -7,6 +7,7 @@
 html, body {
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
 }
 
 html {
@@ -336,8 +337,9 @@ code, pre, .mono {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     padding-bottom: var(--sp-1);
-    scrollbar-width: thin;
+    scrollbar-width: none;
   }
+  .app-nav::-webkit-scrollbar { display: none; }
   .app-nav a {
     white-space: nowrap;
     padding: var(--sp-1) var(--sp-2);

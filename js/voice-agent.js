@@ -232,7 +232,8 @@ export class VoiceAgent extends EventTarget {
     // match the server defaults so pre-flag UI doesn't flash the wrong state.
     this.flags = {
       geminiTranscription: false,
-      showText: true
+      showText: true,
+      humanCallLayer: true
     };
     // Local Web Speech transcriber — USER side only. Instantiated lazily in
     // init() only when the server disabled Gemini transcription AND
@@ -274,6 +275,11 @@ export class VoiceAgent extends EventTarget {
 
     this.compressionEnabled = typeof (restored && restored.compression) === 'boolean'
       ? restored.compression : DEFAULT_COMPRESSION_ENABLED;
+    // Compression strength (0..100). Prefer localStorage → session blob
+    // → legacy boolean fallback (true→50, false→0) → default 50.
+    this.compressionStrength = this._loadCompressionStrength(restored);
+    // Keep the boolean derived so older call-sites stay consistent.
+    this.compressionEnabled = this.compressionStrength > 0;
     this.noiseMode = (restored && typeof restored.noise === 'string')
       ? restored.noise : DEFAULT_NOISE_MODE;
     this.noiseVolume = Number((restored && restored.noiseVolume) ?? NaN);
@@ -309,6 +315,10 @@ export class VoiceAgent extends EventTarget {
     this.liveStartedAt = null;
     this.liveIdleTimer = null;
     this.liveLastVoiceAt = null;
+    // Track last-asserted human-call layer state so _updateAmbient only
+    // emits `ambient-changed` on actual transitions (not phantom re-asserts
+    // at init time).
+    this._ambientLayerOn = false;
 
     this.metrics = {
       framesIn: 0,
@@ -327,7 +337,11 @@ export class VoiceAgent extends EventTarget {
       onToolNote: (s) => this._logTool(s),
       // Live getter so the flag change after init() takes effect without
       // having to rebuild the registry.
-      showText: () => !!this.flags.showText
+      showText: () => !!this.flags.showText,
+      // Live getter for the transcript display mode. ToolRegistry only
+      // emits UI notes when this returns 'full'; off/captions modes keep
+      // the transcript clean. Tool execution itself is unaffected.
+      transcriptMode: () => this.getTranscriptMode()
     });
 
     // Wrap the registry's tool dispatch so activity indicator + other
@@ -415,7 +429,15 @@ export class VoiceAgent extends EventTarget {
 
   /** Create + resume AudioContext synchronously from a user gesture. */
   unlockAudioSync() {
-    return this.pipeline.unlockAudioSync();
+    const ctx = this.pipeline.unlockAudioSync();
+    // Push the persisted compression strength into the newly-built
+    // playback graph. The pipeline self-applies its own default (50) in
+    // _buildPlaybackGraph, so this overwrite is only meaningful when the
+    // user had a different value in localStorage.
+    if (ctx && typeof this.compressionStrength === 'number') {
+      try { this.pipeline.setCompressionStrength(this.compressionStrength); } catch {}
+    }
+    return ctx;
   }
   async unlockAudio() {
     return this.pipeline.ensureCtx();
@@ -652,10 +674,47 @@ export class VoiceAgent extends EventTarget {
   }
 
   setCompressionEnabled(on) {
-    this.compressionEnabled = !!on;
-    this.pipeline.setBandPassEnabled(this.compressionEnabled);
+    // Binary callers map to strength 50 (default phone) or 0 (pass-through).
+    this.setCompressionStrength(on ? 50 : 0);
+  }
+
+  /** Continuous-strength setter. 0 = pass-through, 50 = default phone,
+   *  100 = heavy walkie-talkie. Ramps params (no clicks), persists to
+   *  localStorage + session blob, broadcasts `compression-changed`. */
+  setCompressionStrength(strength) {
+    const s = Math.max(0, Math.min(100, Number(strength) || 0));
+    if (s === this.compressionStrength) {
+      // Still republish so UI can reconcile disabled state if caller
+      // toggled the parent switch without changing strength.
+      this.compressionEnabled = s > 0;
+      this.pipeline.setCompressionStrength(s);
+      return;
+    }
+    this.compressionStrength = s;
+    this.compressionEnabled = s > 0;
+    this.pipeline.setCompressionStrength(s);
+    try { localStorage.setItem('jarvis.compressionStrength', String(s)); } catch {}
     this._persistSessionBlob();
-    this._publishEvent('compression-changed', { enabled: this.compressionEnabled });
+    this._publishEvent('compression-changed', { strength: s, enabled: this.compressionEnabled });
+  }
+
+  getCompressionStrength() { return this.compressionStrength; }
+
+  _loadCompressionStrength(restored) {
+    try {
+      const raw = localStorage.getItem('jarvis.compressionStrength');
+      if (raw != null && raw !== '') {
+        const n = Number(raw);
+        if (Number.isFinite(n)) return Math.max(0, Math.min(100, n));
+      }
+    } catch {}
+    if (restored && Number.isFinite(Number(restored.compressionStrength))) {
+      return Math.max(0, Math.min(100, Number(restored.compressionStrength)));
+    }
+    if (restored && typeof restored.compression === 'boolean') {
+      return restored.compression ? 50 : 0;
+    }
+    return DEFAULT_COMPRESSION_ENABLED ? 50 : 0;
   }
   setNoiseMode(mode) {
     this.noiseMode = String(mode || 'off');
@@ -1006,6 +1065,7 @@ export class VoiceAgent extends EventTarget {
       persona: this.personaId,
       muted: !!this.muted,
       compression: !!this.compressionEnabled,
+      compressionStrength: this.compressionStrength,
       noise: this.noiseMode,
       noiseVolume: this.noiseVolume,
       lastPath: this._currentPathname || location.pathname,
@@ -1192,6 +1252,7 @@ export class VoiceAgent extends EventTarget {
       if (cfg.flags && typeof cfg.flags === 'object') {
         this.flags.geminiTranscription = !!cfg.flags.geminiTranscription;
         this.flags.showText = cfg.flags.showText !== false; // default true
+        this.flags.humanCallLayer = cfg.flags.humanCallLayer !== false; // default true
       }
       // STT backend preference — used by stt-controller.js.
       if (typeof cfg.sttBackend === 'string') {
@@ -1398,21 +1459,41 @@ export class VoiceAgent extends EventTarget {
     this._publishEvent('state', { state, detail });
   }
 
-  /** Single place that maps agent state → AudioPipeline.setAmbientOn.
-   *  Called from _setState on every transition AND from setNoiseMode
-   *  (so flipping noise mode mid-call reflects immediately). Idempotent:
-   *  setAmbientOn with the same target is a cheap no-op ramp. */
+  /** Single place that maps agent state → AudioPipeline.setAmbientOn +
+   *  setHumanLayerOn. Called from _setState on every transition AND from
+   *  setNoiseMode (so flipping noise mode mid-call reflects immediately).
+   *
+   *  Ambient continuity invariant (Oracle v2 Decision 2):
+   *  - Primary ambient AND the new human-call layer BOTH run continuously
+   *    while `isInCall()` is true. Mid-call state transitions re-assert
+   *    the SAME steady target with fadeMs=40 — the setTargetAtTime ramp
+   *    is a no-op at identical targets, so there is no audible dip during
+   *    DIALING → LIVE_OPENING → LIVE_READY → MODEL_* → TOOL_EXECUTING →
+   *    RECONNECTING transitions.
+   *  - Fade-in (220 ms) fires only on the IDLE/ERROR → in-call entry edge.
+   *  - Fade-out (300 ms) fires only on the in-call → IDLE/ERROR exit edge.
+   *  - `CALL_ACTIVE_STATES` at line 105 is the canonical list. Any new
+   *    mid-call state MUST be added there so this invariant holds.
+   *  - The human layer is orthogonal to `noiseMode`: muffle/wind/breath
+   *    run regardless of which primary bed (office/phone/static) is
+   *    selected. A `humanCallLayer` flag from /api/config can disable it. */
   _updateAmbient({ wasActive = CALL_ACTIVE_STATES.has(this.state) } = {}) {
     const shouldBeOn = this.isInCall() && this.noiseMode !== 'off';
-    // Use the fade-in constant only when we were NOT previously in a
-    // call state; on transitions between call states (e.g. LIVE_READY ↔
-    // MODEL_SPEAKING) we keep ambient steadily at target with a
-    // near-instant ramp. The AudioPipeline's setTargetAtTime is already
-    // smooth so even re-asserting the same target mid-call is safe.
     const fadeMs = shouldBeOn
       ? (wasActive ? 40 : AMBIENT_FADE_IN_MS)
       : AMBIENT_FADE_OUT_MS;
     this.pipeline.setAmbientOn(shouldBeOn, { fadeMs });
+    // Human-call layer piggybacks on isInCall() — runs continuously
+    // regardless of noiseMode selection. Honours the server flag if off.
+    const humanShouldBeOn = this.isInCall() && this.flags.humanCallLayer !== false;
+    const humanFadeMs = humanShouldBeOn
+      ? (wasActive ? 40 : AMBIENT_FADE_IN_MS)
+      : AMBIENT_FADE_OUT_MS;
+    this.pipeline.setHumanLayerOn(humanShouldBeOn, { fadeMs: humanFadeMs });
+    if (this._ambientLayerOn !== humanShouldBeOn) {
+      this._ambientLayerOn = humanShouldBeOn;
+      this._publishEvent('ambient-changed', { on: humanShouldBeOn });
+    }
   }
 
   _publishEvent(name, payload) {

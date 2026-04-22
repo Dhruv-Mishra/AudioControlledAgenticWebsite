@@ -194,23 +194,91 @@
 }
 .callback-item .when { color: var(--color-accent); font-family: var(--font-mono); font-size: var(--fs-xs); }
 
-/* Map placeholder (dispatch) */
-.map-placeholder {
-  height: 280px;
-  background: repeating-linear-gradient(
-    45deg,
-    var(--color-bg-elev-2),
-    var(--color-bg-elev-2) 12px,
-    var(--color-bg-elev-1) 12px,
-    var(--color-bg-elev-1) 24px
-  );
+/* Dispatch "fleet map" preview card — links to /map.html. */
+.dispatch-map-card {
+  background: var(--color-bg-elev-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  overflow: hidden;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-dim);
+  flex-direction: column;
+  min-height: 220px;
+}
+.dispatch-map-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  background: linear-gradient(
+    180deg,
+    var(--color-bg-elev-1) 0%,
+    var(--color-bg-elev-2) 100%
+  );
+}
+.dispatch-map-card-title {
   font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.dispatch-map-card-sub {
+  font-size: var(--fs-xs);
+  color: var(--color-text-dim);
+  margin-top: 2px;
+}
+.dispatch-map-lanes {
+  list-style: none;
+  margin: 0;
+  padding: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+.dispatch-map-lanes:empty::before {
+  content: "No active lanes.";
+  display: block;
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--color-text-dim);
+  font-style: italic;
+  font-size: var(--fs-sm);
+}
+.dispatch-map-lane {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  transition: background var(--dur-fast) var(--ease-out-expo);
+}
+.dispatch-map-lane:hover { background: var(--color-bg-elev-2); }
+.dispatch-map-lane .lane-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  flex-shrink: 0;
+}
+.dispatch-map-lane[data-status="in_transit"] .lane-dot { background: var(--color-info); }
+.dispatch-map-lane[data-status="booked"]     .lane-dot { background: var(--color-accent); }
+.dispatch-map-lane[data-status="pending"]    .lane-dot { background: var(--color-warn); }
+.dispatch-map-lane[data-status="delayed"]    .lane-dot { background: var(--color-danger); }
+.dispatch-map-lane[data-status="delivered"]  .lane-dot { background: var(--color-text-dim); }
+.dispatch-map-lane .lane-route {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dispatch-map-lane .lane-id {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  letter-spacing: var(--tracking-wide);
 }
 
 /* ---- Mobile page polish (≤ 640px) ---- */
@@ -234,7 +302,8 @@
   .detail-kv { grid-template-columns: 100px 1fr; font-size: var(--fs-xs); }
   .detail-actions { flex-direction: column; }
   .detail-actions .btn { width: 100%; }
-  .map-placeholder { height: 160px; }
+  .dispatch-map-card { min-height: 180px; }
+  .dispatch-map-lanes { max-height: 160px; }
   .convo-log { height: 200px; }
   .rate-readout { padding: var(--sp-3); }
   .rate-readout .amount { font-size: var(--fs-xl); }

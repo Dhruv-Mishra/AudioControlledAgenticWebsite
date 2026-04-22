@@ -63,6 +63,15 @@ const CARRIER_ELEMENTS = [
   { id: 'carriers.card.C-118.shortlist', role: 'button', label: 'Shortlist' }
 ];
 
+const MAP_ELEMENTS = [
+  { id: 'map.canvas', role: 'application', label: 'Freight map' },
+  { id: 'map.filter.loads', role: 'button', label: 'Loads' },
+  { id: 'map.filter.carriers', role: 'button', label: 'Carriers' },
+  { id: 'map.filter.lanes', role: 'button', label: 'Lanes' },
+  { id: 'map.reset_view', role: 'button', label: 'Reset view' },
+  { id: 'map.marker.LD-10824', role: 'button', label: 'Load LD-10824 Chicago → Dallas' }
+];
+
 const CASES = [
   {
     name: 'navigate to carriers',
@@ -158,6 +167,82 @@ const CASES = [
     text: 'Switch to dark mode, please.',
     expect: (tc) => tc.some((c) => c.name === 'set_theme' && /dark/i.test(String(c.args?.theme || ''))) ||
                    tc.some((c) => c.name === 'run_palette_action' && /theme/i.test(String(c.args?.action_id || '')))
+  },
+  // ---- v2 tools: map navigation + continuous compression strength. ----
+  {
+    name: 'map_focus on Chicago',
+    page: '/map.html',
+    elements: MAP_ELEMENTS,
+    text: 'Center the map on Chicago.',
+    expect: (tc) => tc.some((c) => c.name === 'map_focus' && /chicago/i.test(String(c.args?.target || '')))
+  },
+  {
+    name: 'map_highlight_load for a specific load',
+    page: '/map.html',
+    elements: MAP_ELEMENTS,
+    text: 'Show me load LD-10824 on the map.',
+    expect: (tc) => tc.some((c) => c.name === 'map_highlight_load' && /LD-?10824/i.test(String(c.args?.load_id || ''))) ||
+                   tc.some((c) => c.name === 'map_focus' && /10824/i.test(String(c.args?.target || '')))
+  },
+  {
+    name: 'map_show_layer hides carriers',
+    page: '/map.html',
+    elements: MAP_ELEMENTS,
+    text: 'Hide the carriers on the map — just show loads.',
+    expect: (tc) => tc.some((c) => c.name === 'map_show_layer' && /carrier/i.test(String(c.args?.layer || '')) && c.args?.visible === false)
+  },
+  {
+    name: 'map_focus by state abbreviation',
+    page: '/map.html',
+    elements: MAP_ELEMENTS,
+    text: 'Zoom the map out to Texas.',
+    expect: (tc) => tc.some((c) => c.name === 'map_focus' && /^(texas|tx)$/i.test(String(c.args?.target || '').trim()))
+  },
+  {
+    name: 'map_focus by load id routes through focusTarget',
+    page: '/map.html',
+    elements: MAP_ELEMENTS,
+    text: 'Center the map on load LD-10824 without flashing it.',
+    expect: (tc) => tc.some((c) => c.name === 'map_focus' && /LD-?10824/i.test(String(c.args?.target || ''))) ||
+                   tc.some((c) => c.name === 'map_highlight_load' && /LD-?10824/i.test(String(c.args?.load_id || '')))
+  },
+  {
+    name: 'map_show_layer toggles delayed overlay on',
+    page: '/map.html',
+    elements: MAP_ELEMENTS,
+    text: 'Highlight just the delayed shipments on the map.',
+    expect: (tc) => tc.some((c) => c.name === 'map_show_layer' && /delayed/i.test(String(c.args?.layer || '')) && c.args?.visible === true) ||
+                   tc.some((c) => c.name === 'filter_loads' && /delayed/i.test(String(c.args?.status || '')))
+  },
+  {
+    name: 'map tool auto-navigates from dispatch page',
+    page: '/',
+    elements: DISPATCH_ELEMENTS,
+    text: 'Pull up Dallas on the map for me.',
+    expect: (tc) => tc.some((c) => c.name === 'map_focus' && /dallas/i.test(String(c.args?.target || ''))) ||
+                   tc.some((c) => c.name === 'navigate' && /map/i.test(String(c.args?.path || '')))
+  },
+  {
+    name: 'map_highlight_load confirms ambiguous id',
+    page: '/map.html',
+    elements: MAP_ELEMENTS,
+    text: 'Show me load L D one oh eight two four.',
+    expect: (tc) => tc.some((c) => c.name === 'map_highlight_load' && /LD-?10824/i.test(String(c.args?.load_id || ''))) ||
+                   tc.length === 0 // acceptable: confirm phonetics before calling
+  },
+  {
+    name: 'set_compression_strength to crustier',
+    page: '/',
+    elements: DISPATCH_ELEMENTS,
+    text: 'Make yourself sound crustier — way more phone-line feel.',
+    expect: (tc) => tc.some((c) => c.name === 'set_compression_strength' && Number(c.args?.strength) >= 50)
+  },
+  {
+    name: 'set_compression_strength to clean',
+    page: '/',
+    elements: DISPATCH_ELEMENTS,
+    text: 'Drop the phone filter entirely — studio clean, please.',
+    expect: (tc) => tc.some((c) => c.name === 'set_compression_strength' && Number(c.args?.strength) <= 10)
   }
 ];
 

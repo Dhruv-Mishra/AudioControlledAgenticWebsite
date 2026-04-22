@@ -136,6 +136,50 @@ function buildPageContextText({ page, title, elements }) {
   return head + chunk + tail;
 }
 
+/** Lightweight type-guard for map-tool args. Returns an error string when the
+ *  args are obviously malformed (wrong type / out-of-enum), else null. The
+ *  widget does full validation + canonical error envelopes; this just saves a
+ *  round-trip on the easy failures and keeps the model from learning bad
+ *  shapes. */
+const MAP_LAYER_ENUM = new Set(['loads', 'carriers', 'lanes', 'delayed']);
+function validateMapToolArgs(name, args) {
+  if (!args || typeof args !== 'object') return null;
+  if (name === 'map_show_layer') {
+    const layer = args.layer;
+    if (typeof layer !== 'string' || !layer.trim()) {
+      return 'map_show_layer requires a string "layer" (one of: loads, carriers, lanes, delayed).';
+    }
+    if (!MAP_LAYER_ENUM.has(layer.trim().toLowerCase())) {
+      return `Layer "${String(layer).slice(0, 40)}" not recognised. One of: loads, carriers, lanes, delayed.`;
+    }
+    if (typeof args.visible !== 'boolean') {
+      return 'map_show_layer requires "visible" as a boolean (true or false), not ' + typeof args.visible + '.';
+    }
+    return null;
+  }
+  if (name === 'map_highlight_load') {
+    const id = args.load_id;
+    if (typeof id !== 'string' || !id.trim()) {
+      return 'map_highlight_load requires a string "load_id" like "LD-10824".';
+    }
+    return null;
+  }
+  if (name === 'map_focus') {
+    const hasTarget = typeof args.target === 'string' && args.target.trim().length > 0;
+    const latNum = Number(args.lat);
+    const lngNum = Number(args.lng);
+    const hasCoords = Number.isFinite(latNum) && Number.isFinite(lngNum);
+    if (!hasTarget && !hasCoords) {
+      return 'map_focus requires either a string "target" (city, state, or id) or numeric lat+lng.';
+    }
+    if (hasCoords && (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180)) {
+      return 'map_focus lat/lng out of range (lat -90..90, lng -180..180).';
+    }
+    return null;
+  }
+  return null;
+}
+
 function isErrorEphemeral(err) {
   const msg = (err && (err.message || err.toString())) || '';
   const code = err && err.code;
@@ -235,6 +279,15 @@ function attach(browserWs, req, env) {
         );
       }
       sendToolResponse(id, name, { ok: true, result: { count: out.length, elements: out } });
+      return;
+    }
+
+    // Short-circuit obviously-malformed map-tool args server-side so the model
+    // sees a clean error envelope without a browser round-trip. Keeps shape
+    // identical to what the widget returns (ok:false + error string).
+    const guardErr = validateMapToolArgs(name, args);
+    if (guardErr) {
+      sendToolResponse(id, name, { ok: false, error: guardErr });
       return;
     }
 

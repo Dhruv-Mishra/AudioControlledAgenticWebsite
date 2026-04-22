@@ -15,6 +15,8 @@
  *                                  Web Speech API for the user side when
  *                                  SHOW_TEXT=true).
  *   - SHOW_TEXT=true              (transcript panel + tool args visible).
+ *   - HUMAN_CALL_LAYER=true       (procedural muffle + wind + breath bed
+ *                                  layered over ambient during a call).
  *
  * The matrix honoured end-to-end (see deploy/README.md § Env vars):
  *
@@ -37,6 +39,7 @@ function parseBool(raw, fallback) {
 // Snapshot once — env vars are read-only at runtime.
 const GEMINI_TRANSCRIPTION = parseBool(process.env.GEMINI_TRANSCRIPTION, false);
 const SHOW_TEXT = parseBool(process.env.SHOW_TEXT, true);
+const HUMAN_CALL_LAYER = parseBool(process.env.HUMAN_CALL_LAYER, true);
 
 // STT backend preference for the browser-side on-device pipeline.
 // - 'whisper'    (default) — client uses @xenova/transformers Whisper in a
@@ -53,7 +56,7 @@ const STT_BACKEND = parseSttBackend(process.env.STT_BACKEND);
 
 // Boot-time summary so ops can see exactly what the process is honouring.
 process.stdout.write(
-  `[server-flags] GEMINI_TRANSCRIPTION=${GEMINI_TRANSCRIPTION} SHOW_TEXT=${SHOW_TEXT} STT_BACKEND=${STT_BACKEND}\n`
+  `[server-flags] GEMINI_TRANSCRIPTION=${GEMINI_TRANSCRIPTION} SHOW_TEXT=${SHOW_TEXT} STT_BACKEND=${STT_BACKEND} HUMAN_CALL_LAYER=${HUMAN_CALL_LAYER}\n`
 );
 
-module.exports = { GEMINI_TRANSCRIPTION, SHOW_TEXT, STT_BACKEND, parseBool };
+module.exports = { GEMINI_TRANSCRIPTION, SHOW_TEXT, STT_BACKEND, HUMAN_CALL_LAYER, parseBool };

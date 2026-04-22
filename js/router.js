@@ -44,6 +44,12 @@ const ROUTES = Object.freeze({
     title: 'Contact Support — Dhruv FreightOps',
     partial: '/partials/contact.html',
     load: () => import('./page-contact.js')
+  },
+  '/map.html': {
+    name: 'map',
+    title: 'Freight Map — Dhruv FreightOps',
+    partial: '/partials/map.html',
+    load: () => import('./page-map.js')
   }
 });
 

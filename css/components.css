@@ -480,6 +480,7 @@ table.table {
   padding: var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-elev-1);
+  overflow-x: hidden;
 }
 .voice-chips[hidden] { display: none; }
 .voice-chips.is-visible { display: flex; }
@@ -498,6 +499,9 @@ table.table {
               color var(--dur-fast) var(--ease-out-expo),
               border-color var(--dur-fast) var(--ease-out-expo);
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chip-btn:hover {
   background: var(--color-accent-soft);
