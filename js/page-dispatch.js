@@ -2,6 +2,8 @@
 // The VoiceAgent lives in the shell (ui.js) and is passed in via enter();
 // this module only wires its own DOM + domain tools.
 
+import { restoreFiltersFromUrl } from './tool-registry.js';
+
 const STATUS_LABEL = {
   in_transit: { label: 'In transit', chip: 'info' },
   booked:     { label: 'Booked',     chip: 'neutral' },
@@ -214,6 +216,19 @@ export async function enter(root, { voiceAgent }) {
       ok: false, error: 'schedule_callback is only available on the Contact page.'
     }));
   }
+
+  // Restore filters from URL query (?dispatch.status=delayed, etc) after
+  // the filter inputs have been bound.
+  restoreFiltersFromUrl('dispatch');
+
+  // Register per-page quick-action chips (best-effort — module is dynamic).
+  import('./quick-chips.js').then((chips) => {
+    chips.registerChips(voiceAgent, [
+      { id: 'dispatch.show_delayed', label: 'Show delayed', tool: 'filter_loads', args: { status: 'delayed' } },
+      { id: 'dispatch.transit_tx', label: 'In-transit TX', tool: 'filter_loads', args: { status: 'in_transit', lane_contains: 'TX' } },
+      { id: 'dispatch.export', label: 'Export CSV', tool: 'click', args: { agent_id: 'dispatch.action.export' } }
+    ]);
+  }).catch(() => {});
 }
 
 export function exit() {
@@ -223,6 +238,7 @@ export function exit() {
     agentRef.toolRegistry.unregisterDomain('submit_quote');
     agentRef.toolRegistry.unregisterDomain('schedule_callback');
   }
+  import('./quick-chips.js').then((chips) => chips.clearChips()).catch(() => {});
   state = null;
   agentRef = null;
 }

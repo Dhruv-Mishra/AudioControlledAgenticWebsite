@@ -21,7 +21,7 @@
   box-shadow: var(--shadow-overlay);
   display: flex;
   flex-direction: column;
-  z-index: 200;
+  z-index: var(--z-dock);
   overflow: hidden;
   transition: transform var(--dur-base) var(--ease-out-expo);
 }

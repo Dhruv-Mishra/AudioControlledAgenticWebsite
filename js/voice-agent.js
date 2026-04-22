@@ -330,6 +330,25 @@ export class VoiceAgent extends EventTarget {
       showText: () => !!this.flags.showText
     });
 
+    // Wrap the registry's tool dispatch so activity indicator + other
+    // listeners can observe tool-call lifecycle events. The original
+    // handler is preserved; we just emit bracketing events.
+    const origHandle = this.toolRegistry.handleToolCall.bind(this.toolRegistry);
+    this.toolRegistry.handleToolCall = async (payload) => {
+      const name = (payload && payload.name) || '';
+      this._publishEvent('tool-call-start', { name, id: payload && payload.id });
+      try {
+        return await origHandle(payload);
+      } finally {
+        this._publishEvent('tool-call-end', { name, id: payload && payload.id });
+      }
+    };
+
+    // Transcript mode: 'off' (hidden), 'captions' (overlay only), 'full'
+    // (transcript panel). Default off-first-run per upgrade spec.
+    // `localStorage['jarvis.ui.transcriptMode']` is the persistence key.
+    this.transcriptMode = this._loadTranscriptMode();
+
     if (this.transcript && restored && Array.isArray(restored.transcript) && restored.transcript.length) {
       this.transcript.hydrate({ lines: restored.transcript });
     }
@@ -357,6 +376,12 @@ export class VoiceAgent extends EventTarget {
   getState() { return this.state; }
   getMode() { return this.mode; }
   isMuted() { return !!this.muted; }
+  /** Current transcript display mode — 'off' | 'captions' | 'full'. Falls
+   *  back to 'off' when the server flag `showText` is disabled. */
+  getTranscriptMode() {
+    if (!this.flags.showText) return 'off';
+    return this.transcriptMode || 'off';
+  }
   isPlaybackBlocked() { return this.pipeline.isPlaybackBlocked(); }
   getCompressionEnabled() { return !!this.compressionEnabled; }
   getNoiseMode() { return this.noiseMode; }
@@ -458,8 +483,17 @@ export class VoiceAgent extends EventTarget {
     }
 
     // Start local STT (user side only) — only runs when server has
-    // GEMINI_TRANSCRIPTION=false AND SHOW_TEXT=true.
-    if (this.localStt && this.localStt.supported) this.localStt.start();
+    // GEMINI_TRANSCRIPTION=false AND SHOW_TEXT=true. Try the Whisper
+    // controller first; fall back to Web Speech if unavailable.
+    this._ensureSttController().then((ctrl) => {
+      if (ctrl) {
+        try { ctrl.start(); } catch {}
+      } else if (this.localStt && this.localStt.supported) {
+        this.localStt.start();
+      }
+    }).catch(() => {
+      if (this.localStt && this.localStt.supported) this.localStt.start();
+    });
 
     // Open the WS (non-blocking — onopen handles the rest).
     this._connect();
@@ -494,6 +528,9 @@ export class VoiceAgent extends EventTarget {
     clearTimeout(this.dialTimer); this.dialTimer = null;
     clearInterval(this.liveIdleTimer); this.liveIdleTimer = null;
     if (this.localStt) this.localStt.stop();
+    if (this._sttController) {
+      try { this._sttController.stop(); } catch {}
+    }
 
     // Flush any in-flight playback (no more Jarvis audio).
     this.pipeline.flushPlayback();
@@ -537,6 +574,9 @@ export class VoiceAgent extends EventTarget {
     clearTimeout(this.dialTimer); this.dialTimer = null;
     clearInterval(this.liveIdleTimer); this.liveIdleTimer = null;
     if (this.localStt) this.localStt.stop();
+    if (this._sttController) {
+      try { this._sttController.stop(); } catch {}
+    }
     this.pipeline.flushPlayback();
     this.pipeline.stopCapture();
     try { if (this.ws) this.ws.close(); } catch {}
@@ -567,6 +607,39 @@ export class VoiceAgent extends EventTarget {
   }
 
   // ---------- Preferences ----------
+
+  _loadTranscriptMode() {
+    try {
+      const raw = localStorage.getItem('jarvis.ui.transcriptMode');
+      if (raw === 'off' || raw === 'captions' || raw === 'full') return raw;
+    } catch {}
+    return 'off';
+  }
+
+  /** Persist + broadcast a transcript display mode. Server override takes
+   *  precedence at render time (see `getTranscriptMode`). */
+  setTranscriptMode(mode) {
+    const next = (mode === 'off' || mode === 'captions' || mode === 'full') ? mode : 'off';
+    if (next === this.transcriptMode) {
+      this._publishEvent('transcript-mode-changed', { mode: this.getTranscriptMode(), serverForced: !this.flags.showText });
+      return next;
+    }
+    this.transcriptMode = next;
+    try { localStorage.setItem('jarvis.ui.transcriptMode', next); } catch {}
+    this._publishEvent('transcript-mode-changed', { mode: this.getTranscriptMode(), serverForced: !this.flags.showText });
+    return next;
+  }
+
+  /** Shortcut for tool handlers — flip captions on/off without touching 'full'. */
+  setCaptionsEnabled(enabled) {
+    const curr = this.transcriptMode;
+    if (enabled) {
+      if (curr !== 'full') this.setTranscriptMode('captions');
+    } else {
+      if (curr === 'captions') this.setTranscriptMode('off');
+    }
+    return this.getTranscriptMode();
+  }
 
   clearTranscript() {
     if (this.transcript) this.transcript.clearAll();
@@ -661,6 +734,9 @@ export class VoiceAgent extends EventTarget {
     this.pipeline.setMuted(next);
     // Local STT follows mute — no need to transcribe silence.
     if (this.localStt && this.isInCall()) this.localStt.setMuted(next);
+    if (this._sttController && this.isInCall()) {
+      try { this._sttController.setMuted(next); } catch {}
+    }
     if (next && this.setupComplete) {
       this._sendJson({ type: 'stream_end' });
     }
@@ -989,12 +1065,21 @@ export class VoiceAgent extends EventTarget {
   }
 
   _onTranscriptDelta(msg) {
-    if (!this.transcript) return;
-    this.transcript.addDelta({
-      from: msg.from === 'agent' ? 'agent' : 'user',
-      delta: msg.delta,
-      finished: !!msg.finished
-    });
+    if (this.transcript) {
+      this.transcript.addDelta({
+        from: msg.from === 'agent' ? 'agent' : 'user',
+        delta: msg.delta,
+        finished: !!msg.finished
+      });
+    }
+    // Republish agent-side deltas so the captions overlay (and any other
+    // listener) can consume without poking the DOM transcript.
+    if (msg && msg.from === 'agent') {
+      this._publishEvent('agent-delta', {
+        text: String(msg.delta || ''),
+        finished: !!msg.finished
+      });
+    }
   }
 
   _sendJson(obj) {
@@ -1012,6 +1097,11 @@ export class VoiceAgent extends EventTarget {
   }
 
   _sendAudio(int16) {
+    // Feed PCM to the on-device STT controller FIRST (non-blocking).
+    // The controller handles VAD gating internally.
+    if (this._sttController && typeof this._sttController.feedPcm === 'function' && !this.muted) {
+      try { this._sttController.feedPcm(int16); } catch {}
+    }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     if (this.muted) return;
     const view = new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength);
@@ -1103,6 +1193,10 @@ export class VoiceAgent extends EventTarget {
         this.flags.geminiTranscription = !!cfg.flags.geminiTranscription;
         this.flags.showText = cfg.flags.showText !== false; // default true
       }
+      // STT backend preference — used by stt-controller.js.
+      if (typeof cfg.sttBackend === 'string') {
+        this.flags.sttBackend = cfg.sttBackend === 'web-speech' ? 'web-speech' : 'whisper';
+      }
     } catch {}
     this._setupKeyHotkey();
     this._bootWakeWord();
@@ -1113,7 +1207,9 @@ export class VoiceAgent extends EventTarget {
   }
 
   /** Configure the local (browser-native) STT engine that transcribes USER
-   *  speech when GEMINI_TRANSCRIPTION=false AND SHOW_TEXT=true. Idempotent. */
+   *  speech when GEMINI_TRANSCRIPTION=false AND SHOW_TEXT=true. Idempotent.
+   *  Attempts to upgrade to the Whisper-based `stt-controller` when
+   *  available; falls back to Web Speech. */
   _initLocalStt() {
     const needLocal = this.flags.showText && !this.flags.geminiTranscription;
     if (!needLocal) {
@@ -1124,18 +1220,155 @@ export class VoiceAgent extends EventTarget {
     this.localStt = new LocalStt({ debug: DEBUG });
     if (!this.localStt.supported) {
       dlog('LocalStt unsupported — user-side transcript will be empty.');
-      return;
+    } else {
+      this.localStt.addEventListener('transcript', (ev) => {
+        const { text, finished } = ev.detail || {};
+        if (!this.transcript) return;
+        this.transcript.addDelta({ from: 'user', delta: text, finished: !!finished });
+        if (finished) {
+          // Mirror the Gemini-side contract — a finished line emits a
+          // transcript_event to the server for logging.
+          this._sendJson({ type: 'transcript_event', kind: 'final', text, at: Date.now() });
+        }
+      });
     }
-    this.localStt.addEventListener('transcript', (ev) => {
-      const { text, finished } = ev.detail || {};
-      if (!this.transcript) return;
-      this.transcript.addDelta({ from: 'user', delta: text, finished: !!finished });
-      if (finished) {
-        // Mirror the Gemini-side contract — a finished line emits a
-        // transcript_event to the server for logging.
-        this._sendJson({ type: 'transcript_event', kind: 'final', text, at: Date.now() });
+    // Try to upgrade to Whisper on the first placeCall. We don't import
+    // here to keep the initial bundle small — `placeCall` does the
+    // dynamic import on demand.
+    this._sttController = null;
+  }
+
+  /** Dynamic-import the on-device STT controller on the first placeCall.
+   *  Matches the contract in `specs/upgrade-stt-contract.md`. If the module
+   *  isn't available or init fails unrecoverably, we fall back to Web
+   *  Speech (`this.localStt`). Non-blocking. */
+  async _ensureSttController() {
+    if (this._sttController || this._sttControllerLoading) return this._sttController;
+    if (!(this.flags.showText && !this.flags.geminiTranscription)) return null;
+    this._sttControllerLoading = true;
+    try {
+      const mod = await import('./stt-controller.js');
+      if (!mod || typeof mod.SttController !== 'function') {
+        dlog('stt-controller missing SttController class; using LocalStt.');
+        this._sttControllerLoading = false;
+        return null;
       }
+      const ctrl = new mod.SttController({
+        debug: DEBUG,
+        backend: this.flags.sttBackend || 'whisper',
+        onPcmMicLevel: () => this.pipeline.readMicLevel()
+      });
+      this._sttController = ctrl;
+
+      let lastSegmentId = null;
+      ctrl.addEventListener('transcript', (ev) => {
+        const { text, finished, segmentId } = ev.detail || {};
+        if (!text) return;
+        // When a new segment starts, close the previous live user row so
+        // the next partial starts fresh (prevents the repeat-phrase bug).
+        if (this.transcript && segmentId && segmentId !== lastSegmentId) {
+          if (lastSegmentId) {
+            try { this.transcript.turnBreak(); } catch {}
+          }
+          lastSegmentId = segmentId;
+        }
+        if (this.transcript) {
+          this.transcript.addDelta({ from: 'user', delta: text, finished: !!finished });
+        }
+        if (finished) {
+          this._sendJson({ type: 'transcript_event', kind: 'final', text, at: Date.now() });
+        }
+      });
+      ctrl.addEventListener('progress', (ev) => {
+        const d = ev.detail || {};
+        dlog('stt progress', d.stage, d.loaded, '/', d.total);
+      });
+      ctrl.addEventListener('ready', (ev) => {
+        const backend = ev.detail && ev.detail.backend;
+        dlog('stt ready backend=' + backend);
+      });
+      ctrl.addEventListener('error', (ev) => {
+        const code = ev.detail && ev.detail.code;
+        dlog('stt error', code);
+        if (code === 'model_fetch') {
+          this._showSttRetryBanner(ctrl);
+        } else if (code === 'worker_crash') {
+          this._announce({ from: 'system', text: 'Transcription worker crashed. Continuing without captions.' });
+          try { ctrl.destroy && ctrl.destroy(); } catch {}
+          this._sttController = null;
+          if (this.localStt && this.localStt.supported) this.localStt.start();
+        } else if (code === 'no_backend') {
+          this._announce({ from: 'system', text: 'Transcription unavailable in this browser.' });
+          try { ctrl.destroy && ctrl.destroy(); } catch {}
+          this._sttController = null;
+        }
+      });
+      ctrl.addEventListener('needs_consent', () => this._showSttConsentBanner(ctrl));
+      ctrl.addEventListener('backend_changed', (ev) => {
+        const d = ev.detail || {};
+        dlog('stt backend_changed', d.from, '->', d.to, d.reason);
+      });
+
+      // Kick off init. This downloads the model on first call unless
+      // needs_consent is emitted and the user accepts later.
+      ctrl.init().catch((err) => {
+        dlog('stt init rejected', err && err.message);
+      });
+
+      this._sttControllerLoading = false;
+      return ctrl;
+    } catch (err) {
+      dlog('stt-controller import failed', err && err.message);
+      this._sttControllerLoading = false;
+      return null;
+    }
+  }
+
+  _showSttRetryBanner(ctrl) {
+    const el = document.getElementById('voice-error');
+    if (!el) return;
+    el.replaceChildren();
+    el.appendChild(document.createTextNode("Couldn't download transcription model. "));
+    const retry = document.createElement('button');
+    retry.textContent = 'Retry';
+    retry.setAttribute('data-agent-id', 'voice.stt.retry');
+    retry.style.marginLeft = '8px';
+    retry.addEventListener('click', () => {
+      el.hidden = true;
+      try { ctrl.init && ctrl.init({ acceptLargeDownload: true }); } catch {}
     });
+    el.appendChild(retry);
+    el.hidden = false;
+  }
+
+  _showSttConsentBanner(ctrl) {
+    const el = document.getElementById('voice-error');
+    if (!el) return;
+    el.replaceChildren();
+    el.appendChild(document.createTextNode('Download 40 MB transcription model for better captions? '));
+    const dl = document.createElement('button');
+    dl.textContent = 'Download';
+    dl.setAttribute('data-agent-id', 'voice.stt.consent.accept');
+    dl.style.marginLeft = '8px';
+    dl.addEventListener('click', () => {
+      try { ctrl.init && ctrl.init({ acceptLargeDownload: true }); } catch {}
+      try { localStorage.setItem('jarvis.stt.opted', '1'); } catch {}
+      el.hidden = true;
+    });
+    const skip = document.createElement('button');
+    skip.textContent = 'Skip';
+    skip.setAttribute('data-agent-id', 'voice.stt.consent.skip');
+    skip.style.marginLeft = '8px';
+    skip.addEventListener('click', () => {
+      try { ctrl.destroy && ctrl.destroy(); } catch {}
+      this._sttController = null;
+      if (this.localStt && this.localStt.supported) this.localStt.start();
+      try { localStorage.setItem('jarvis.stt.opted', '0'); } catch {}
+      el.hidden = true;
+    });
+    el.appendChild(dl);
+    el.appendChild(skip);
+    el.hidden = false;
   }
 
   _setupKeyHotkey() {
@@ -1206,6 +1439,7 @@ export class VoiceAgent extends EventTarget {
     try { this.ws && this.ws.close(); } catch {}
     try { this.wake && this.wake.stop(); } catch {}
     try { this.localStt && this.localStt.stop(); } catch {}
+    try { this._sttController && this._sttController.destroy && this._sttController.destroy(); } catch {}
     await this.pipeline.close();
   }
 }

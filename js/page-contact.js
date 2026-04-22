@@ -75,6 +75,24 @@ export async function enter(root, { voiceAgent }) {
     voiceAgent.toolRegistry.registerDomain('assign_carrier', () => ({ ok: false, error: 'Carrier assignment is on Dispatch.' }));
     voiceAgent.toolRegistry.registerDomain('submit_quote',   () => ({ ok: false, error: 'Submit quotes from the Rate Negotiation page.' }));
   }
+
+  import('./quick-chips.js').then((chips) => {
+    chips.registerChips(voiceAgent, [
+      { id: 'contact.schedule_callback', label: 'Schedule callback', run: () => {
+        const form = document.getElementById('contact-form');
+        if (form && typeof form.scrollIntoView === 'function') form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const nameEl = document.getElementById('contact-name');
+        if (nameEl) nameEl.focus();
+      }},
+      { id: 'contact.attach_last_load', label: 'Attach last load', run: () => {
+        const msg = document.getElementById('contact-message');
+        if (!msg) return;
+        const prefix = msg.value ? msg.value + '\n\n' : '';
+        msg.value = `${prefix}Re: last viewed load.`;
+        msg.dispatchEvent(new Event('input', { bubbles: true }));
+      }}
+    ]);
+  }).catch(() => {});
 }
 
 export function exit() {
@@ -84,6 +102,7 @@ export function exit() {
     agentRef.toolRegistry.unregisterDomain('assign_carrier');
     agentRef.toolRegistry.unregisterDomain('submit_quote');
   }
+  import('./quick-chips.js').then((chips) => chips.clearChips()).catch(() => {});
   state = null;
   agentRef = null;
 }

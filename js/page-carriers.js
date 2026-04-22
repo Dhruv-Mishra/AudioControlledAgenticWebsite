@@ -1,5 +1,7 @@
 // Carrier Directory page module — exports { enter, exit } for the SPA router.
 
+import { restoreFiltersFromUrl } from './tool-registry.js';
+
 let state = null;
 let agentRef = null;
 
@@ -92,6 +94,16 @@ export async function enter(root, { voiceAgent }) {
       ok: false, error: 'Schedule callbacks from the Contact page.'
     }));
   }
+
+  restoreFiltersFromUrl('carriers');
+
+  import('./quick-chips.js').then((chips) => {
+    chips.registerChips(voiceAgent, [
+      { id: 'carriers.reefer', label: 'Reefer available', tool: 'filter_carriers', args: { equipment: 'reefer', available: 'yes' } },
+      { id: 'carriers.top_dry_van', label: 'Top-rated dry-van', tool: 'filter_carriers', args: { equipment: 'dry van' } },
+      { id: 'carriers.shortlisted', label: 'Shortlisted', tool: 'filter_carriers', args: { search: 'Shortlisted' } }
+    ]);
+  }).catch(() => {});
 }
 
 export function exit() {
@@ -101,6 +113,7 @@ export function exit() {
     agentRef.toolRegistry.unregisterDomain('submit_quote');
     agentRef.toolRegistry.unregisterDomain('schedule_callback');
   }
+  import('./quick-chips.js').then((chips) => chips.clearChips()).catch(() => {});
   state = null;
   agentRef = null;
 }

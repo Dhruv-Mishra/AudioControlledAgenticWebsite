@@ -150,6 +150,23 @@ function buildDockMarkup() {
           </div>
         </div>
         <p class="voice-settings-note" id="voice-mode-note"></p>
+        <div class="voice-control-row" role="radiogroup" aria-label="Transcript mode">
+          <span class="voice-control-label">Transcript</span>
+          <div class="segmented transcript-seg" id="voice-transcript-seg" data-agent-id="transcript.mode_seg">
+            <button role="radio" type="button" data-mode="off" data-agent-id="transcript.mode.off" aria-checked="true">Off</button>
+            <button role="radio" type="button" data-mode="captions" data-agent-id="transcript.mode.captions" aria-checked="false">Captions</button>
+            <button role="radio" type="button" data-mode="full" data-agent-id="transcript.mode.full" aria-checked="false">Full</button>
+          </div>
+        </div>
+        <p class="voice-settings-note" id="voice-transcript-note"></p>
+        <div class="voice-control-row" role="radiogroup" aria-label="Theme">
+          <span class="voice-control-label">Theme</span>
+          <div class="segmented theme-seg" id="voice-theme-seg" data-agent-id="theme.toggle">
+            <button role="radio" type="button" data-theme-value="dark" data-agent-id="theme.dark" aria-checked="false">Dark</button>
+            <button role="radio" type="button" data-theme-value="light" data-agent-id="theme.light" aria-checked="false">Light</button>
+            <button role="radio" type="button" data-theme-value="system" data-agent-id="theme.system" aria-checked="false">System</button>
+          </div>
+        </div>
         <div class="voice-control-row voice-settings-actions">
           <button class="btn btn--ghost btn--sm" id="voice-clear" data-agent-id="voice.clear_transcript">Clear transcript</button>
         </div>
@@ -181,15 +198,10 @@ function buildHeader() {
       <a href="/contact.html" data-agent-id="nav.contact">Contact</a>
     </nav>
     <div class="app-header-right">
-      <span class="mono-id" id="header-model"></span>
       <a href="#voice-dock" class="btn btn--ghost btn--sm" data-agent-id="nav.voice_dock" data-external>Voice</a>
     </div>
   `;
   document.body.insertBefore(header, document.body.firstChild);
-  fetch('/api/config').then((r) => r.json()).then((cfg) => {
-    const el = document.getElementById('header-model');
-    if (el && cfg && cfg.model) el.textContent = cfg.model;
-  }).catch(() => {});
 }
 
 function buildSkipLink() {
@@ -653,38 +665,114 @@ export async function bootstrapVoiceShell() {
     }
   } catch {}
 
+  // --- Transcript tri-state toggle (Off / Captions / Full)
+  const transcriptSegButtons = document.querySelectorAll('#voice-transcript-seg button[data-mode]');
+  transcriptSegButtons.forEach((b) => on(b, 'click', () => {
+    if (b.disabled) return;
+    const mode = b.getAttribute('data-mode');
+    agent.setTranscriptMode(mode);
+  }));
+  agent.addEventListener('transcript-mode-changed', () => {
+    applyTranscriptMode(agent.getTranscriptMode(), agent.getFlags());
+  });
+
+  // --- Theme toggle (Dark / Light / System)
+  const themeSegButtons = document.querySelectorAll('#voice-theme-seg button[data-theme-value]');
+  themeSegButtons.forEach((b) => on(b, 'click', async () => {
+    const mod = await import('./theme.js');
+    mod.setTheme(b.getAttribute('data-theme-value'));
+  }));
+
   // Apply feature flags as soon as /api/config lands. init() emits
   // flags-ready immediately after, so this handler fires once per page.
-  agent.addEventListener('flags-ready', (e) => applyFlags(e.detail.flags));
+  agent.addEventListener('flags-ready', (e) => applyFlags(e.detail.flags, agent));
   // In case the agent already read flags before this listener attached.
-  applyFlags(agent.getFlags());
+  applyFlags(agent.getFlags(), agent);
 
   return agent;
 }
 
 /** Reflect the server-issued feature flags into the DOM. Called once on
- *  `flags-ready`. Idempotent. */
-function applyFlags(flags) {
+ *  `flags-ready`. Idempotent. The transcript mode (`getTranscriptMode`)
+ *  takes precedence over the raw showText flag for visibility decisions
+ *  once the tri-state toggle is active. */
+function applyFlags(flags, agent) {
   const transcript = document.getElementById('voice-transcript');
   const hint = document.getElementById('voice-transcript-hint');
   const hidden = document.getElementById('voice-transcript-hidden');
   if (!transcript) return;
 
+  const note = document.getElementById('voice-transcript-note');
+  const seg = document.getElementById('voice-transcript-seg');
   if (!flags.showText) {
-    // Transcript content stays out of the DOM entirely. We hide the
-    // scrollable panel and show a short note so the user isn't confused
-    // by the absence of a transcript.
+    // Server forces transcript off; disable the tri-state toggle and
+    // show the explanatory "hidden by server" card.
     transcript.hidden = true;
     if (hint) hint.hidden = true;
     if (hidden) hidden.hidden = false;
+    if (note) note.textContent = 'Transcripts disabled by server config.';
+    if (seg) seg.querySelectorAll('button').forEach((b) => {
+      b.disabled = true;
+      b.setAttribute('aria-disabled', 'true');
+    });
     return;
   }
-  transcript.hidden = false;
+  if (seg) seg.querySelectorAll('button').forEach((b) => {
+    b.disabled = false;
+    b.removeAttribute('aria-disabled');
+  });
+  if (note) note.textContent = '';
   if (hidden) hidden.hidden = true;
-  // SHOW_TEXT=true but Gemini transcription is off → the user side is
-  // transcribed locally (Web Speech); the agent side is NOT transcribed.
-  // Show a small muted hint so the user understands the asymmetry.
-  if (hint) hint.hidden = !!flags.geminiTranscription;
+
+  // Apply the user-selected transcript mode.
+  const mode = (agent && typeof agent.getTranscriptMode === 'function') ? agent.getTranscriptMode() : 'off';
+  applyTranscriptMode(mode, flags);
+}
+
+function applyTranscriptMode(mode, flags) {
+  const transcript = document.getElementById('voice-transcript');
+  const hint = document.getElementById('voice-transcript-hint');
+  const hidden = document.getElementById('voice-transcript-hidden');
+  const captions = document.getElementById('jarvis-captions');
+  if (!transcript) return;
+
+  const serverOff = !!(flags && flags.showText === false);
+  const effective = serverOff ? 'off' : mode;
+
+  if (effective === 'full') {
+    transcript.hidden = false;
+    if (hidden) hidden.hidden = true;
+    // SHOW_TEXT=true but Gemini transcription off → hint about asymmetry.
+    if (hint) hint.hidden = !flags || !!flags.geminiTranscription;
+    if (captions) { captions.hidden = true; captions.classList.remove('is-visible'); }
+  } else if (effective === 'captions') {
+    transcript.hidden = true;
+    if (hint) hint.hidden = true;
+    if (hidden) hidden.hidden = true;
+    // Captions overlay itself is controlled by voice-agent events +
+    // captions-overlay.js. Just make sure it's mountable.
+    if (captions) captions.hidden = false;
+  } else {
+    // mode === 'off' — hide everything transcript-related. The
+    // voice-transcript-hidden announcement is only for the server-forced
+    // case (`showText === false`).
+    transcript.hidden = true;
+    if (hint) hint.hidden = true;
+    if (hidden) hidden.hidden = !serverOff;
+    if (captions) { captions.hidden = true; captions.classList.remove('is-visible'); }
+  }
+
+  // When mode is off (user-selected), we also hide the dock body's
+  // transcript panel but keep the dock visible — so still surface other
+  // controls (status strip, chips, activity). Nothing more to do here.
+
+  // Sync the segmented control visual state.
+  const seg = document.getElementById('voice-transcript-seg');
+  if (seg) seg.querySelectorAll('button[data-mode]').forEach((b) => {
+    const active = b.getAttribute('data-mode') === effective;
+    b.setAttribute('aria-checked', active ? 'true' : 'false');
+    b.classList.toggle('is-active', active);
+  });
 }
 
 function debounce(fn, ms) {

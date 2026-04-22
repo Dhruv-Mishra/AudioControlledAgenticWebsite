@@ -142,6 +142,26 @@ export async function enter(root, { voiceAgent }) {
       ok: false, error: 'schedule_callback is on the Contact page.'
     }));
   }
+
+  import('./quick-chips.js').then((chips) => {
+    chips.registerChips(voiceAgent, [
+      { id: 'negotiate.counter_100', label: 'Counter +$100', run: () => {
+        const el = document.getElementById('field-target-rate');
+        if (!el) return;
+        const curr = Number(el.value || 0) || 0;
+        el.value = String(Math.round(curr + 100));
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }},
+      { id: 'negotiate.accept', label: 'Accept', tool: 'click', args: { agent_id: 'negotiate.accept' } },
+      { id: 'negotiate.add_pickup_time', label: 'Add pickup time', run: () => {
+        const n = document.getElementById('field-note');
+        if (!n) return;
+        const prefix = n.value ? n.value + ' · ' : '';
+        n.value = `${prefix}Pickup ${new Date().toLocaleString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+        n.dispatchEvent(new Event('input', { bubbles: true }));
+      }}
+    ]);
+  }).catch(() => {});
 }
 
 export function exit() {
@@ -151,6 +171,7 @@ export function exit() {
     agentRef.toolRegistry.unregisterDomain('assign_carrier');
     agentRef.toolRegistry.unregisterDomain('schedule_callback');
   }
+  import('./quick-chips.js').then((chips) => chips.clearChips()).catch(() => {});
   state = null;
   agentRef = null;
 }

@@ -482,6 +482,118 @@ export class ToolRegistry {
   }
 }
 
+/**
+ * Drive the dispatch-page filter inputs by agent_id. Used by the
+ * `filter_loads` tool handler AND the URL query restore on page load.
+ * Pure DOM driver — safe even if the inputs don't exist (returns ok:false).
+ */
+export function applyDispatchFilters({ status, lane_contains, carrier_contains, min_miles, max_miles }) {
+  const changes = {};
+  const statusEl = document.querySelector('[data-agent-id="dispatch.filters.status"]');
+  const laneEl = document.querySelector('[data-agent-id="dispatch.filters.lane"]');
+  const searchEl = document.querySelector('[data-agent-id="dispatch.filters.search"]');
+  if (!statusEl || !laneEl || !searchEl) {
+    return { ok: false, error: 'Dispatch filters not mounted. Navigate to the Dispatch page first.' };
+  }
+  if (typeof status === 'string' && status) {
+    statusEl.value = status;
+    statusEl.dispatchEvent(new Event('input', { bubbles: true }));
+    statusEl.dispatchEvent(new Event('change', { bubbles: true }));
+    changes.status = status;
+  }
+  if (typeof lane_contains === 'string') {
+    laneEl.value = lane_contains;
+    laneEl.dispatchEvent(new Event('input', { bubbles: true }));
+    changes.lane_contains = lane_contains;
+  }
+  // Use search box to encode carrier + numeric filters since the page's
+  // native filter uses a single text search across id/lane/carrier/commodity.
+  const searchParts = [];
+  if (typeof carrier_contains === 'string' && carrier_contains) searchParts.push(carrier_contains);
+  if (searchParts.length) {
+    searchEl.value = searchParts.join(' ');
+    searchEl.dispatchEvent(new Event('input', { bubbles: true }));
+    changes.carrier_contains = carrier_contains;
+  }
+  if (Number.isFinite(Number(min_miles))) changes.min_miles = Number(min_miles);
+  if (Number.isFinite(Number(max_miles))) changes.max_miles = Number(max_miles);
+  syncUrlFilters('dispatch', { status, lane_contains, carrier_contains, min_miles, max_miles });
+  return { ok: true, applied: changes };
+}
+
+/** Drive the carriers-page filter inputs. */
+export function applyCarrierFilters({ equipment, available, search }) {
+  const eqEl = document.querySelector('[data-agent-id="carriers.filters.equipment"]');
+  const avEl = document.querySelector('[data-agent-id="carriers.filters.available"]');
+  const qEl = document.querySelector('[data-agent-id="carriers.filters.search"]');
+  if (!eqEl || !avEl || !qEl) {
+    return { ok: false, error: 'Carrier filters not mounted. Navigate to the Carriers page first.' };
+  }
+  const changes = {};
+  if (typeof equipment === 'string' && equipment) {
+    eqEl.value = equipment;
+    eqEl.dispatchEvent(new Event('change', { bubbles: true }));
+    changes.equipment = equipment;
+  }
+  if (typeof available === 'string' && available) {
+    avEl.value = available;
+    avEl.dispatchEvent(new Event('change', { bubbles: true }));
+    changes.available = available;
+  }
+  if (typeof search === 'string') {
+    qEl.value = search;
+    qEl.dispatchEvent(new Event('input', { bubbles: true }));
+    changes.search = search;
+  }
+  syncUrlFilters('carriers', { equipment, available, search });
+  return { ok: true, applied: changes };
+}
+
+function syncUrlFilters(domain, params) {
+  try {
+    const url = new URL(location.href);
+    Object.keys(params).forEach((k) => {
+      const v = params[k];
+      const key = `${domain}.${k}`;
+      if (v == null || v === '' || v === 'all') url.searchParams.delete(key);
+      else url.searchParams.set(key, String(v));
+    });
+    history.replaceState(null, '', url.toString());
+  } catch {}
+}
+
+/** On page load, restore filters from the URL query (if any). Called by
+ *  page modules after they've bound their own filter inputs. */
+export function restoreFiltersFromUrl(domain) {
+  try {
+    const url = new URL(location.href);
+    const read = (k) => url.searchParams.get(`${domain}.${k}`);
+    if (domain === 'dispatch') {
+      const status = read('status');
+      const lane = read('lane_contains');
+      const carrier = read('carrier_contains');
+      if (status || lane || carrier) {
+        applyDispatchFilters({
+          status: status || undefined,
+          lane_contains: lane || undefined,
+          carrier_contains: carrier || undefined
+        });
+      }
+    } else if (domain === 'carriers') {
+      const equipment = read('equipment');
+      const available = read('available');
+      const search = read('search');
+      if (equipment || available || search) {
+        applyCarrierFilters({
+          equipment: equipment || undefined,
+          available: available || undefined,
+          search: search || undefined
+        });
+      }
+    }
+  } catch {}
+}
+
 function safeJson(v) {
   try { return JSON.stringify(v).slice(0, 200); } catch { return '[unserialisable]'; }
 }

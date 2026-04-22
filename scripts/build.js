@@ -195,7 +195,13 @@ async function main() {
     path.join(ROOT, 'js/page-dispatch.js'),
     path.join(ROOT, 'js/page-carriers.js'),
     path.join(ROOT, 'js/page-negotiate.js'),
-    path.join(ROOT, 'js/page-contact.js')
+    path.join(ROOT, 'js/page-contact.js'),
+    // STT pipeline — worker must be an explicit entry so `new URL(...,
+    // import.meta.url)` in stt-controller can resolve it after build.
+    // transformers.js is dynamically imported inside the worker and
+    // esbuild code-splits it into its own chunk (kept out of the initial
+    // load path — first placeCall triggers the fetch).
+    path.join(ROOT, 'js/stt-worker.js')
   ];
 
   const results = await Promise.all([

@@ -98,6 +98,66 @@ const CASES = [
     elements: NEGOTIATE_ELEMENTS,
     text: 'Flash the submit button so I can see it.',
     expect: (tc) => tc.some((c) => c.name === 'highlight' && /submit/i.test(String(c.args?.agent_id || '')))
+  },
+  // ---- New tools introduced by the upgrade (one eval entry per tool). ----
+  {
+    name: 'turn captions on',
+    page: '/',
+    elements: DISPATCH_ELEMENTS,
+    text: 'Turn captions on so I can read them while I drive.',
+    expect: (tc) => tc.some((c) => c.name === 'set_captions' && c.args && c.args.enabled === true)
+  },
+  {
+    name: 'open command palette with a query',
+    page: '/',
+    elements: DISPATCH_ELEMENTS,
+    text: 'Open the command palette and search for carriers.',
+    expect: (tc) => tc.some((c) => c.name === 'open_palette' || c.name === 'run_palette_action')
+  },
+  {
+    name: 'run palette action to toggle theme',
+    page: '/',
+    elements: DISPATCH_ELEMENTS,
+    text: 'Use the palette action to toggle the theme for me.',
+    expect: (tc) => tc.some((c) => c.name === 'run_palette_action' || c.name === 'set_theme')
+  },
+  {
+    name: 'activity note during tool work',
+    page: '/carriers.html',
+    elements: CARRIER_ELEMENTS,
+    text: 'Compare the top three reefer carriers for me and tell me when you have a shortlist.',
+    expect: (tc) => tc.some((c) => c.name === 'set_activity_note' || c.name === 'filter_carriers' || c.name === 'list_elements')
+  },
+  {
+    name: 'set quick actions after a selection',
+    page: '/carriers.html',
+    elements: CARRIER_ELEMENTS,
+    text: 'Give me quick buttons for shortlisting and requesting quotes on the visible carriers.',
+    expect: (tc) => tc.some((c) => c.name === 'set_quick_actions' || c.name === 'click')
+  },
+  {
+    name: 'filter loads by delayed status',
+    page: '/',
+    elements: DISPATCH_ELEMENTS,
+    text: 'Show me just the delayed loads.',
+    expect: (tc) => tc.some((c) => c.name === 'filter_loads' && /delayed/i.test(String(c.args?.status || ''))) ||
+                   tc.some((c) => c.name === 'select' && /status/i.test(String(c.args?.agent_id || '')))
+  },
+  {
+    name: 'filter carriers by equipment',
+    page: '/carriers.html',
+    elements: CARRIER_ELEMENTS,
+    text: 'Only show reefer carriers that are available now.',
+    expect: (tc) => tc.some((c) => c.name === 'filter_carriers' && /reefer/i.test(String(c.args?.equipment || ''))) ||
+                   tc.some((c) => c.name === 'select' && /equipment|availab/i.test(String(c.args?.agent_id || '')))
+  },
+  {
+    name: 'set theme to dark',
+    page: '/',
+    elements: DISPATCH_ELEMENTS,
+    text: 'Switch to dark mode, please.',
+    expect: (tc) => tc.some((c) => c.name === 'set_theme' && /dark/i.test(String(c.args?.theme || ''))) ||
+                   tc.some((c) => c.name === 'run_palette_action' && /theme/i.test(String(c.args?.action_id || '')))
   }
 ];
 

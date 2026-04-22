@@ -80,8 +80,21 @@
 
   /* Shadow */
   --shadow-overlay: 0 12px 32px -8px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-overlay-strong: 0 20px 56px -12px rgba(0, 0, 0, 0.60), 0 4px 10px rgba(0, 0, 0, 0.35);
   --shadow-focus-ring-accent: 0 0 0 2px rgba(110, 231, 183, 0.35);
   --shadow-focus-ring-danger: 0 0 0 2px rgba(248, 113, 113, 0.35);
+
+  /* Overlay surfaces (added 2026-04-22 for upgrade) */
+  --color-overlay-bg: rgba(17, 21, 26, 0.92);
+  --color-overlay-scrim: rgba(0, 0, 0, 0.55);
+  --color-spotlight-mask: rgba(0, 0, 0, 0.70);
+
+  /* Z-index scale */
+  --z-header: 100;
+  --z-dock: 200;
+  --z-captions: 250;
+  --z-overlay: 500;
+  --z-skip-link: 1000;
 
   /* Motion */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -111,6 +124,12 @@
   --color-danger-soft: #FECACA;
   --color-info: #1D4ED8;
   --color-info-soft: #DBEAFE;
+  --color-overlay-bg: rgba(255, 255, 255, 0.94);
+}
+
+[data-theme="light"] html,
+html[data-theme="light"] {
+  color-scheme: light;
 }
 
 @media (prefers-reduced-motion: reduce) {

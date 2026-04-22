@@ -38,9 +38,22 @@ function parseBool(raw, fallback) {
 const GEMINI_TRANSCRIPTION = parseBool(process.env.GEMINI_TRANSCRIPTION, false);
 const SHOW_TEXT = parseBool(process.env.SHOW_TEXT, true);
 
+// STT backend preference for the browser-side on-device pipeline.
+// - 'whisper'    (default) — client uses @xenova/transformers Whisper in a
+//                  Web Worker; falls back to Web Speech if unavailable.
+// - 'web-speech' — client skips Whisper entirely and uses the Web Speech
+//                  fallback (useful for debugging or iOS Safari).
+// Anything else coerces back to 'whisper'.
+function parseSttBackend(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  if (v === 'web-speech' || v === 'webspeech') return 'web-speech';
+  return 'whisper';
+}
+const STT_BACKEND = parseSttBackend(process.env.STT_BACKEND);
+
 // Boot-time summary so ops can see exactly what the process is honouring.
 process.stdout.write(
-  `[server-flags] GEMINI_TRANSCRIPTION=${GEMINI_TRANSCRIPTION} SHOW_TEXT=${SHOW_TEXT}\n`
+  `[server-flags] GEMINI_TRANSCRIPTION=${GEMINI_TRANSCRIPTION} SHOW_TEXT=${SHOW_TEXT} STT_BACKEND=${STT_BACKEND}\n`
 );
 
-module.exports = { GEMINI_TRANSCRIPTION, SHOW_TEXT, parseBool };
+module.exports = { GEMINI_TRANSCRIPTION, SHOW_TEXT, STT_BACKEND, parseBool };
