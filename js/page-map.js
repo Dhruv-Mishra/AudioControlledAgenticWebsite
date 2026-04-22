@@ -58,11 +58,19 @@ export async function enter(root, { voiceAgent }) {
 
   try {
     const { createMap } = await import('./map-widget.js');
-    instance = await createMap(mapRoot, data);
+    // Capture the partial api as soon as it's constructed (synchronously,
+    // before createMap awaits the first tile). If the user navigates away
+    // mid-mount, exit() can call instance.destroy() to unwind the pending
+    // tile await cleanly. The full `{api, destroy}` shape overwrites the
+    // early shape on successful resolve.
+    instance = await createMap(mapRoot, data, (earlyApi) => {
+      instance = { api: earlyApi, destroy: earlyApi.destroy };
+    });
   } catch (err) {
     console.error('[page-map] createMap failed', err);
     renderErrorBanner(mapRoot, 'Map failed to mount: ' + (err && err.message || err));
-    instance = null;
+    // If exit() already ran mid-mount, instance is non-null but destroy is
+    // a no-op (isDestroyed=true). Leave it — exit() is idempotent.
   }
 }
 

@@ -188,7 +188,7 @@ function shuffledSample(arr, n) {
  * matches the Widget API Freeze contract in specs/map-reliability-oracle.md §2
  * and is also exposed as `window.__mapWidget`.
  */
-export async function createMap(root, { loads, carriers }) {
+export async function createMap(root, { loads, carriers }, onEarlyApi) {
   const cleanups = [];
   const track = (fn) => cleanups.push(fn);
   let destroyed = false;
@@ -206,6 +206,11 @@ export async function createMap(root, { loads, carriers }) {
   });
   // Prevent "unhandledrejection" noise if no caller awaits.
   ready.catch(() => {});
+
+  // Settled by destroy() to unwind the first-tile await cleanly if the
+  // caller tears us down mid-mount. Closes the partial-mount race where
+  // window.__mapWidget would leak a live Leaflet instance.
+  let firstTileReject = null;
 
   function envelopeOk(result) { return { ok: true, result }; }
   function envelopeErr(code, error) { return { ok: false, code, error }; }
@@ -230,11 +235,26 @@ export async function createMap(root, { loads, carriers }) {
       flashTimers.forEach(clearTimeout); flashTimers.clear();
       tileRetryTimers.forEach(clearTimeout); tileRetryTimers.clear();
       pendingTransitionListeners.clear();
+      // Wake the first-tile await so createMap can unwind through its
+      // catch block (which calls api.destroy — idempotent).
+      if (typeof firstTileReject === 'function') {
+        const rej = firstTileReject; firstTileReject = null;
+        try { rej(new Error('destroyed')); } catch {}
+      }
       if (!readySettled) {
         try { readyReject({ ok: false, code: 'destroyed', error: 'Map torn down.' }); } catch {}
       }
     }
   };
+
+  // Hand the partial api to the caller SYNCHRONOUSLY, before any await.
+  // This closes the partial-mount race: if the caller navigates away
+  // between here and the first `tileload`, page-map.js::exit can still
+  // call `destroy()` on the stored early-api reference and everything
+  // unwinds cleanly.
+  if (typeof onEarlyApi === 'function') {
+    try { onEarlyApi(api); } catch {}
+  }
 
   try {
     injectLeafletCss();
@@ -314,14 +334,33 @@ export async function createMap(root, { loads, carriers }) {
     tileLayer.addTo(map);
 
     // Tile retry + error banner wiring.
-    const tileState = { failed: 0, lastFailAt: 0, retries: new Map(), bannerShown: false };
+    const tileState = {
+      failed: 0, lastFailAt: 0, retries: new Map(),
+      bannerShown: false, bannerShownAt: 0
+    };
+    const BANNER_MIN_HOLD_MS = 2000;
     const showTileErrorBanner = () => {
       if (!tileErrorEl || tileState.bannerShown) return;
       tileErrorEl.hidden = false;
       tileState.bannerShown = true;
+      tileState.bannerShownAt = Date.now();
     };
     const hideTileErrorBanner = () => {
       if (!tileErrorEl || !tileState.bannerShown) return;
+      // Hold the banner for at least BANNER_MIN_HOLD_MS before hiding
+      // so a single late-arriving tileload doesn't flash it off-then-on.
+      const age = Date.now() - tileState.bannerShownAt;
+      if (age < BANNER_MIN_HOLD_MS) {
+        const t = setTimeout(() => {
+          tileRetryTimers.delete(t);
+          if (tileState.failed === 0 && tileState.bannerShown && tileErrorEl) {
+            tileErrorEl.hidden = true;
+            tileState.bannerShown = false;
+          }
+        }, BANNER_MIN_HOLD_MS - age);
+        tileRetryTimers.add(t);
+        return;
+      }
       tileErrorEl.hidden = true;
       tileState.bannerShown = false;
     };
@@ -1085,9 +1124,12 @@ export async function createMap(root, { loads, carriers }) {
     document.addEventListener('keydown', onKeydown);
     track(() => document.removeEventListener('keydown', onKeydown));
 
-    // Mobile swipe-down-to-dismiss on the bottom-sheet detail.
+    // Mobile swipe-down-to-dismiss on the bottom-sheet detail. Attached
+    // unconditionally — the `dy > 60 && scrollTop === 0` guard makes them
+    // harmless on desktop, and that sidesteps the "viewport resized past
+    // the breakpoint" race where mount-time matchMedia misses.
     let onDetailTouchStart = null, onDetailTouchMove = null;
-    if (detail && window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+    if (detail) {
       let touchStartY = 0;
       onDetailTouchStart = (ev) => {
         if (ev.touches.length !== 1) return;
@@ -1214,24 +1256,28 @@ export async function createMap(root, { loads, carriers }) {
     window.__mapWidget = api;
     track(() => { if (window.__mapWidget === api) { try { delete window.__mapWidget; } catch { window.__mapWidget = undefined; } } });
 
-    // Wait for first tile paint (or give up after ~5s and fail loudly).
+    // Wait for first tile paint (or give up after ~5s and fail loudly, or
+    // unwind synchronously if destroy() is called mid-mount).
     await new Promise((res, rej) => {
       let settled = false;
-      const budget = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        rej(new Error('Tile provider unreachable after retries.'));
-      }, 5000);
-      tileRetryTimers.add(budget);
-      const onFirstTile = () => {
+      const settle = (fn, arg) => {
         if (settled) return;
         settled = true;
         clearTimeout(budget);
         tileRetryTimers.delete(budget);
         try { tileLayer.off('tileload', onFirstTile); } catch {}
-        res();
+        firstTileReject = null;
+        fn(arg);
       };
-      tileLayer.on('tileload', onFirstTile);
+      const budget = setTimeout(() => {
+        settle(rej, new Error('Tile provider unreachable after retries.'));
+      }, 5000);
+      tileRetryTimers.add(budget);
+      const onFirstTile = () => settle(res);
+      // `.once` self-removes the listener even on Leaflet-internal error paths.
+      tileLayer.once('tileload', onFirstTile);
+      // Expose the reject so destroy() can wake this await synchronously.
+      firstTileReject = (err) => settle(rej, err);
     });
 
     // Hide skeleton + clear aria-busy AFTER first paint.
