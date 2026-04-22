@@ -13,6 +13,7 @@
 import { bootstrapVoiceShell } from './ui.js';
 import { Router } from './router.js';
 import { applyDispatchFilters, applyCarrierFilters } from './tool-registry.js';
+import { setActivityNote } from './activity-indicator.js';
 
 function onIdle(fn) {
   const run = () => { try { fn(); } catch (err) { console.error('[app] idle task failed', err); } };
@@ -49,50 +50,78 @@ async function main() {
   // First render — `replace: true` so we don't push a history entry.
   await router.navigate(location.pathname, { replace: true });
 
-  // --- Map tools + compression-strength tool are registered eagerly so
-  // they work the moment the agent connects (before onIdle fires). Each
-  // map handler auto-navigates to /map.html when the user is elsewhere
-  // then dispatches a CustomEvent the widget listens for.
-  async function ensureMapPage() {
-    if (location.pathname === '/map.html') return;
-    if (!router || typeof router.navigate !== 'function') {
-      throw new Error('Router not attached; cannot open map.');
+  // --- Map tools: registered eagerly so they work the moment the agent
+  // connects (before onIdle fires). Every handler validates args FIRST,
+  // then navigates, then awaits the widget's ready-Promise before calling
+  // the direct widget API.
+  async function ensureMapWidget() {
+    if (location.pathname !== '/map.html') {
+      if (!router || typeof router.navigate !== 'function') {
+        throw new Error('Router not attached; cannot open map.');
+      }
+      await router.navigate('/map.html');
     }
-    await router.navigate('/map.html');
-    await new Promise((r) => setTimeout(r, 0));
+    const w = window.__mapWidget;
+    if (!w) throw new Error('Map did not mount.');
+    await w.ready;
+    return w;
+  }
+
+  // Detect what kind of target we're dealing with so we can set a tailored
+  // activity-note phrasing.
+  function activityNoteForTarget(target) {
+    if (target && typeof target === 'object' && Number.isFinite(Number(target.lat))) {
+      return 'Panning to coordinates…';
+    }
+    const str = String(target || '').trim();
+    if (/^LD-[A-Za-z0-9]+/i.test(str)) return `Finding load ${str}…`;
+    if (/^C-[A-Za-z0-9]+/i.test(str))  return `Finding carrier ${str}…`;
+    // 2-letter state code (e.g. "TX") or explicit state word.
+    if (/^[A-Za-z]{2}$/.test(str)) return `Showing ${str.toUpperCase()}…`;
+    if (str.includes(',')) return `Centering on ${str}…`;
+    return `Centering on ${str}…`;
   }
 
   agent.toolRegistry.registerDomain('map_focus', async (args) => {
-    // Validate BEFORE navigating so a malformed call doesn't boot the
-    // user to /map.html only to then return ok:false.
-    const detail = {};
-    if (args && (Number.isFinite(Number(args.lat)) && Number.isFinite(Number(args.lng)))) {
-      detail.target = { lat: Number(args.lat), lng: Number(args.lng), zoom: args.zoom };
+    let target;
+    if (args && Number.isFinite(Number(args.lat)) && Number.isFinite(Number(args.lng))) {
+      target = { lat: Number(args.lat), lng: Number(args.lng), zoom: args.zoom };
     } else if (args && typeof args.target === 'string' && args.target.trim()) {
-      detail.target = args.target.trim();
+      target = args.target.trim();
     } else {
       throw new Error('map_focus requires target (string) or lat+lng (numbers).');
     }
-    await ensureMapPage();
-    document.dispatchEvent(new CustomEvent('map:focus', { detail }));
-    return { ok: true, focused: detail.target };
+    try { setActivityNote({ text: activityNoteForTarget(target), ttl_seconds: 3 }); } catch {}
+    const w = await ensureMapWidget();
+    const r = await w.focusTarget(target);
+    if (!r.ok) throw new Error(r.error);
+    return r.result;
   });
 
   agent.toolRegistry.registerDomain('map_highlight_load', async (args) => {
     const id = args && typeof args.load_id === 'string' ? args.load_id.trim() : '';
     if (!id) throw new Error('map_highlight_load requires load_id.');
-    await ensureMapPage();
-    document.dispatchEvent(new CustomEvent('map:highlight-load', { detail: { load_id: id } }));
-    return { ok: true, load_id: id };
+    try { setActivityNote({ text: `Highlighting ${id}…`, ttl_seconds: 3 }); } catch {}
+    const w = await ensureMapWidget();
+    const r = await w.highlightLoad(id);
+    if (!r.ok) throw new Error(r.error);
+    return r.result;
   });
 
   agent.toolRegistry.registerDomain('map_show_layer', async (args) => {
     const layer = args && typeof args.layer === 'string' ? args.layer.toLowerCase().trim() : '';
     const visible = args ? !!args.visible : false;
     if (!layer) throw new Error('map_show_layer requires layer.');
-    await ensureMapPage();
-    document.dispatchEvent(new CustomEvent('map:show-layer', { detail: { layer, visible } }));
-    return { ok: true, layer, visible };
+    try {
+      setActivityNote({
+        text: (visible ? 'Showing ' : 'Hiding ') + layer + '…',
+        ttl_seconds: 3
+      });
+    } catch {}
+    const w = await ensureMapWidget();
+    const r = await w.setLayerVisible(layer, visible);
+    if (!r.ok) throw new Error(r.error);
+    return r.result;
   });
 
   agent.toolRegistry.registerDomain('set_compression_strength', (args) => {

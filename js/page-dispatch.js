@@ -200,16 +200,16 @@ function renderMapCard() {
       <span class="lane-route">${escapeHtml(l.pickup)} → ${escapeHtml(l.dropoff)}</span>
       <span class="lane-id">${escapeHtml(l.id)}</span>
     `;
-    const openMap = () => {
-      if (typeof window !== 'undefined' && window.__router && typeof window.__router.navigate === 'function') {
-        window.__router.navigate('/map.html');
-        // After navigation lands, ask the widget to highlight this load.
-        setTimeout(() => {
-          document.dispatchEvent(new CustomEvent('map:highlight-load', { detail: { load_id: l.id } }));
-        }, 50);
-      } else {
+    const openMap = async () => {
+      if (typeof window === 'undefined' || !window.__router || typeof window.__router.navigate !== 'function') {
         location.href = '/map.html';
+        return;
       }
+      await window.__router.navigate('/map.html');
+      const w = window.__mapWidget;
+      if (!w) return;
+      try { await w.ready; } catch { return; }
+      await w.highlightLoad(l.id);
     };
     li.addEventListener('click', openMap);
     li.addEventListener('keydown', (e) => {

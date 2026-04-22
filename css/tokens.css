@@ -96,6 +96,8 @@
   --color-map-polyline: rgba(110, 231, 183, 0.65);
   --color-map-polyline-pending: rgba(251, 191, 36, 0.55);
   --color-map-pin-ring: rgba(11, 13, 16, 0.85);
+  --color-map-highlight-ring: rgba(110, 231, 183, 0.75);
+  --dur-map-fly: 900ms;
 
   /* Z-index scale */
   --z-header: 100;
@@ -146,5 +148,6 @@ html[data-theme="light"] {
     --dur-fast: 0ms;
     --dur-base: 0ms;
     --dur-slow: 0ms;
+    --dur-map-fly: 0ms;
   }
 }

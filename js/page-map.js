@@ -7,11 +7,30 @@ let instance = null;
 let agentRef = null;
 
 async function loadData() {
-  const [loads, carriers] = await Promise.all([
-    fetch('/data/loads.json').then((r) => r.json()),
-    fetch('/data/carriers.json').then((r) => r.json())
-  ]);
-  return { loads, carriers };
+  try {
+    const [loads, carriers] = await Promise.all([
+      fetch('/data/loads.json').then((r) => {
+        if (!r.ok) throw new Error(`loads.json → ${r.status}`);
+        return r.json();
+      }),
+      fetch('/data/carriers.json').then((r) => {
+        if (!r.ok) throw new Error(`carriers.json → ${r.status}`);
+        return r.json();
+      })
+    ]);
+    return { loads, carriers };
+  } catch (err) {
+    throw new Error('Could not load map data: ' + (err && err.message || err));
+  }
+}
+
+function renderErrorBanner(root, message) {
+  if (!root) return;
+  const banner = document.createElement('div');
+  banner.className = 'map-load-error';
+  banner.setAttribute('role', 'alert');
+  banner.textContent = message;
+  root.prepend(banner);
 }
 
 export async function enter(root, { voiceAgent }) {
@@ -23,17 +42,44 @@ export async function enter(root, { voiceAgent }) {
 
   const mapRoot = root.querySelector('#map-root') || root;
 
-  const { loads, carriers } = await loadData();
-  const { createMap } = await import('./map-widget.js');
-  instance = await createMap(mapRoot, { loads, carriers });
+  // Double-mount guard: if a previous instance was left around, tear it
+  // down before re-mounting.
+  if (instance) {
+    try { exit(); } catch {}
+  }
+
+  let data;
+  try {
+    data = await loadData();
+  } catch (err) {
+    renderErrorBanner(mapRoot, err.message || 'Map data failed to load.');
+    return;
+  }
+
+  try {
+    const { createMap } = await import('./map-widget.js');
+    instance = await createMap(mapRoot, data);
+  } catch (err) {
+    console.error('[page-map] createMap failed', err);
+    renderErrorBanner(mapRoot, 'Map failed to mount: ' + (err && err.message || err));
+    instance = null;
+  }
 }
 
 export function exit() {
+  // Destroy happens even if createMap threw — instance may be {api, destroy}
+  // or just a partial object. Be defensive.
   if (instance && typeof instance.destroy === 'function') {
-    try { instance.destroy(); } catch {}
+    try { instance.destroy(); } catch (err) { console.error('[page-map] destroy', err); }
+  } else if (instance && instance.api && typeof instance.api.destroy === 'function') {
+    try { instance.api.destroy(); } catch {}
   }
   instance = null;
   agentRef = null;
   const main = document.querySelector('.app-main.app-main--map');
   if (main) main.classList.remove('app-main--map');
+  // Defensive: wipe the global even if destroy missed it (partial-mount failure).
+  if (typeof window !== 'undefined' && window.__mapWidget) {
+    try { delete window.__mapWidget; } catch { window.__mapWidget = undefined; }
+  }
 }

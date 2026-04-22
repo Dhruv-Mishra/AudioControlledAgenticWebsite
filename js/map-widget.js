@@ -4,11 +4,9 @@
 //   - init Leaflet once per mount, wire DOM-backed divIcon pins for loads
 //     + carriers, draw lane polylines, render popups, manage the slide-in
 //     detail panel + list-view fallback.
-//   - listen on `document` for `map:focus`, `map:highlight-load`,
-//     `map:show-layer` so the agent tool handlers can drive the map
-//     without holding a reference to the widget.
-//   - expose a direct `window.__mapWidget` API object for testing + the
-//     agent to call from tool handlers.
+//   - expose a direct `window.__mapWidget` API object with a `ready`
+//     Promise so agent tool handlers can `await` it before calling the
+//     widget. No document-event bridge.
 
 const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 // For a production deploy with real traffic, swap to Stadia's free tier
@@ -18,10 +16,12 @@ const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyrigh
 
 const DEFAULT_VIEW = { lat: 39.5, lng: -98.35, zoom: 4 };
 
+const PAN_DURATION_LOCAL_S = 0.28;
+const PAN_DURATION_FLY_S   = 0.90;
+const FLY_THRESHOLD_KM     = 1500;
+
 // Frozen city → {lat, lng} lookup. Covers every city referenced in
 // data/loads.json + data/carriers.json plus common dispatch cities.
-// Unknown cities fall through to DEFAULT_VIEW with an aria-label on the
-// pin of "unknown coordinates".
 const CITY_COORDS = Object.freeze({
   'Atlanta, GA':        { lat: 33.7490, lng: -84.3880 },
   'Austin, TX':         { lat: 30.2672, lng: -97.7431 },
@@ -53,8 +53,7 @@ const CITY_COORDS = Object.freeze({
   'St. Louis, MO':      { lat: 38.6270, lng: -90.1994 }
 });
 
-// Carrier HQ fallback — infer from the area code in the phone number when
-// the carrier's lanes don't give us a definite city. Keyed by id.
+// Carrier HQ fallback — keyed by id.
 const CARRIER_HQ = Object.freeze({
   'C-088': { city: 'Newark, NJ' },
   'C-118': { city: 'Atlanta, GA' },
@@ -71,11 +70,7 @@ function prefersReducedMotion() {
 }
 
 function injectLeafletCss() {
-  const hrefs = [
-    '/public/leaflet/leaflet.css',
-    '/public/leaflet/MarkerCluster.css',
-    '/public/leaflet/MarkerCluster.Default.css'
-  ];
+  const hrefs = ['/public/leaflet/leaflet.css'];
   hrefs.forEach((href) => {
     if (document.head.querySelector(`link[data-leaflet-css="${href}"]`)) return;
     const link = document.createElement('link');
@@ -86,18 +81,9 @@ function injectLeafletCss() {
   });
 }
 
-// Leaflet + markercluster are vendored under public/leaflet/ and loaded via
-// classic <script> tags (UMD). This is the canonical Leaflet pattern and
-// avoids a subtle gotcha with the ESM build: the imported module namespace
-// is sealed, so the markercluster UMD plugin's `L.markerClusterGroup = …`
-// assignment silently fails in sloppy mode and the method never attaches.
-// Script-tag UMD gives us a plain mutable `window.L` the plugin can extend.
-//
-// Works identically in dev (public/ served from source) and prod (copied to
-// dist/public/ by scripts/build.js::copyStatic). No bare specifiers; nothing
-// for esbuild to resolve.
+// Leaflet is vendored under public/leaflet/ and loaded via classic <script>
+// tags (UMD). No bare specifiers; nothing for esbuild to resolve.
 const LEAFLET_UMD_URL = '/public/leaflet/leaflet.js';
-const MARKERCLUSTER_URL = '/public/leaflet/leaflet.markercluster-src.js';
 
 function loadScriptOnce(url) {
   return new Promise((resolve, reject) => {
@@ -110,7 +96,7 @@ function loadScriptOnce(url) {
     }
     const s = document.createElement('script');
     s.src = url;
-    s.async = false;       // preserve relative load order vs other scripts
+    s.async = false;
     s.defer = false;
     s.setAttribute('data-vendor-src', url);
     s.addEventListener('load', () => { s.dataset.loaded = 'true'; resolve(); }, { once: true });
@@ -133,22 +119,6 @@ async function loadLeaflet() {
     return window.L;
   })();
   return _leafletPromise;
-}
-
-let _markerClusterPromise = null;
-async function loadMarkerCluster(L) {
-  if (L && typeof L.markerClusterGroup === 'function') return;
-  if (_markerClusterPromise) { await _markerClusterPromise; return; }
-  _markerClusterPromise = (async () => {
-    await loadScriptOnce(MARKERCLUSTER_URL);
-    // Sanity check: the plugin MUST have attached itself to window.L. If not,
-    // fail loudly so the caller sees a meaningful error instead of the
-    // downstream `L.markerClusterGroup is not a function`.
-    if (!window.L || typeof window.L.markerClusterGroup !== 'function') {
-      throw new Error('leaflet.markercluster loaded but did not attach markerClusterGroup to L.');
-    }
-  })();
-  await _markerClusterPromise;
 }
 
 function resolveCity(name) {
@@ -193,653 +163,1100 @@ function statusChipClass(status) {
   }
 }
 
+function haversineKm(a, b) {
+  const toRad = (x) => (x * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const x = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) *
+    Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+function shuffledSample(arr, n) {
+  const copy = arr.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, n);
+}
+
 /**
- * Create a freshly-mounted map. Returns an API object for programmatic
- * control and a teardown() function.
- *
- * @param {HTMLElement} root  The section root (#map-root).
- * @param {{loads: object[], carriers: object[]}} data
+ * Create a freshly-mounted map. Returns `{ api, destroy }` where `api`
+ * matches the Widget API Freeze contract in specs/map-reliability-oracle.md §2
+ * and is also exposed as `window.__mapWidget`.
  */
 export async function createMap(root, { loads, carriers }) {
-  injectLeafletCss();
-  const L = await loadLeaflet();
-  await loadMarkerCluster(L);
+  const cleanups = [];
+  const track = (fn) => cleanups.push(fn);
+  let destroyed = false;
 
-  const canvas = root.querySelector('#map-canvas');
-  const detail = root.querySelector('#map-detail');
-  const attribution = root.querySelector('#map-attribution');
-  const filterRail = root.querySelector('#map-filter-rail');
-  const filterList = root.querySelector('#map-filter-list');
-  const listView = root.querySelector('#map-list-view');
-  const listViewItems = root.querySelector('#map-list-items');
-  const listToggleBtn = root.querySelector('#map-list-toggle');
-  const searchInput = root.querySelector('#map-search');
-  const zoomInBtn = root.querySelector('#map-zoom-in');
-  const zoomOutBtn = root.querySelector('#map-zoom-out');
-  const resetBtn = root.querySelector('#map-reset');
+  const flashTimers = new Set();
+  const tileRetryTimers = new Set();
+  const pendingTransitionListeners = new Set();
 
-  if (!canvas) throw new Error('map-widget: #map-canvas missing from partial');
-
-  const reduced = prefersReducedMotion();
-
-  const map = L.map(canvas, {
-    keyboard: true,
-    zoomControl: false,
-    attributionControl: false,
-    zoomAnimation: !reduced,
-    markerZoomAnimation: !reduced,
-    fadeAnimation: !reduced,
-    preferCanvas: false
-  }).setView([DEFAULT_VIEW.lat, DEFAULT_VIEW.lng], DEFAULT_VIEW.zoom);
-
-  L.tileLayer(TILE_URL, {
-    attribution: TILE_ATTRIBUTION,
-    maxZoom: 18,
-    crossOrigin: true
-  }).addTo(map);
-
-  if (attribution) {
-    attribution.replaceChildren();
-    attribution.append('© ');
-    const osm = document.createElement('a');
-    osm.href = 'https://www.openstreetmap.org/copyright';
-    osm.target = '_blank';
-    osm.rel = 'noopener';
-    osm.textContent = 'OpenStreetMap';
-    attribution.append(osm, ' contributors');
-  }
-
-  // --- layers
-  const loadLayer = L.markerClusterGroup({
-    showCoverageOnHover: false,
-    iconCreateFunction: (cluster) => L.divIcon({
-      className: '',
-      html: `<div class="map-cluster">${cluster.getChildCount()}</div>`,
-      iconSize: [28, 28]
-    })
+  let readyResolve;
+  let readyReject;
+  let readySettled = false;
+  const ready = new Promise((res, rej) => {
+    readyResolve = (v) => { readySettled = true; res(v); };
+    readyReject  = (e) => { readySettled = true; rej(e); };
   });
-  const carrierLayer = L.layerGroup();
-  const laneLayer = L.layerGroup();
+  // Prevent "unhandledrejection" noise if no caller awaits.
+  ready.catch(() => {});
 
-  loadLayer.addTo(map);
-  carrierLayer.addTo(map);
-  laneLayer.addTo(map);
+  function envelopeOk(result) { return { ok: true, result }; }
+  function envelopeErr(code, error) { return { ok: false, code, error }; }
 
-  const visibleLayers = new Set(['loads', 'carriers', 'lanes']);
-  let delayedOnly = false;
+  // Public API stub — methods are wired below. `destroy` must exist before
+  // any `await` so partial-mount failures can still tear down.
+  const api = {
+    get isDestroyed() { return destroyed; },
+    ready,
+    panTo: () => envelopeErr('not_ready', 'Map not mounted yet.'),
+    focusTarget: () => envelopeErr('not_ready', 'Map not mounted yet.'),
+    highlightLoad: () => envelopeErr('not_ready', 'Map not mounted yet.'),
+    focusCarrier: () => envelopeErr('not_ready', 'Map not mounted yet.'),
+    setLayerVisible: () => envelopeErr('not_ready', 'Map not mounted yet.'),
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      for (let i = cleanups.length - 1; i >= 0; i--) {
+        try { cleanups[i](); } catch (err) { console.error('[map-widget] cleanup', err); }
+      }
+      cleanups.length = 0;
+      flashTimers.forEach(clearTimeout); flashTimers.clear();
+      tileRetryTimers.forEach(clearTimeout); tileRetryTimers.clear();
+      pendingTransitionListeners.clear();
+      if (!readySettled) {
+        try { readyReject({ ok: false, code: 'destroyed', error: 'Map torn down.' }); } catch {}
+      }
+    }
+  };
 
-  // --- marker registry
-  // key: load-id or carrier-id → { marker, type, record, pickupLatLng?, dropoffLatLng?, lane? }
-  const registry = new Map();
+  try {
+    injectLeafletCss();
+    const L = await loadLeaflet();
 
-  function makeDivIcon(cls, ariaLabel) {
-    // The outer Leaflet marker element carries the stable `data-agent-id`
-    // (`map.pin.<id>.<side>`) — see addLoadMarker / addCarrierMarker below.
-    // The inner .map-pin div is purely visual; keeping a data-agent-id here
-    // would expose the human aria-label text to the agent's element scanner.
-    return L.divIcon({
-      className: '',
-      html: `<div class="map-pin ${cls}" tabindex="0" role="button" aria-label="${escapeHtml(ariaLabel)}"></div>`,
-      iconSize: [16, 16],
-      iconAnchor: [8, 8]
+    const canvas = root.querySelector('#map-canvas');
+    const detail = root.querySelector('#map-detail');
+    const attribution = root.querySelector('#map-attribution');
+    const filterRail = root.querySelector('#map-filter-rail');
+    const filterList = root.querySelector('#map-filter-list');
+    const listView = root.querySelector('#map-list-view');
+    const listViewItems = root.querySelector('#map-list-items');
+    const listToggleBtn = root.querySelector('#map-list-toggle');
+    const searchInput = root.querySelector('#map-search');
+    const zoomInBtn = root.querySelector('#map-zoom-in');
+    const zoomOutBtn = root.querySelector('#map-zoom-out');
+    const resetBtn = root.querySelector('#map-reset');
+    const tileErrorEl = root.querySelector('#map-tile-error');
+    const tileRetryBtn = root.querySelector('#map-tile-retry');
+
+    if (!canvas) throw new Error('map-widget: #map-canvas missing from partial');
+
+    // Skeleton overlay — mounted BEFORE Leaflet instantiates.
+    const skeleton = document.createElement('div');
+    skeleton.className = 'map-skeleton';
+    skeleton.setAttribute('data-agent-id', 'map.skeleton');
+    skeleton.setAttribute('aria-hidden', 'true');
+    const skeletonPulse = document.createElement('div');
+    skeletonPulse.className = 'map-skeleton-pulse';
+    const skeletonLabel = document.createElement('p');
+    skeletonLabel.className = 'map-skeleton-label';
+    skeletonLabel.textContent = 'Loading map…';
+    skeleton.appendChild(skeletonPulse);
+    skeleton.appendChild(skeletonLabel);
+    canvas.appendChild(skeleton);
+    track(() => { try { skeleton.remove(); } catch {} });
+
+    // Empty state — hidden initially; shown when every toggleable layer is off.
+    const emptyStateEl = document.createElement('div');
+    emptyStateEl.className = 'map-empty-state';
+    emptyStateEl.setAttribute('role', 'status');
+    emptyStateEl.hidden = true;
+    const emptyTitle = document.createElement('p');
+    emptyTitle.className = 'map-empty-state-title';
+    emptyTitle.textContent = 'Nothing to show';
+    const emptyBody = document.createElement('p');
+    emptyBody.className = 'map-empty-state-body';
+    emptyBody.innerHTML = 'Toggle <strong>Loads</strong>, <strong>Carriers</strong>, or <strong>Lanes</strong> in the filter rail to reveal pins.';
+    emptyStateEl.appendChild(emptyTitle);
+    emptyStateEl.appendChild(emptyBody);
+    canvas.appendChild(emptyStateEl);
+    track(() => { try { emptyStateEl.remove(); } catch {} });
+
+    const reducedAtMount = prefersReducedMotion();
+
+    const map = L.map(canvas, {
+      keyboard: true,
+      zoomControl: false,
+      attributionControl: false,
+      zoomAnimation: !reducedAtMount,
+      markerZoomAnimation: !reducedAtMount,
+      fadeAnimation: !reducedAtMount,
+      preferCanvas: false
+    }).setView([DEFAULT_VIEW.lat, DEFAULT_VIEW.lng], DEFAULT_VIEW.zoom);
+    track(() => { try { map.remove(); } catch {} });
+
+    // Dedicated panes per layer so we can fade whole layers via opacity on
+    // a single DOM node instead of add/removeLayer.
+    map.createPane('loads-pane');    map.getPane('loads-pane').style.zIndex    = '410';
+    map.createPane('carriers-pane'); map.getPane('carriers-pane').style.zIndex = '420';
+    map.createPane('lanes-pane');    map.getPane('lanes-pane').style.zIndex    = '405';
+
+    const tileLayer = L.tileLayer(TILE_URL, {
+      attribution: TILE_ATTRIBUTION,
+      maxZoom: 18
     });
-  }
+    tileLayer.addTo(map);
 
-  function addLoadMarker(load) {
-    const pickupLL = resolveCity(load.pickup);
-    const dropoffLL = resolveCity(load.dropoff);
-    if (!pickupLL && !dropoffLL) return;
+    // Tile retry + error banner wiring.
+    const tileState = { failed: 0, lastFailAt: 0, retries: new Map(), bannerShown: false };
+    const showTileErrorBanner = () => {
+      if (!tileErrorEl || tileState.bannerShown) return;
+      tileErrorEl.hidden = false;
+      tileState.bannerShown = true;
+    };
+    const hideTileErrorBanner = () => {
+      if (!tileErrorEl || !tileState.bannerShown) return;
+      tileErrorEl.hidden = true;
+      tileState.bannerShown = false;
+    };
 
-    const cls = `map-pin--${load.status || 'booked'}`;
+    const onTileError = (ev) => {
+      const now = Date.now();
+      if (now - tileState.lastFailAt > 10_000) tileState.failed = 0;
+      tileState.lastFailAt = now;
+      tileState.failed++;
+      const key = ev && ev.coords ? `${ev.coords.z}/${ev.coords.x}/${ev.coords.y}` : `r${Math.random()}`;
+      const tries = tileState.retries.get(key) || 0;
+      if (tries < 2) {
+        tileState.retries.set(key, tries + 1);
+        const t = setTimeout(() => {
+          tileRetryTimers.delete(t);
+          try { tileLayer.redraw(); } catch {}
+        }, 800 + Math.random() * 400);
+        tileRetryTimers.add(t);
+      }
+      if (tileState.failed > 5) showTileErrorBanner();
+    };
+    const onTileLoadEvt = () => {
+      tileState.failed = Math.max(0, tileState.failed - 1);
+      if (tileState.failed === 0) hideTileErrorBanner();
+    };
+    tileLayer.on('tileerror', onTileError);
+    tileLayer.on('tileload', onTileLoadEvt);
+    track(() => {
+      try { tileLayer.off('tileerror', onTileError); } catch {}
+      try { tileLayer.off('tileload', onTileLoadEvt); } catch {}
+    });
 
-    const pickupId = `map.pin.${load.id}.pickup`;
-    const dropoffId = `map.pin.${load.id}.dropoff`;
+    let onTileRetryClick = null;
+    if (tileRetryBtn) {
+      onTileRetryClick = () => {
+        tileState.failed = 0;
+        tileState.retries.clear();
+        hideTileErrorBanner();
+        try { tileLayer.redraw(); } catch {}
+      };
+      tileRetryBtn.addEventListener('click', onTileRetryClick);
+      track(() => { try { tileRetryBtn.removeEventListener('click', onTileRetryClick); } catch {} });
+    }
 
-    const pickupMarker = pickupLL
-      ? L.marker([pickupLL.lat, pickupLL.lng], {
-          icon: makeDivIcon(cls, `Load ${load.id} pickup, ${load.pickup || 'unknown coordinates'}`),
-          keyboard: true
-        })
-      : null;
-    const dropoffMarker = dropoffLL
-      ? L.marker([dropoffLL.lat, dropoffLL.lng], {
-          icon: makeDivIcon(cls, `Load ${load.id} dropoff, ${load.dropoff || 'unknown coordinates'}`),
-          keyboard: true
-        })
-      : null;
+    // Render attribution into our own element so Leaflet's default chrome
+    // stays off.
+    if (attribution) {
+      attribution.replaceChildren();
+      attribution.append('© ');
+      const osm = document.createElement('a');
+      osm.href = 'https://www.openstreetmap.org/copyright';
+      osm.target = '_blank';
+      osm.rel = 'noopener';
+      osm.textContent = 'OpenStreetMap';
+      attribution.append(osm, ' contributors');
+    }
 
-    const popup = buildLoadPopup(load);
+    // --- layers (plain layerGroups on dedicated panes — no clustering)
+    const loadLayer    = L.layerGroup([], { pane: 'loads-pane' });
+    const carrierLayer = L.layerGroup([], { pane: 'carriers-pane' });
+    const laneLayer    = L.layerGroup([], { pane: 'lanes-pane' });
 
-    [pickupMarker, dropoffMarker].forEach((m, idx) => {
-      if (!m) return;
-      m.bindPopup(popup);
-      // When the user clicks the pin, also open the detail panel.
-      m.on('click', () => openLoadDetail(load, idx === 0 ? 'pickup' : 'dropoff'));
+    loadLayer.addTo(map);
+    carrierLayer.addTo(map);
+    laneLayer.addTo(map);
+    track(() => { try { loadLayer.clearLayers(); } catch {} });
+    track(() => { try { carrierLayer.clearLayers(); } catch {} });
+    track(() => { try { laneLayer.clearLayers(); } catch {} });
+
+    const visibleLayers = new Set(['loads', 'carriers', 'lanes']);
+    let delayedOnly = false;
+
+    // --- marker registry: id → entry
+    const registry = new Map();
+    track(() => registry.clear());
+
+    function makeDivIcon(pinClass, ariaLabel, pane) {
+      return L.divIcon({
+        className: '',
+        html: `<div class="map-pin ${pinClass}" tabindex="0" role="button" aria-label="${escapeHtml(ariaLabel)}"></div>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+        pane
+      });
+    }
+
+    function addLoadMarker(load) {
+      const pickupLL = resolveCity(load.pickup);
+      const dropoffLL = resolveCity(load.dropoff);
+      if (!pickupLL && !dropoffLL) return;
+
+      const pinClass = `map-pin--${load.status || 'booked'}`;
+
+      const pickupId = `map.pin.${load.id}.pickup`;
+      const dropoffId = `map.pin.${load.id}.dropoff`;
+
+      const pickupMarker = pickupLL
+        ? L.marker([pickupLL.lat, pickupLL.lng], {
+            icon: makeDivIcon(pinClass, `Load ${load.id} pickup, ${load.pickup || 'unknown coordinates'}`, 'loads-pane'),
+            keyboard: true,
+            pane: 'loads-pane'
+          })
+        : null;
+      const dropoffMarker = dropoffLL
+        ? L.marker([dropoffLL.lat, dropoffLL.lng], {
+            icon: makeDivIcon(pinClass, `Load ${load.id} dropoff, ${load.dropoff || 'unknown coordinates'}`, 'loads-pane'),
+            keyboard: true,
+            pane: 'loads-pane'
+          })
+        : null;
+
+      const popup = buildLoadPopup(load);
+
+      [pickupMarker, dropoffMarker].forEach((m, idx) => {
+        if (!m) return;
+        m.bindPopup(popup);
+        const side = idx === 0 ? 'pickup' : 'dropoff';
+        m.on('click', () => openLoadDetail(load, side));
+        m.on('keypress', (ev) => {
+          const key = ev && ev.originalEvent && ev.originalEvent.key;
+          if (key === 'Enter' || key === ' ') openLoadDetail(load, side);
+        });
+        loadLayer.addLayer(m);
+        const pinEl = m.getElement();
+        if (pinEl) pinEl.setAttribute('data-agent-id', idx === 0 ? pickupId : dropoffId);
+      });
+
+      let lane = null;
+      if (pickupLL && dropoffLL) {
+        const pending = !load.carrier || load.status === 'pending';
+        const laneClass = pending ? 'map-lane map-lane--pending' : 'map-lane';
+        lane = L.polyline(
+          [[pickupLL.lat, pickupLL.lng], [dropoffLL.lat, dropoffLL.lng]],
+          { className: laneClass, weight: 2, interactive: true, pane: 'lanes-pane' }
+        );
+        lane.bindPopup(popup);
+        lane.on('click', () => openLoadDetail(load));
+        laneLayer.addLayer(lane);
+      }
+
+      registry.set(load.id, {
+        kind: 'load',
+        record: load,
+        pickup: pickupMarker,
+        dropoff: dropoffMarker,
+        pickupLL,
+        dropoffLL,
+        lane,
+        pickupAgentId: pickupId,
+        dropoffAgentId: dropoffId
+      });
+    }
+
+    function addCarrierMarker(carrier) {
+      const hq = CARRIER_HQ[carrier.id];
+      const coords = hq ? resolveCity(hq.city) : null;
+      if (!coords) return;
+      const id = `map.pin.${carrier.id}`;
+      const m = L.marker([coords.lat, coords.lng], {
+        icon: makeDivIcon('map-pin--carrier', `Carrier ${carrier.name} in ${hq.city}`, 'carriers-pane'),
+        keyboard: true,
+        pane: 'carriers-pane'
+      });
+      m.bindPopup(buildCarrierPopup(carrier, hq.city));
+      m.on('click', () => openCarrierDetail(carrier, hq.city));
       m.on('keypress', (ev) => {
         const key = ev && ev.originalEvent && ev.originalEvent.key;
-        if (key === 'Enter' || key === ' ') openLoadDetail(load, idx === 0 ? 'pickup' : 'dropoff');
+        if (key === 'Enter' || key === ' ') openCarrierDetail(carrier, hq.city);
       });
-      loadLayer.addLayer(m);
-      // Tag the marker's DOM element with data-agent-id so the agent can
-      // snapshot it. `_icon` is Leaflet's own element reference.
+      carrierLayer.addLayer(m);
       const pinEl = m.getElement();
-      if (pinEl) {
-        pinEl.setAttribute('data-agent-id', idx === 0 ? pickupId : dropoffId);
-      }
-    });
-
-    let lane = null;
-    if (pickupLL && dropoffLL) {
-      const pending = !load.carrier || load.status === 'pending';
-      const cls = pending ? 'map-lane map-lane--pending' : 'map-lane';
-      lane = L.polyline(
-        [[pickupLL.lat, pickupLL.lng], [dropoffLL.lat, dropoffLL.lng]],
-        { className: cls, weight: 2, interactive: true }
-      );
-      lane.bindPopup(popup);
-      lane.on('click', () => openLoadDetail(load));
-      laneLayer.addLayer(lane);
+      if (pinEl) pinEl.setAttribute('data-agent-id', id);
+      registry.set(carrier.id, { kind: 'carrier', record: carrier, marker: m, coords, agentId: id });
     }
 
-    registry.set(load.id, {
-      kind: 'load',
-      record: load,
-      pickup: pickupMarker,
-      dropoff: dropoffMarker,
-      pickupLL,
-      dropoffLL,
-      lane
-    });
-  }
+    function buildLoadPopup(load) {
+      const status = STATUS_LABEL[load.status] || load.status || '';
+      const chipCls = statusChipClass(load.status);
+      const wrap = document.createElement('div');
+      const head = document.createElement('div');
+      head.className = 'map-popup-title';
+      const idSpan = document.createElement('span');
+      idSpan.textContent = load.id;
+      head.appendChild(idSpan);
+      const chip = document.createElement('span');
+      chip.className = chipCls;
+      chip.textContent = status;
+      head.appendChild(chip);
+      const sub = document.createElement('div');
+      sub.className = 'map-popup-sub';
+      sub.textContent = `${load.pickup || '?'} → ${load.dropoff || '?'} · ${load.miles ? load.miles + 'mi' : ''} · ETA ${fmtEta(load.eta)}`;
+      wrap.appendChild(head);
+      wrap.appendChild(sub);
+      return wrap;
+    }
 
-  function addCarrierMarker(carrier) {
-    const hq = CARRIER_HQ[carrier.id];
-    const coords = hq ? resolveCity(hq.city) : null;
-    if (!coords) return;
-    const id = `map.pin.${carrier.id}`;
-    const m = L.marker([coords.lat, coords.lng], {
-      icon: makeDivIcon('map-pin--carrier', `Carrier ${carrier.name} in ${hq.city}`),
-      keyboard: true
-    });
-    m.bindPopup(buildCarrierPopup(carrier, hq.city));
-    m.on('click', () => openCarrierDetail(carrier, hq.city));
-    m.on('keypress', (ev) => {
-      const key = ev && ev.originalEvent && ev.originalEvent.key;
-      if (key === 'Enter' || key === ' ') openCarrierDetail(carrier, hq.city);
-    });
-    carrierLayer.addLayer(m);
-    const pinEl = m.getElement();
-    if (pinEl) pinEl.setAttribute('data-agent-id', id);
-    registry.set(carrier.id, { kind: 'carrier', record: carrier, marker: m, coords });
-  }
+    function buildCarrierPopup(carrier, city) {
+      const wrap = document.createElement('div');
+      const head = document.createElement('div');
+      head.className = 'map-popup-title';
+      head.textContent = carrier.name;
+      const sub = document.createElement('div');
+      sub.className = 'map-popup-sub';
+      sub.textContent = `${carrier.mc || ''} · ${city || ''} · ${carrier.available ? 'Available' : 'Assigned'}`;
+      wrap.appendChild(head);
+      wrap.appendChild(sub);
+      return wrap;
+    }
 
-  function buildLoadPopup(load) {
-    const status = STATUS_LABEL[load.status] || load.status || '';
-    const chipCls = statusChipClass(load.status);
-    const wrap = document.createElement('div');
-    const head = document.createElement('div');
-    head.className = 'map-popup-title';
-    const idSpan = document.createElement('span');
-    idSpan.textContent = load.id;
-    head.appendChild(idSpan);
-    const chip = document.createElement('span');
-    chip.className = chipCls;
-    chip.textContent = status;
-    head.appendChild(chip);
-    const sub = document.createElement('div');
-    sub.className = 'map-popup-sub';
-    sub.textContent = `${load.pickup || '?'} → ${load.dropoff || '?'} · ${load.miles ? load.miles + 'mi' : ''} · ETA ${fmtEta(load.eta)}`;
-    wrap.appendChild(head);
-    wrap.appendChild(sub);
-    return wrap;
-  }
+    let renderFilterListTimer = null;
+    function renderFilterListImmediate() {
+      if (!filterList) return;
+      filterList.replaceChildren();
+      const q = searchInput && searchInput.value ? searchInput.value.trim().toLowerCase() : '';
 
-  function buildCarrierPopup(carrier, city) {
-    const wrap = document.createElement('div');
-    const head = document.createElement('div');
-    head.className = 'map-popup-title';
-    head.textContent = carrier.name;
-    const sub = document.createElement('div');
-    sub.className = 'map-popup-sub';
-    sub.textContent = `${carrier.mc || ''} · ${city || ''} · ${carrier.available ? 'Available' : 'Assigned'}`;
-    wrap.appendChild(head);
-    wrap.appendChild(sub);
-    return wrap;
-  }
+      const addItem = ({ id, dotColor, label, meta, onClick }) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'map-filter-list-item';
+        btn.setAttribute('data-agent-id', id);
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = dotColor;
+        const text = document.createElement('span');
+        text.innerHTML = `${escapeHtml(label)}<br><span class="meta">${escapeHtml(meta)}</span>`;
+        btn.appendChild(dot);
+        btn.appendChild(text);
+        btn.addEventListener('click', onClick);
+        li.appendChild(btn);
+        filterList.appendChild(li);
+      };
 
-  function renderFilterList() {
-    if (!filterList) return;
-    filterList.replaceChildren();
-    const q = searchInput && searchInput.value ? searchInput.value.trim().toLowerCase() : '';
-
-    const addItem = ({ id, dotColor, label, meta, onClick }) => {
-      const li = document.createElement('li');
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'map-filter-list-item';
-      btn.setAttribute('data-agent-id', id);
-      const dot = document.createElement('span');
-      dot.className = 'dot';
-      dot.style.background = dotColor;
-      const text = document.createElement('span');
-      text.innerHTML = `${escapeHtml(label)}<br><span class="meta">${escapeHtml(meta)}</span>`;
-      btn.appendChild(dot);
-      btn.appendChild(text);
-      btn.addEventListener('click', onClick);
-      li.appendChild(btn);
-      filterList.appendChild(li);
-    };
-
-    if (visibleLayers.has('loads')) {
-      loads.forEach((l) => {
-        if (delayedOnly && l.status !== 'delayed') return;
-        if (q && !`${l.id} ${l.pickup} ${l.dropoff} ${l.carrier || ''}`.toLowerCase().includes(q)) return;
-        addItem({
-          id: `map.list.${l.id}`,
-          dotColor: colorForStatus(l.status),
-          label: `${l.id}`,
-          meta: `${l.pickup || '?'} → ${l.dropoff || '?'}`,
-          onClick: () => focusLoad(l.id)
+      if (visibleLayers.has('loads')) {
+        loads.forEach((l) => {
+          if (delayedOnly && l.status !== 'delayed') return;
+          if (q && !`${l.id} ${l.pickup} ${l.dropoff} ${l.carrier || ''}`.toLowerCase().includes(q)) return;
+          addItem({
+            id: `map.list.${l.id}`,
+            dotColor: colorForStatus(l.status),
+            label: `${l.id}`,
+            meta: `${l.pickup || '?'} → ${l.dropoff || '?'}`,
+            onClick: () => focusLoadInternal(l.id)
+          });
         });
-      });
+      }
+      if (visibleLayers.has('carriers')) {
+        carriers.forEach((c) => {
+          const hq = CARRIER_HQ[c.id];
+          if (q && !`${c.id} ${c.name} ${hq && hq.city ? hq.city : ''}`.toLowerCase().includes(q)) return;
+          addItem({
+            id: `map.list.${c.id}`,
+            dotColor: 'var(--color-info)',
+            label: c.name,
+            meta: `${c.id}${hq ? ' · ' + hq.city : ''}`,
+            onClick: () => focusCarrierInternal(c.id)
+          });
+        });
+      }
     }
-    if (visibleLayers.has('carriers')) {
+    function renderFilterList() {
+      // 80ms debounce per Oracle [W9]
+      if (renderFilterListTimer) clearTimeout(renderFilterListTimer);
+      renderFilterListTimer = setTimeout(() => {
+        renderFilterListTimer = null;
+        renderFilterListImmediate();
+      }, 80);
+    }
+    track(() => {
+      if (renderFilterListTimer) { clearTimeout(renderFilterListTimer); renderFilterListTimer = null; }
+      if (filterList) { try { filterList.replaceChildren(); } catch {} }
+    });
+
+    function colorForStatus(s) {
+      switch (s) {
+        case 'booked': return 'var(--color-accent)';
+        case 'pending': return 'var(--color-warn)';
+        case 'delayed': return 'var(--color-danger)';
+        case 'delivered': return 'var(--color-text-dim)';
+        case 'in_transit': return 'var(--color-info)';
+        default: return 'var(--color-text-muted)';
+      }
+    }
+
+    function renderListView() {
+      if (!listViewItems) return;
+      listViewItems.replaceChildren();
+      loads.forEach((l) => {
+        const li = document.createElement('li');
+        li.textContent = `${l.id} — ${l.pickup || '?'} → ${l.dropoff || '?'}`;
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = `${STATUS_LABEL[l.status] || l.status} · ${fmtMiles(l.miles)} · ETA ${fmtEta(l.eta)}`;
+        li.appendChild(meta);
+        listViewItems.appendChild(li);
+      });
       carriers.forEach((c) => {
         const hq = CARRIER_HQ[c.id];
-        if (q && !`${c.id} ${c.name} ${hq && hq.city ? hq.city : ''}`.toLowerCase().includes(q)) return;
-        addItem({
-          id: `map.list.${c.id}`,
-          dotColor: 'var(--color-info)',
-          label: c.name,
-          meta: `${c.id}${hq ? ' · ' + hq.city : ''}`,
-          onClick: () => focusCarrier(c.id)
-        });
+        const li = document.createElement('li');
+        li.textContent = `${c.name} (${c.id})`;
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = `${hq ? hq.city : 'Unknown HQ'} · ${c.available ? 'Available' : 'Assigned'}`;
+        li.appendChild(meta);
+        listViewItems.appendChild(li);
       });
     }
-  }
 
-  function colorForStatus(s) {
-    switch (s) {
-      case 'booked': return 'var(--color-accent)';
-      case 'pending': return 'var(--color-warn)';
-      case 'delayed': return 'var(--color-danger)';
-      case 'delivered': return 'var(--color-text-dim)';
-      case 'in_transit': return 'var(--color-info)';
-      default: return 'var(--color-text-muted)';
+    // --- detail panel
+
+    let detailOpener = null;
+
+    function openDetailPanel(contentNode, opener) {
+      if (!detail) return;
+      detail.replaceChildren();
+      const hdr = document.createElement('div');
+      hdr.className = 'map-detail-header';
+      const h = document.createElement('h2');
+      h.textContent = contentNode.dataset.title || 'Detail';
+      hdr.appendChild(h);
+      const close = document.createElement('button');
+      close.className = 'icon-btn';
+      close.type = 'button';
+      close.setAttribute('aria-label', 'Close detail');
+      close.textContent = '×';
+      close.addEventListener('click', closeDetailPanel);
+      hdr.appendChild(close);
+      detail.appendChild(hdr);
+      detail.appendChild(contentNode);
+      detail.hidden = false;
+      void detail.offsetWidth;
+      detail.classList.add('is-open');
+      detailOpener = opener || null;
+      try { close.focus(); } catch {}
     }
-  }
 
-  function renderListView() {
-    if (!listViewItems) return;
-    listViewItems.replaceChildren();
-    loads.forEach((l) => {
-      const li = document.createElement('li');
-      li.textContent = `${l.id} — ${l.pickup || '?'} → ${l.dropoff || '?'}`;
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = `${STATUS_LABEL[l.status] || l.status} · ${fmtMiles(l.miles)} · ETA ${fmtEta(l.eta)}`;
-      li.appendChild(meta);
-      listViewItems.appendChild(li);
-    });
-    carriers.forEach((c) => {
-      const hq = CARRIER_HQ[c.id];
-      const li = document.createElement('li');
-      li.textContent = `${c.name} (${c.id})`;
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = `${hq ? hq.city : 'Unknown HQ'} · ${c.available ? 'Available' : 'Assigned'}`;
-      li.appendChild(meta);
-      listViewItems.appendChild(li);
-    });
-  }
-
-  // --- detail panel
-
-  let detailOpener = null; // element to return focus to on close
-
-  function openDetailPanel(contentNode, opener) {
-    if (!detail) return;
-    detail.replaceChildren();
-    const hdr = document.createElement('div');
-    hdr.className = 'map-detail-header';
-    const h = document.createElement('h2');
-    h.textContent = contentNode.dataset.title || 'Detail';
-    hdr.appendChild(h);
-    const close = document.createElement('button');
-    close.className = 'icon-btn';
-    close.type = 'button';
-    close.setAttribute('aria-label', 'Close detail');
-    close.textContent = '×';
-    close.addEventListener('click', closeDetailPanel);
-    hdr.appendChild(close);
-    detail.appendChild(hdr);
-    detail.appendChild(contentNode);
-    detail.hidden = false;
-    // Force reflow so the transition fires.
-    void detail.offsetWidth;
-    detail.classList.add('is-open');
-    detailOpener = opener || null;
-    try { close.focus(); } catch {}
-  }
-
-  function closeDetailPanel() {
-    if (!detail) return;
-    detail.classList.remove('is-open');
-    const done = () => {
-      detail.hidden = true;
-      detail.removeEventListener('transitionend', done);
-    };
-    if (reduced) done();
-    else detail.addEventListener('transitionend', done);
-    const opener = detailOpener;
-    detailOpener = null;
-    if (opener && typeof opener.focus === 'function') {
-      try { opener.focus(); } catch {}
+    function closeDetailPanel() {
+      if (!detail) return;
+      detail.classList.remove('is-open');
+      const reduced = prefersReducedMotion();
+      const done = () => {
+        detail.hidden = true;
+        detail.removeEventListener('transitionend', done);
+        pendingTransitionListeners.delete(done);
+      };
+      if (reduced) {
+        done();
+      } else {
+        detail.addEventListener('transitionend', done);
+        pendingTransitionListeners.add(done);
+      }
+      const opener = detailOpener;
+      detailOpener = null;
+      if (opener && typeof opener.focus === 'function') {
+        try { opener.focus(); } catch {}
+      }
     }
-  }
-
-  function openLoadDetail(load, side) {
-    const wrap = document.createElement('div');
-    wrap.dataset.title = `Load ${load.id}`;
-    const dl = document.createElement('dl');
-    dl.className = 'detail-kv';
-    const kv = [
-      ['Status', STATUS_LABEL[load.status] || load.status],
-      ['Pickup', load.pickup || '—'],
-      ['Dropoff', load.dropoff || '—'],
-      ['Carrier', load.carrier || 'Unassigned'],
-      ['Commodity', load.commodity || '—'],
-      ['Miles', fmtMiles(load.miles)],
-      ['Rate', fmtMoney(load.rate)],
-      ['ETA', fmtEta(load.eta)]
-    ];
-    kv.forEach(([k, v]) => {
-      const dt = document.createElement('dt'); dt.textContent = k;
-      const dd = document.createElement('dd'); dd.textContent = v;
-      dl.appendChild(dt); dl.appendChild(dd);
+    track(() => {
+      if (!detail) return;
+      pendingTransitionListeners.forEach((fn) => {
+        try { detail.removeEventListener('transitionend', fn); } catch {}
+      });
+      pendingTransitionListeners.clear();
     });
-    wrap.appendChild(dl);
 
-    const entry = registry.get(load.id);
-    const opener = entry && entry[side] ? entry[side].getElement() : (entry && entry.pickup ? entry.pickup.getElement() : null);
-    openDetailPanel(wrap, opener);
-  }
+    function openLoadDetail(load, side) {
+      const wrap = document.createElement('div');
+      wrap.dataset.title = `Load ${load.id}`;
+      const dl = document.createElement('dl');
+      dl.className = 'detail-kv';
+      const kv = [
+        ['Status', STATUS_LABEL[load.status] || load.status],
+        ['Pickup', load.pickup || '—'],
+        ['Dropoff', load.dropoff || '—'],
+        ['Carrier', load.carrier || 'Unassigned'],
+        ['Commodity', load.commodity || '—'],
+        ['Miles', fmtMiles(load.miles)],
+        ['Rate', fmtMoney(load.rate)],
+        ['ETA', fmtEta(load.eta)]
+      ];
+      kv.forEach(([k, v]) => {
+        const dt = document.createElement('dt'); dt.textContent = k;
+        const dd = document.createElement('dd'); dd.textContent = v;
+        dl.appendChild(dt); dl.appendChild(dd);
+      });
+      wrap.appendChild(dl);
 
-  function openCarrierDetail(carrier, city) {
-    const wrap = document.createElement('div');
-    wrap.dataset.title = carrier.name;
-    const dl = document.createElement('dl');
-    dl.className = 'detail-kv';
-    const kv = [
-      ['ID', carrier.id],
-      ['MC', carrier.mc || '—'],
-      ['HQ', city || 'Unknown'],
-      ['Rating', typeof carrier.rating === 'number' ? carrier.rating.toFixed(1) : '—'],
-      ['Equipment', (carrier.equipment || []).join(', ') || '—'],
-      ['Lanes', (carrier.lanes || []).join(', ') || '—'],
-      ['Available', carrier.available ? 'Yes' : 'No'],
-      ['Phone', carrier.phone || '—']
-    ];
-    kv.forEach(([k, v]) => {
-      const dt = document.createElement('dt'); dt.textContent = k;
-      const dd = document.createElement('dd'); dd.textContent = v;
-      dl.appendChild(dt); dl.appendChild(dd);
-    });
-    wrap.appendChild(dl);
-
-    const entry = registry.get(carrier.id);
-    const opener = entry && entry.marker ? entry.marker.getElement() : null;
-    openDetailPanel(wrap, opener);
-  }
-
-  // --- agent-callable methods
-
-  const smoothOpts = { animate: !reduced, duration: reduced ? 0 : 0.28 };
-
-  function panTo(lat, lng, zoom) {
-    const z = zoom != null && Number.isFinite(Number(zoom)) ? Number(zoom) : map.getZoom();
-    map.setView([Number(lat), Number(lng)], z, smoothOpts);
-  }
-
-  function focusLoad(loadId) {
-    const entry = registry.get(loadId);
-    if (!entry || entry.kind !== 'load') return false;
-    const ll = entry.pickupLL || entry.dropoffLL;
-    if (!ll) return false;
-    if (entry.pickupLL && entry.dropoffLL) {
-      const bounds = L.latLngBounds([
-        [entry.pickupLL.lat, entry.pickupLL.lng],
-        [entry.dropoffLL.lat, entry.dropoffLL.lng]
-      ]).pad(0.25);
-      map.flyToBounds(bounds, smoothOpts);
-    } else {
-      map.flyTo([ll.lat, ll.lng], 7, smoothOpts);
+      const entry = registry.get(load.id);
+      const opener = entry && entry[side] ? entry[side].getElement() : (entry && entry.pickup ? entry.pickup.getElement() : null);
+      openDetailPanel(wrap, opener);
     }
-    [entry.pickup, entry.dropoff].forEach((m) => {
-      if (!m) return;
-      const el = m.getElement();
-      if (!el) return;
-      const pin = el.querySelector('.map-pin');
+
+    function openCarrierDetail(carrier, city) {
+      const wrap = document.createElement('div');
+      wrap.dataset.title = carrier.name;
+      const dl = document.createElement('dl');
+      dl.className = 'detail-kv';
+      const kv = [
+        ['ID', carrier.id],
+        ['MC', carrier.mc || '—'],
+        ['HQ', city || 'Unknown'],
+        ['Rating', typeof carrier.rating === 'number' ? carrier.rating.toFixed(1) : '—'],
+        ['Equipment', (carrier.equipment || []).join(', ') || '—'],
+        ['Lanes', (carrier.lanes || []).join(', ') || '—'],
+        ['Available', carrier.available ? 'Yes' : 'No'],
+        ['Phone', carrier.phone || '—']
+      ];
+      kv.forEach(([k, v]) => {
+        const dt = document.createElement('dt'); dt.textContent = k;
+        const dd = document.createElement('dd'); dd.textContent = v;
+        dl.appendChild(dt); dl.appendChild(dd);
+      });
+      wrap.appendChild(dl);
+
+      const entry = registry.get(carrier.id);
+      const opener = entry && entry.marker ? entry.marker.getElement() : null;
+      openDetailPanel(wrap, opener);
+    }
+
+    // --- pan helpers
+
+    // Debounce rapid flyTo calls from the agent — within 400ms, force
+    // animate:false so we don't cancel an in-flight flyTo with a new one.
+    let _lastCallAt = 0;
+    function shouldSkipAnimation() {
+      const now = Date.now();
+      const tooFast = now - _lastCallAt < 400;
+      _lastCallAt = now;
+      return tooFast;
+    }
+
+    function smoothPan(target, zoom) {
+      const reduced = prefersReducedMotion();
+      const z = (zoom != null && Number.isFinite(Number(zoom))) ? Number(zoom) : map.getZoom();
+      if (reduced) {
+        map.setView([target.lat, target.lng], z, { animate: false });
+        return;
+      }
+      if (shouldSkipAnimation()) {
+        map.setView([target.lat, target.lng], z, { animate: false });
+        return;
+      }
+      const here = map.getCenter();
+      const distance = haversineKm({ lat: here.lat, lng: here.lng }, target);
+      if (distance > FLY_THRESHOLD_KM) {
+        map.flyTo([target.lat, target.lng], z, { animate: true, duration: PAN_DURATION_FLY_S });
+      } else {
+        map.setView([target.lat, target.lng], z, { animate: true, duration: PAN_DURATION_LOCAL_S });
+      }
+    }
+
+    function smoothFitBounds(bounds) {
+      const reduced = prefersReducedMotion();
+      if (reduced) {
+        map.fitBounds(bounds, { animate: false, maxZoom: 6 });
+        return;
+      }
+      if (shouldSkipAnimation()) {
+        map.fitBounds(bounds, { animate: false, maxZoom: 6 });
+        return;
+      }
+      const here = map.getCenter();
+      const center = bounds.getCenter();
+      const distance = haversineKm({ lat: here.lat, lng: here.lng }, { lat: center.lat, lng: center.lng });
+      const duration = distance > FLY_THRESHOLD_KM ? PAN_DURATION_FLY_S : PAN_DURATION_LOCAL_S;
+      map.flyToBounds(bounds, { animate: true, duration, maxZoom: 6 });
+    }
+
+    function announceFocus(label) {
+      try {
+        const el = document.getElementById('route-live-region');
+        if (el && label) el.textContent = `Focused on ${label}`;
+      } catch {}
+    }
+
+    // --- internal actions (used by list clicks + agent methods)
+
+    function focusLoadInternal(loadId) {
+      const entry = registry.get(loadId);
+      if (!entry || entry.kind !== 'load') return false;
+      const ll = entry.pickupLL || entry.dropoffLL;
+      if (!ll) return false;
+      if (entry.pickupLL && entry.dropoffLL) {
+        const bounds = L.latLngBounds([
+          [entry.pickupLL.lat, entry.pickupLL.lng],
+          [entry.dropoffLL.lat, entry.dropoffLL.lng]
+        ]).pad(0.25);
+        smoothFitBounds(bounds);
+      } else {
+        smoothPan({ lat: ll.lat, lng: ll.lng }, 7);
+      }
+      [entry.pickup, entry.dropoff].forEach((m) => {
+        if (!m) return;
+        const el = m.getElement();
+        if (!el) return;
+        const pin = el.querySelector('.map-pin');
+        if (pin) flash(pin);
+      });
+      return true;
+    }
+
+    function focusCarrierInternal(carrierId) {
+      const entry = registry.get(carrierId);
+      if (!entry || entry.kind !== 'carrier') return false;
+      smoothPan({ lat: entry.coords.lat, lng: entry.coords.lng }, 7);
+      const el = entry.marker && entry.marker.getElement();
+      const pin = el && el.querySelector('.map-pin');
       if (pin) flash(pin);
-    });
-    return true;
-  }
-
-  function focusCarrier(carrierId) {
-    const entry = registry.get(carrierId);
-    if (!entry || entry.kind !== 'carrier') return false;
-    map.flyTo([entry.coords.lat, entry.coords.lng], 7, smoothOpts);
-    const el = entry.marker && entry.marker.getElement();
-    const pin = el && el.querySelector('.map-pin');
-    if (pin) flash(pin);
-    return true;
-  }
-
-  function flash(el) {
-    el.classList.remove('is-agent-highlighted');
-    void el.offsetWidth;
-    el.classList.add('is-agent-highlighted');
-    setTimeout(() => el.classList.remove('is-agent-highlighted'), 1400);
-  }
-
-  function focusTarget(target) {
-    if (target == null) return false;
-    // coord object
-    if (typeof target === 'object' && target !== null && Number.isFinite(target.lat) && Number.isFinite(target.lng)) {
-      panTo(target.lat, target.lng, target.zoom);
-      return true;
-    }
-    const str = String(target).trim();
-    if (!str) return false;
-
-    // Id lookup first — cheaper than a string match.
-    if (registry.has(str)) {
-      const entry = registry.get(str);
-      if (entry.kind === 'load') return focusLoad(str);
-      if (entry.kind === 'carrier') return focusCarrier(str);
-    }
-
-    // City match (exact key, then case-insensitive key-contains).
-    const cityExact = CITY_COORDS[str];
-    if (cityExact) {
-      map.flyTo([cityExact.lat, cityExact.lng], 7, smoothOpts);
-      return true;
-    }
-    const lower = str.toLowerCase();
-    const cityKey = Object.keys(CITY_COORDS).find((k) => k.toLowerCase() === lower);
-    if (cityKey) {
-      const c = CITY_COORDS[cityKey];
-      map.flyTo([c.lat, c.lng], 7, smoothOpts);
       return true;
     }
 
-    // State match — accept "TX", "tx", "Texas".
-    const stateMatches = Object.keys(CITY_COORDS).filter((k) => {
-      const st = k.split(',')[1] ? k.split(',')[1].trim() : '';
-      return st && (st.toLowerCase() === lower || lower.endsWith(' ' + st.toLowerCase()));
-    });
-    if (stateMatches.length) {
-      const bounds = L.latLngBounds(stateMatches.map((k) => [CITY_COORDS[k].lat, CITY_COORDS[k].lng])).pad(0.2);
-      map.flyToBounds(bounds, { ...smoothOpts, maxZoom: 6 });
-      return true;
+    function flash(el) {
+      el.classList.remove('is-agent-highlighted');
+      void el.offsetWidth;
+      el.classList.add('is-agent-highlighted');
+      const t = setTimeout(() => {
+        flashTimers.delete(t);
+        el.classList.remove('is-agent-highlighted');
+      }, 1600);
+      flashTimers.add(t);
     }
 
-    // Loose contains.
-    const partial = Object.keys(CITY_COORDS).find((k) => k.toLowerCase().includes(lower));
-    if (partial) {
-      const c = CITY_COORDS[partial];
-      map.flyTo([c.lat, c.lng], 7, smoothOpts);
-      return true;
+    function knownCityHint() {
+      // Short list of covered cities to surface in target-not-found errors.
+      const sample = shuffledSample(Object.keys(CITY_COORDS), 5);
+      return sample.join(', ');
     }
-    return false;
-  }
 
-  function highlightLoad(loadId) {
-    const ok = focusLoad(loadId);
-    if (!ok) return false;
-    const entry = registry.get(loadId);
-    // Open the first available pin's popup.
-    const m = entry.pickup || entry.dropoff;
-    if (m) m.openPopup();
-    return true;
-  }
+    function focusTargetInternal(target) {
+      // coord object
+      if (target && typeof target === 'object' && !Array.isArray(target)
+          && Number.isFinite(Number(target.lat)) && Number.isFinite(Number(target.lng))) {
+        const lat = Number(target.lat);
+        const lng = Number(target.lng);
+        const z = Number.isFinite(Number(target.zoom)) ? Number(target.zoom) : undefined;
+        smoothPan({ lat, lng }, z);
+        const label = `${lat.toFixed(2)}, ${lng.toFixed(2)}`;
+        announceFocus(label);
+        return { matched: 'coords', label };
+      }
 
-  function setLayerVisible(layer, on) {
-    const name = String(layer || '').toLowerCase();
-    const visible = !!on;
-    if (name === 'loads') {
-      if (visible) { visibleLayers.add('loads'); loadLayer.addTo(map); }
-      else { visibleLayers.delete('loads'); map.removeLayer(loadLayer); }
-    } else if (name === 'carriers') {
-      if (visible) { visibleLayers.add('carriers'); carrierLayer.addTo(map); }
-      else { visibleLayers.delete('carriers'); map.removeLayer(carrierLayer); }
-    } else if (name === 'lanes') {
-      if (visible) { visibleLayers.add('lanes'); laneLayer.addTo(map); }
-      else { visibleLayers.delete('lanes'); map.removeLayer(laneLayer); }
-    } else if (name === 'delayed') {
-      delayedOnly = visible;
-      applyDelayedFilter();
-    } else {
-      return false;
-    }
-    // Reflect in the chip buttons.
-    const chip = filterRail && filterRail.querySelector(`[data-layer="${CSS.escape(name)}"]`);
-    if (chip) chip.setAttribute('aria-pressed', visible ? 'true' : 'false');
-    renderFilterList();
-    return true;
-  }
+      const str = String(target == null ? '' : target).trim();
+      if (!str) return null;
 
-  function applyDelayedFilter() {
-    // Re-add markers conditionally.
-    loadLayer.clearLayers();
-    loads.forEach((l) => {
-      if (delayedOnly && l.status !== 'delayed') return;
-      const entry = registry.get(l.id);
-      if (!entry) return;
-      [entry.pickup, entry.dropoff].forEach((m) => { if (m) loadLayer.addLayer(m); });
-    });
-  }
+      // Id lookup first.
+      if (registry.has(str)) {
+        const entry = registry.get(str);
+        if (entry.kind === 'load') {
+          const ok = focusLoadInternal(str);
+          if (!ok) return null;
+          announceFocus(`load ${str}`);
+          return { matched: 'load', label: str };
+        }
+        if (entry.kind === 'carrier') {
+          const ok = focusCarrierInternal(str);
+          if (!ok) return null;
+          announceFocus(`carrier ${str}`);
+          return { matched: 'carrier', label: str };
+        }
+      }
 
-  // --- bootstrap data + bind UI
+      // Exact city.
+      const cityExact = CITY_COORDS[str];
+      if (cityExact) {
+        smoothPan({ lat: cityExact.lat, lng: cityExact.lng }, 7);
+        announceFocus(str);
+        return { matched: 'city', label: str };
+      }
+      const lower = str.toLowerCase();
+      const cityKey = Object.keys(CITY_COORDS).find((k) => k.toLowerCase() === lower);
+      if (cityKey) {
+        const c = CITY_COORDS[cityKey];
+        smoothPan({ lat: c.lat, lng: c.lng }, 7);
+        announceFocus(cityKey);
+        return { matched: 'city', label: cityKey };
+      }
 
-  loads.forEach(addLoadMarker);
-  carriers.forEach(addCarrierMarker);
-  renderFilterList();
-  renderListView();
-
-  // Chip filters
-  if (filterRail) {
-    filterRail.querySelectorAll('.chip-btn[data-layer]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const layer = btn.getAttribute('data-layer');
-        const next = btn.getAttribute('aria-pressed') !== 'true';
-        setLayerVisible(layer, next);
+      // State match.
+      const stateMatches = Object.keys(CITY_COORDS).filter((k) => {
+        const st = k.split(',')[1] ? k.split(',')[1].trim() : '';
+        return st && (st.toLowerCase() === lower || lower.endsWith(' ' + st.toLowerCase()));
       });
-    });
-  }
+      if (stateMatches.length) {
+        const bounds = L.latLngBounds(stateMatches.map((k) => [CITY_COORDS[k].lat, CITY_COORDS[k].lng])).pad(0.2);
+        smoothFitBounds(bounds);
+        announceFocus(str);
+        return { matched: 'state', label: str };
+      }
 
-  if (searchInput) searchInput.addEventListener('input', () => renderFilterList());
+      // Loose contains.
+      const partial = Object.keys(CITY_COORDS).find((k) => k.toLowerCase().includes(lower));
+      if (partial) {
+        const c = CITY_COORDS[partial];
+        smoothPan({ lat: c.lat, lng: c.lng }, 7);
+        announceFocus(partial);
+        return { matched: 'city', label: partial };
+      }
+      return null;
+    }
 
-  // Zoom/reset controls
-  if (zoomInBtn) zoomInBtn.addEventListener('click', () => map.zoomIn(1, smoothOpts));
-  if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => map.zoomOut(1, smoothOpts));
-  if (resetBtn) resetBtn.addEventListener('click', () => {
-    map.flyTo([DEFAULT_VIEW.lat, DEFAULT_VIEW.lng], DEFAULT_VIEW.zoom, smoothOpts);
-  });
+    function highlightLoadInternal(loadId) {
+      const ok = focusLoadInternal(loadId);
+      if (!ok) return null;
+      const entry = registry.get(loadId);
+      const m = entry.pickup || entry.dropoff;
+      if (m) m.openPopup();
+      announceFocus(`load ${loadId}`);
+      return {
+        load_id: loadId,
+        pickup: entry.record && entry.record.pickup,
+        dropoff: entry.record && entry.record.dropoff
+      };
+    }
 
-  // List view fallback toggle
-  let listOpen = false;
-  function setListView(on) {
-    listOpen = !!on;
-    if (listView) listView.hidden = !listOpen;
-    if (canvas) canvas.setAttribute('aria-hidden', listOpen ? 'true' : 'false');
+    function setLayerVisibleInternal(layer, on) {
+      const name = String(layer || '').toLowerCase();
+      const visible = !!on;
+      if (name === 'loads')    applyPaneVisibility('loads-pane', visible, 'loads');
+      else if (name === 'carriers') applyPaneVisibility('carriers-pane', visible, 'carriers');
+      else if (name === 'lanes') applyPaneVisibility('lanes-pane', visible, 'lanes');
+      else if (name === 'delayed') { delayedOnly = visible; applyDelayedFilter(); }
+      else return null;
+
+      const chip = filterRail && filterRail.querySelector(`[data-layer="${CSS.escape(name)}"]`);
+      if (chip) chip.setAttribute('aria-pressed', visible ? 'true' : 'false');
+      renderFilterList();
+      updateEmptyState();
+      return { layer: name, visible };
+    }
+
+    function applyPaneVisibility(paneName, visible, setKey) {
+      const pane = map.getPane(paneName);
+      if (!pane) return;
+      if (visible) visibleLayers.add(setKey);
+      else visibleLayers.delete(setKey);
+      pane.classList.toggle('map-pane-hidden', !visible);
+    }
+
+    function applyDelayedFilter() {
+      // Loads pane — we rebuild the layer's contents but re-apply each
+      // marker's `data-agent-id` so the agent's element scanner still sees
+      // them (Oracle [W6]).
+      loadLayer.clearLayers();
+      loads.forEach((l) => {
+        if (delayedOnly && l.status !== 'delayed') return;
+        const entry = registry.get(l.id);
+        if (!entry) return;
+        if (entry.pickup) {
+          loadLayer.addLayer(entry.pickup);
+          const el = entry.pickup.getElement();
+          if (el) el.setAttribute('data-agent-id', entry.pickupAgentId);
+        }
+        if (entry.dropoff) {
+          loadLayer.addLayer(entry.dropoff);
+          const el = entry.dropoff.getElement();
+          if (el) el.setAttribute('data-agent-id', entry.dropoffAgentId);
+        }
+      });
+    }
+
+    function updateEmptyState() {
+      if (!emptyStateEl) return;
+      const anyVisible =
+        visibleLayers.has('loads') || visibleLayers.has('carriers') || visibleLayers.has('lanes');
+      emptyStateEl.hidden = anyVisible;
+    }
+
+    // --- bootstrap data + bind UI
+
+    loads.forEach(addLoadMarker);
+    carriers.forEach(addCarrierMarker);
+    renderFilterListImmediate();
+    renderListView();
+    updateEmptyState();
+
+    // Chip filters
+    if (filterRail) {
+      const chipBtns = filterRail.querySelectorAll('.chip-btn[data-layer]');
+      const chipHandlers = [];
+      chipBtns.forEach((btn) => {
+        const handler = () => {
+          const layer = btn.getAttribute('data-layer');
+          const next = btn.getAttribute('aria-pressed') !== 'true';
+          setLayerVisibleInternal(layer, next);
+        };
+        btn.addEventListener('click', handler);
+        chipHandlers.push([btn, handler]);
+      });
+      track(() => { chipHandlers.forEach(([b, h]) => { try { b.removeEventListener('click', h); } catch {} }); });
+    }
+
+    let onSearchInput = null;
+    if (searchInput) {
+      onSearchInput = () => renderFilterList();
+      searchInput.addEventListener('input', onSearchInput);
+      track(() => { try { searchInput.removeEventListener('input', onSearchInput); } catch {} });
+    }
+
+    // Zoom/reset controls — user-initiated, always animated (outside the
+    // agent-debounce window).
+    let onZoomIn = null, onZoomOut = null, onReset = null;
+    if (zoomInBtn) {
+      onZoomIn = () => {
+        const reduced = prefersReducedMotion();
+        map.zoomIn(1, { animate: !reduced });
+      };
+      zoomInBtn.addEventListener('click', onZoomIn);
+      track(() => { try { zoomInBtn.removeEventListener('click', onZoomIn); } catch {} });
+    }
+    if (zoomOutBtn) {
+      onZoomOut = () => {
+        const reduced = prefersReducedMotion();
+        map.zoomOut(1, { animate: !reduced });
+      };
+      zoomOutBtn.addEventListener('click', onZoomOut);
+      track(() => { try { zoomOutBtn.removeEventListener('click', onZoomOut); } catch {} });
+    }
+    if (resetBtn) {
+      onReset = () => {
+        const reduced = prefersReducedMotion();
+        if (reduced) {
+          map.setView([DEFAULT_VIEW.lat, DEFAULT_VIEW.lng], DEFAULT_VIEW.zoom, { animate: false });
+        } else {
+          map.flyTo([DEFAULT_VIEW.lat, DEFAULT_VIEW.lng], DEFAULT_VIEW.zoom, {
+            animate: true,
+            duration: PAN_DURATION_FLY_S
+          });
+        }
+      };
+      resetBtn.addEventListener('click', onReset);
+      track(() => { try { resetBtn.removeEventListener('click', onReset); } catch {} });
+    }
+
+    // List view fallback toggle
+    let listOpen = false;
+    let onListToggle = null;
+    function setListView(on) {
+      listOpen = !!on;
+      if (listView) {
+        listView.hidden = !listOpen;
+        listView.toggleAttribute('inert', !listOpen);
+      }
+      if (canvas) canvas.setAttribute('aria-hidden', listOpen ? 'true' : 'false');
+      if (listToggleBtn) {
+        listToggleBtn.setAttribute('aria-pressed', listOpen ? 'true' : 'false');
+        listToggleBtn.textContent = listOpen ? 'Map view' : 'List view';
+      }
+    }
     if (listToggleBtn) {
-      listToggleBtn.setAttribute('aria-pressed', listOpen ? 'true' : 'false');
-      listToggleBtn.textContent = listOpen ? 'Map view' : 'List view';
+      onListToggle = () => setListView(!listOpen);
+      listToggleBtn.addEventListener('click', onListToggle);
+      track(() => { try { listToggleBtn.removeEventListener('click', onListToggle); } catch {} });
     }
-  }
-  if (listToggleBtn) listToggleBtn.addEventListener('click', () => setListView(!listOpen));
 
-  // ESC closes detail panel
-  function onKeydown(ev) {
-    if (ev.key === 'Escape' && detail && detail.classList.contains('is-open')) {
-      closeDetailPanel();
+    // ESC closes detail panel
+    function onKeydown(ev) {
+      if (ev.key === 'Escape' && detail && detail.classList.contains('is-open')) {
+        closeDetailPanel();
+      }
     }
+    document.addEventListener('keydown', onKeydown);
+    track(() => document.removeEventListener('keydown', onKeydown));
+
+    // Mobile swipe-down-to-dismiss on the bottom-sheet detail.
+    let onDetailTouchStart = null, onDetailTouchMove = null;
+    if (detail && window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+      let touchStartY = 0;
+      onDetailTouchStart = (ev) => {
+        if (ev.touches.length !== 1) return;
+        touchStartY = ev.touches[0].clientY;
+      };
+      onDetailTouchMove = (ev) => {
+        if (ev.touches.length !== 1) return;
+        const dy = ev.touches[0].clientY - touchStartY;
+        if (dy > 60 && detail.scrollTop === 0) {
+          closeDetailPanel();
+          touchStartY = ev.touches[0].clientY;
+        }
+      };
+      detail.addEventListener('touchstart', onDetailTouchStart, { passive: true });
+      detail.addEventListener('touchmove',  onDetailTouchMove,  { passive: true });
+      track(() => {
+        try { detail.removeEventListener('touchstart', onDetailTouchStart); } catch {}
+        try { detail.removeEventListener('touchmove',  onDetailTouchMove); } catch {}
+      });
+    }
+
+    // Leaflet needs an explicit invalidateSize() when its container changes.
+    const ro = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => { try { map.invalidateSize(); } catch {} })
+      : null;
+    if (ro && canvas) ro.observe(canvas);
+    track(() => { if (ro) { try { ro.disconnect(); } catch {} } });
+
+    // --- wire public API methods (now that internals exist).
+
+    api.panTo = function panTo(lat, lng, zoom, opts) {
+      if (destroyed) return envelopeErr('destroyed', 'Map has been torn down.');
+      if (!readySettled) return envelopeErr('not_ready', 'Map not mounted yet.');
+      const la = Number(lat); const ln = Number(lng);
+      if (!Number.isFinite(la) || !Number.isFinite(ln)) {
+        return envelopeErr('bad_input', 'panTo: lat/lng must be finite numbers.');
+      }
+      const z = (zoom != null && Number.isFinite(Number(zoom))) ? Number(zoom) : map.getZoom();
+      if (opts && opts.animate === false) {
+        map.setView([la, ln], z, { animate: false });
+      } else {
+        smoothPan({ lat: la, lng: ln }, z);
+      }
+      return envelopeOk({ lat: la, lng: ln, zoom: z });
+    };
+
+    api.focusTarget = function focusTarget(target) {
+      if (destroyed) return envelopeErr('destroyed', 'Map has been torn down.');
+      if (!readySettled) return envelopeErr('not_ready', 'Map not mounted yet.');
+      // Bad-input guard: plain empty string or null.
+      if (target == null) return envelopeErr('bad_input', 'focusTarget: empty target.');
+      if (typeof target === 'string' && !target.trim()) {
+        return envelopeErr('bad_input', 'focusTarget: empty target.');
+      }
+      const r = focusTargetInternal(target);
+      if (!r) {
+        const display = typeof target === 'string' ? target : JSON.stringify(target);
+        return envelopeErr(
+          'target_not_found',
+          `No city, state, or id matched "${display}". Known cities include: ${knownCityHint()}.`
+        );
+      }
+      return envelopeOk(r);
+    };
+
+    api.highlightLoad = function highlightLoad(loadId) {
+      if (destroyed) return envelopeErr('destroyed', 'Map has been torn down.');
+      if (!readySettled) return envelopeErr('not_ready', 'Map not mounted yet.');
+      const id = typeof loadId === 'string' ? loadId.trim() : '';
+      if (!id) return envelopeErr('bad_input', 'highlightLoad: empty id.');
+      const entry = registry.get(id);
+      if (!entry || entry.kind !== 'load') {
+        return envelopeErr(
+          'load_not_found',
+          `Load "${id}" not in current dataset. (${loads.length} loads total.)`
+        );
+      }
+      const r = highlightLoadInternal(id);
+      if (!r) {
+        return envelopeErr(
+          'load_not_found',
+          `Load "${id}" not in current dataset. (${loads.length} loads total.)`
+        );
+      }
+      return envelopeOk(r);
+    };
+
+    api.focusCarrier = function focusCarrier(carrierId) {
+      if (destroyed) return envelopeErr('destroyed', 'Map has been torn down.');
+      if (!readySettled) return envelopeErr('not_ready', 'Map not mounted yet.');
+      const id = typeof carrierId === 'string' ? carrierId.trim() : '';
+      if (!id) return envelopeErr('bad_input', 'focusCarrier: empty id.');
+      const entry = registry.get(id);
+      if (!entry || entry.kind !== 'carrier') {
+        return envelopeErr('carrier_not_found', `Carrier "${id}" not in current dataset.`);
+      }
+      const ok = focusCarrierInternal(id);
+      if (!ok) return envelopeErr('carrier_not_found', `Carrier "${id}" not in current dataset.`);
+      const hq = CARRIER_HQ[id];
+      return envelopeOk({ carrier_id: id, city: hq ? hq.city : '' });
+    };
+
+    api.setLayerVisible = function setLayerVisible(layer, on) {
+      if (destroyed) return envelopeErr('destroyed', 'Map has been torn down.');
+      if (!readySettled) return envelopeErr('not_ready', 'Map not mounted yet.');
+      const name = String(layer || '').toLowerCase();
+      if (!['loads', 'carriers', 'lanes', 'delayed'].includes(name)) {
+        return envelopeErr(
+          'unknown_layer',
+          `Layer "${name}" not recognised. One of: loads, carriers, lanes, delayed.`
+        );
+      }
+      const r = setLayerVisibleInternal(name, on);
+      if (!r) {
+        return envelopeErr(
+          'unknown_layer',
+          `Layer "${name}" not recognised. One of: loads, carriers, lanes, delayed.`
+        );
+      }
+      return envelopeOk(r);
+    };
+
+    // Expose BEFORE ready resolves so callers can `await w.ready`.
+    window.__mapWidget = api;
+    track(() => { if (window.__mapWidget === api) { try { delete window.__mapWidget; } catch { window.__mapWidget = undefined; } } });
+
+    // Wait for first tile paint (or give up after ~5s and fail loudly).
+    await new Promise((res, rej) => {
+      let settled = false;
+      const budget = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        rej(new Error('Tile provider unreachable after retries.'));
+      }, 5000);
+      tileRetryTimers.add(budget);
+      const onFirstTile = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(budget);
+        tileRetryTimers.delete(budget);
+        try { tileLayer.off('tileload', onFirstTile); } catch {}
+        res();
+      };
+      tileLayer.on('tileload', onFirstTile);
+    });
+
+    // Hide skeleton + clear aria-busy AFTER first paint.
+    skeleton.classList.add('is-hidden');
+    if (canvas) canvas.removeAttribute('aria-busy');
+    const skelDone = () => {
+      skeleton.hidden = true;
+      skeleton.removeEventListener('transitionend', skelDone);
+    };
+    if (prefersReducedMotion()) {
+      skelDone();
+    } else {
+      skeleton.addEventListener('transitionend', skelDone);
+      track(() => { try { skeleton.removeEventListener('transitionend', skelDone); } catch {} });
+    }
+
+    readyResolve();
+    return { api, destroy: api.destroy };
+  } catch (err) {
+    api.destroy();
+    if (!readySettled) {
+      try { readyReject({ ok: false, code: 'tile_error', error: String(err && err.message || err) }); } catch {}
+    }
+    throw err;
   }
-  document.addEventListener('keydown', onKeydown);
-
-  // --- agent event wiring
-  const onFocus = (ev) => {
-    const d = ev.detail || {};
-    focusTarget(d.target != null ? d.target : d);
-  };
-  const onHighlight = (ev) => {
-    const d = ev.detail || {};
-    if (d.load_id) highlightLoad(d.load_id);
-  };
-  const onShowLayer = (ev) => {
-    const d = ev.detail || {};
-    if (d.layer != null && d.visible != null) setLayerVisible(d.layer, d.visible);
-  };
-  document.addEventListener('map:focus', onFocus);
-  document.addEventListener('map:highlight-load', onHighlight);
-  document.addEventListener('map:show-layer', onShowLayer);
-
-  // Make the canvas itself resizable when the rail collapses — Leaflet
-  // needs an explicit invalidateSize() when its container changes size.
-  const ro = typeof ResizeObserver !== 'undefined'
-    ? new ResizeObserver(() => { try { map.invalidateSize(); } catch {} })
-    : null;
-  if (ro && canvas) ro.observe(canvas);
-
-  const api = {
-    panTo,
-    focusTarget,
-    highlightLoad,
-    setLayerVisible,
-    focusLoad,
-    focusCarrier,
-    openLoadDetail,
-    openCarrierDetail,
-    CITY_COORDS,
-    _map: map
-  };
-
-  // expose a global handle for the agent's tool handlers (fallback for
-  // environments where the event wiring hasn't caught up).
-  window.__mapWidget = api;
-
-  function destroy() {
-    try { map.remove(); } catch {}
-    if (ro && canvas) try { ro.unobserve(canvas); } catch {}
-    document.removeEventListener('keydown', onKeydown);
-    document.removeEventListener('map:focus', onFocus);
-    document.removeEventListener('map:highlight-load', onHighlight);
-    document.removeEventListener('map:show-layer', onShowLayer);
-    if (window.__mapWidget === api) delete window.__mapWidget;
-  }
-
-  return { api, destroy };
 }
 
 export { CITY_COORDS };

@@ -253,11 +253,17 @@
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
+  border: 1px solid transparent;
   font-size: var(--fs-sm);
   color: var(--color-text);
-  transition: background var(--dur-fast) var(--ease-out-expo);
+  transition:
+    background var(--dur-fast) var(--ease-out-expo),
+    border-color var(--dur-fast) var(--ease-out-expo);
 }
-.dispatch-map-lane:hover { background: var(--color-bg-elev-2); }
+.dispatch-map-lane:hover {
+  background: var(--color-bg-elev-2);
+  border-color: var(--color-border-strong);
+}
 .dispatch-map-lane .lane-dot {
   width: 8px; height: 8px;
   border-radius: 50%;
