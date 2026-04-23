@@ -561,12 +561,12 @@ export class VoiceAgent extends EventTarget {
    * audio-flow flow:
    *   1. Unlock AudioContext + <audio> elements synchronously (no await yet).
    *   2. Mark state DIALING.
-   *   3. Kick off startCall.webm playback WITHOUT awaiting it — it runs
+   *   3. Kick off the callOpen clip WITHOUT awaiting it — it runs
    *      in parallel with the WS/mic handshake. We capture a promise
    *      (`_callOpenPromise`) that resolves on ended/error/timeout.
    *   4. Open mic (await getUserMedia).
    *   5. Open WS → hello (with greet intent) → wait for setup_complete.
-   *   6. When BOTH the start-audio promise resolves AND setup_complete
+   *   6. When BOTH the call-open promise resolves AND setup_complete
    *      fires, send `greet_gate_open` to the server — that releases
    *      Gemini's greeting — and start the background audio loop (if
    *      the user's toggle is on).
