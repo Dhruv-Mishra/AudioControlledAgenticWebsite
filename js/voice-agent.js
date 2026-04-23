@@ -396,6 +396,7 @@ export class VoiceAgent extends EventTarget {
     this._agentTurnComplete = false;
     this._agentAudioDrained = false;
     this._agentEndingTimer = null;
+    this._agentEndingGraceTimer = null;
     this._agentEndingListeners = null;
     // Round-3 fix 1: label for the parallel-init `console.time` span.
     // Set at the top of placeCall; closed on setup_complete OR on any
@@ -782,12 +783,16 @@ export class VoiceAgent extends EventTarget {
    *  to call even if nothing was armed. Called from teardown paths
    *  + early-kill (user click interrupting the wait). */
   _cancelAgentEndingWait(why) {
-    if (!this._agentEndingArmed && !this._agentEndingTimer && !this._agentEndingListeners) return;
+    if (!this._agentEndingArmed && !this._agentEndingTimer && !this._agentEndingListeners && !this._agentEndingGraceTimer) return;
     dlog('agent-end-call wait cancelled why=' + (why || '?'));
     this._agentEndingArmed = false;
     if (this._agentEndingTimer) {
       clearTimeout(this._agentEndingTimer);
       this._agentEndingTimer = null;
+    }
+    if (this._agentEndingGraceTimer) {
+      clearTimeout(this._agentEndingGraceTimer);
+      this._agentEndingGraceTimer = null;
     }
     if (this._agentEndingListeners) {
       try { this.removeEventListener('turn-complete', this._agentEndingListeners.onTurnComplete); } catch {}
@@ -1612,10 +1617,28 @@ export class VoiceAgent extends EventTarget {
           if (!this._agentTurnComplete || !this._agentAudioDrained) {
             dlog('agent-end-call waiting — turn=' + this._agentTurnComplete +
               ' drained=' + this._agentAudioDrained + ' via=' + trigger);
+            // end-call-latency: once audio has drained (user heard the
+            // last word), cap the additional wait for turn_complete.
+            // Gemini often sends turn_complete a few hundred ms AFTER
+            // audio generation finishes; without this cap, the user
+            // hears "Have a good day!" then a noticeable pause before
+            // the callClose chime. 300 ms is well under the perceptual
+            // threshold for a conversational turn and still gives the
+            // turn_complete frame ample time to arrive.
+            if (this._agentAudioDrained && !this._agentTurnComplete && !this._agentEndingGraceTimer) {
+              this._agentEndingGraceTimer = setTimeout(() => {
+                this._agentEndingGraceTimer = null;
+                if (!this._agentEndingArmed) return;
+                dlog('agent-end-call grace-expired — proceeding without turn_complete');
+                this._agentTurnComplete = true;
+                tryFinish('grace_timeout');
+              }, 300);
+            }
             return;
           }
           // Both gates closed — run teardown.
           clearTimeout(this._agentEndingTimer); this._agentEndingTimer = null;
+          clearTimeout(this._agentEndingGraceTimer); this._agentEndingGraceTimer = null;
           this._agentEndingArmed = false;
           dlog('agent-end-call deterministic fire via=' + trigger);
           this._gracefullyEndCall('agent_end_call').catch(() => {});
@@ -1634,15 +1657,19 @@ export class VoiceAgent extends EventTarget {
         this.addEventListener('turn-complete', onTurnComplete);
         this.pipeline.addEventListener('agent-playback-drained', onAgentDrained);
         this._agentEndingListeners = { onTurnComplete, onAgentDrained };
+        this._agentEndingGraceTimer = null;
 
-        // Safety timeout: 10 s. If Gemini dies mid-turn, proceed anyway.
+        // Safety timeout: 3 s. If Gemini dies mid-turn, proceed anyway.
+        // Reduced from 10 s — that was a worst-case guard but meant the
+        // call could hang for ages if a signal genuinely failed.
         this._agentEndingTimer = setTimeout(() => {
           if (!this._agentEndingArmed) return;
           // eslint-disable-next-line no-console
           console.error('[jarvis] agent-end-call timeout — turn_complete or drained never fired. Proceeding with teardown.');
           this._agentEndingArmed = false;
+          clearTimeout(this._agentEndingGraceTimer); this._agentEndingGraceTimer = null;
           this._gracefullyEndCall('agent_end_call_timeout').catch(() => {});
-        }, 10000);
+        }, 3000);
 
         // If audio was ALREADY drained at the moment the tool fired
         // (no sign-off was ever scheduled), we still wait for
