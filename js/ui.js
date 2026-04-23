@@ -33,69 +33,100 @@ function on(el, ev, fn, opts) { el.addEventListener(ev, fn, opts); }
 
 // --- Dock markup ---
 //
-// "Harbor Bridge" voice dock. Five stacked rows when expanded:
-//   1. Header     — brand + state pill + chips + icon actions
-//   2. Scope      — canvas-driven radar visualiser + VU baton
-//   3. Transcript — ledger-ruled conversation feed
-//   4. Quick chips — in-call horizontal chip strip (mounted by quick-chips.js)
-//   5. Action      — Place / End call button + mute + hint + kbd pips
+// "Expressive Console" voice dock v2. The dock defaults to a MINIMISED
+// pill: a 60 px rounded rectangle anchored bottom-right (desktop) or
+// bottom-full-width (mobile). The pill is actionable — it contains the
+// Place Call button directly, so the user never needs to expand it to
+// start a call.
 //
-// Settings sheet slides in from the right of the dock (desktop) or occupies
-// the full bottom-sheet (mobile). Uses a tabbed layout (Voice / Agent /
-// Transcript / Theme) but every control ID from the old single-column layout
-// is preserved so no JS wiring breaks.
+// Pill layout (minimised — always visible):
+//   [ state-dot + "Jarvis" | status-chip | timer-chip | muted-chip | mic | call-btn | settings | expand-caret ]
+//
+// Clicking the caret expands the dock into a full panel (28 px uniform
+// radius, container-morph per §8.6). Expanded rows top→bottom:
+//   1. Header pill (same as above — the Call button lives here in both states)
+//   2. Error banner (hidden by default)
+//   3. Visualiser — 5-bar vertical VU inside #voice-status-strip
+//   4. Transcript pane (#voice-transcript)
+//   5. Quick chips row (mounted by quick-chips.js inside .voice-dock-body)
+//   6. Action footer — activity indicator + hint + kbd pips
+//
+// Settings sheet slides from right (desktop) or as bottom-sheet (mobile).
+// Tabbed layout: Voice / Agent / Transcript / Theme. Every preserved ID
+// from architecture §2 remains intact for JS wiring.
 
 function buildDockMarkup() {
   const dock = document.createElement('section');
   dock.className = 'voice-dock';
   dock.id = 'voice-dock';
   dock.setAttribute('aria-label', 'Voice agent');
+  dock.setAttribute('data-state', 'idle');
   dock.innerHTML = `
-    <div class="voice-dock-halo" aria-hidden="true"></div>
-    <div class="voice-dock-grab" aria-hidden="true"></div>
-
     <header class="voice-dock-header">
       <div class="voice-dock-brand">
-        <span class="voice-dock-radar" aria-hidden="true">
-          <span class="voice-dock-radar-dot"></span>
-        </span>
+        <span class="voice-state-dot" aria-hidden="true"></span>
         <span class="voice-dock-brand-name">Jarvis</span>
       </div>
+
       <div class="voice-dock-header-chips">
         <span class="voice-status-pill" id="voice-status-pill" data-state="idle" aria-live="polite">
-          <span class="voice-status-pill-dot" aria-hidden="true"></span>
-          <span class="voice-status-pill-label label">Stand by</span>
+          <span class="voice-status-pill-label label" id="voice-status-text">Stand by</span>
         </span>
         <span class="voice-chip voice-chip--live" id="voice-live-chip" hidden>
-          <span class="voice-chip-dot" aria-hidden="true"></span>
-          <span class="voice-chip-label">LIVE</span>
+          <span class="voice-chip-label">On call</span>
           <span class="voice-chip-timer mono" id="voice-live-timer">0:00</span>
         </span>
         <span class="voice-chip voice-chip--muted" id="voice-muted-chip" hidden>
-          <span class="voice-chip-dot" aria-hidden="true"></span>
           <span class="voice-chip-label">Muted</span>
         </span>
         <span class="voice-chip voice-chip--ambient voice-ambient-chip" id="voice-ambient-chip" data-agent-id="voice.ambient_chip" hidden>
-          <span class="voice-chip-dot" aria-hidden="true"></span>
           <span class="voice-chip-label">Ambient</span>
         </span>
       </div>
+
       <div class="voice-dock-header-actions">
-        <button class="voice-icon-btn icon-btn" id="voice-settings" aria-label="Call settings" aria-expanded="false" aria-controls="voice-settings-sheet" title="Call settings" data-agent-id="voice.settings">
+        <button class="voice-mic-btn mic-btn" id="voice-mic" data-agent-id="voice.mic" type="button" aria-pressed="false" aria-label="Mute microphone" title="Mute (M)" hidden>
+          <svg class="mic-icon mic-icon--on" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 1 0 6 0V5a3 3 0 0 0-3-3Z" fill="currentColor"/>
+            <path d="M5 11a7 7 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 18v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <svg class="mic-icon mic-icon--off" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M12 2a3 3 0 0 0-3 3v4l6 6V5a3 3 0 0 0-3-3Z" fill="currentColor"/>
+            <path d="M19 11a7 7 0 0 1-11.3 5.55L9 15a5 5 0 0 0 8-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 18v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="sr-only" id="voice-mic-label">Mute</span>
+        </button>
+
+        <button class="voice-call-btn call-btn call-btn--idle" id="voice-call-btn" data-agent-id="voice.call_btn" data-call-state="idle" type="button" aria-label="Place a call to Jarvis">
+          <span class="voice-call-btn-icons" aria-hidden="true">
+            <svg class="call-btn-icon call-btn-icon--phone" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.6 1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .6 3.6 1 1 0 0 1-.25 1l-2.25 2.2Z"/>
+            </svg>
+            <svg class="call-btn-icon call-btn-icon--end" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M12 9c-3.6 0-7 1-9.4 2.6a1 1 0 0 0-.3 1.4l1.8 2.4a1 1 0 0 0 1.2.3L7.2 15a1 1 0 0 0 .6-.9V12a11 11 0 0 1 8.4 0v2.1a1 1 0 0 0 .6.9l1.9.8a1 1 0 0 0 1.2-.3l1.8-2.4a1 1 0 0 0-.3-1.4C19 10 15.6 9 12 9Z"/>
+            </svg>
+            <svg class="call-btn-icon call-btn-icon--cancel" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M6 6l12 12M18 6 6 18"/>
+            </svg>
+          </span>
+          <span class="voice-call-btn-label call-btn-label" id="voice-call-btn-label">Place Call</span>
+        </button>
+
+        <button class="voice-icon-btn icon-btn" id="voice-settings" aria-label="Call settings" aria-expanded="false" aria-controls="voice-settings-sheet" title="Call settings" data-agent-id="voice.settings" type="button">
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>
           </svg>
         </button>
-        <button class="voice-icon-btn voice-icon-btn--collapse icon-btn" id="voice-dock-toggle" aria-expanded="true" aria-controls="voice-dock-body" data-agent-id="voice.dock.collapse" title="Collapse voice panel">
-          <svg class="voice-icon voice-icon--collapse" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M6 14l6 6 6-6"/>
-            <path d="M6 10l6-6 6 6"/>
+
+        <button class="voice-icon-btn voice-icon-btn--toggle icon-btn" id="voice-dock-toggle" aria-expanded="false" aria-controls="voice-dock-body" data-agent-id="voice.dock.collapse" title="Expand voice panel" type="button">
+          <svg class="voice-icon voice-icon--caret" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 15l6-6 6 6"/>
           </svg>
-          <svg class="voice-icon voice-icon--expand" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M6 9l6 6 6-6"/>
-          </svg>
-          <span class="sr-only">Collapse voice panel</span>
+          <span class="sr-only">Expand voice panel</span>
         </button>
       </div>
     </header>
@@ -103,47 +134,13 @@ function buildDockMarkup() {
     <div class="voice-error-banner" id="voice-error" role="alert" hidden></div>
 
     <div class="voice-dock-body" id="voice-dock-body">
-      <section class="voice-scope" id="voice-status-strip" data-state="idle" aria-hidden="true">
-        <canvas class="voice-scope-canvas" aria-hidden="true"></canvas>
-        <svg class="voice-scope-compass" viewBox="0 0 280 140" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
-          <defs>
-            <radialGradient id="voice-scope-gradient" cx="50%" cy="50%" r="55%">
-              <stop offset="0%" stop-color="var(--color-accent, #F7B32B)" stop-opacity="0.10"/>
-              <stop offset="70%" stop-color="var(--color-accent, #F7B32B)" stop-opacity="0"/>
-            </radialGradient>
-          </defs>
-          <g transform="translate(140 70)">
-            <circle r="58" fill="url(#voice-scope-gradient)"/>
-            <circle class="voice-scope-ring voice-scope-ring--outer" r="58" fill="none" stroke="currentColor" stroke-width="0.6" stroke-opacity="0.32"/>
-            <circle class="voice-scope-ring" r="40" fill="none" stroke="currentColor" stroke-width="0.4" stroke-opacity="0.22"/>
-            <circle class="voice-scope-ring" r="22" fill="none" stroke="currentColor" stroke-width="0.4" stroke-opacity="0.20"/>
-            <g class="voice-scope-ticks" stroke="currentColor" stroke-opacity="0.35" stroke-linecap="round">
-              <line x1="0" y1="-58" x2="0" y2="-50" stroke-width="1.1"/>
-              <line x1="58" y1="0" x2="50" y2="0" stroke-width="1.1"/>
-              <line x1="0" y1="58" x2="0" y2="50" stroke-width="1.1"/>
-              <line x1="-58" y1="0" x2="-50" y2="0" stroke-width="1.1"/>
-              <line x1="29" y1="-50.23" x2="25.12" y2="-43.5" stroke-width="0.5"/>
-              <line x1="50.23" y1="-29" x2="43.5" y2="-25.12" stroke-width="0.5"/>
-              <line x1="50.23" y1="29" x2="43.5" y2="25.12" stroke-width="0.5"/>
-              <line x1="29" y1="50.23" x2="25.12" y2="43.5" stroke-width="0.5"/>
-              <line x1="-29" y1="50.23" x2="-25.12" y2="43.5" stroke-width="0.5"/>
-              <line x1="-50.23" y1="29" x2="-43.5" y2="25.12" stroke-width="0.5"/>
-              <line x1="-50.23" y1="-29" x2="-43.5" y2="-25.12" stroke-width="0.5"/>
-              <line x1="-29" y1="-50.23" x2="-25.12" y2="-43.5" stroke-width="0.5"/>
-            </g>
-            <line class="voice-scope-needle" x1="0" y1="0" x2="0" y2="-58" stroke-linecap="round" stroke-width="1.4"/>
-            <circle class="voice-scope-hub" r="3" fill="currentColor"/>
-          </g>
-        </svg>
+      <section class="voice-visualiser" id="voice-status-strip" data-state="idle" aria-hidden="true">
         <div class="voice-vu" aria-hidden="true">
           <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
         </div>
-        <div class="voice-scope-readout">
-          <span class="voice-scope-readout-label">STATUS</span>
-          <span class="voice-status-text" id="voice-status-text">Stand by</span>
-          <span class="voice-scope-readout-sep" aria-hidden="true">·</span>
-          <span class="voice-scope-readout-label">SESS</span>
-          <span class="mono-id voice-scope-readout-id" id="voice-session-id">—</span>
+        <div class="voice-visualiser-readout">
+          <span class="voice-visualiser-label">Session</span>
+          <span class="mono-id voice-visualiser-id" id="voice-session-id">—</span>
         </div>
       </section>
 
@@ -155,38 +152,6 @@ function buildDockMarkup() {
     </div>
 
     <div class="voice-dock-action">
-      <div class="voice-dock-action-row">
-        <button class="voice-call-btn call-btn call-btn--place call-btn--idle" id="voice-call-btn" data-agent-id="voice.call_btn" data-call-state="idle" type="button">
-          <span class="voice-call-btn-inner">
-            <span class="voice-call-btn-icons" aria-hidden="true">
-              <svg class="call-btn-icon call-btn-icon--phone" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-                <path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.6 1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .6 3.6 1 1 0 0 1-.25 1l-2.25 2.2Z"/>
-              </svg>
-              <svg class="call-btn-icon call-btn-icon--end" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-                <path d="M12 9c-3.6 0-7 1-9.4 2.6a1 1 0 0 0-.3 1.4l1.8 2.4a1 1 0 0 0 1.2.3L7.2 15a1 1 0 0 0 .6-.9V12a11 11 0 0 1 8.4 0v2.1a1 1 0 0 0 .6.9l1.9.8a1 1 0 0 0 1.2-.3l1.8-2.4a1 1 0 0 0-.3-1.4C19 10 15.6 9 12 9Z"/>
-              </svg>
-              <svg class="call-btn-icon call-btn-icon--cancel" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-                <path d="M6 6l12 12M18 6 6 18"/>
-              </svg>
-            </span>
-            <span class="voice-call-btn-label call-btn-label" id="voice-call-btn-label">Place Call</span>
-          </span>
-        </button>
-        <button class="voice-mic-btn mic-btn mic-btn--inline" id="voice-mic" data-agent-id="voice.mic" aria-pressed="false" title="Mute (M)" hidden>
-          <svg class="mic-icon mic-icon--on" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 1 0 6 0V5a3 3 0 0 0-3-3Z" fill="currentColor"/>
-            <path d="M5 11a7 7 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M12 18v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <svg class="mic-icon mic-icon--off" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 2a3 3 0 0 0-3 3v4l6 6V5a3 3 0 0 0-3-3Z" fill="currentColor"/>
-            <path d="M19 11a7 7 0 0 1-11.3 5.55L9 15a5 5 0 0 0 8-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M12 18v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <span class="sr-only" id="voice-mic-label">Mute</span>
-        </button>
-      </div>
       <div class="voice-dock-action-footer">
         <p class="voice-call-hint call-hint" id="voice-call-hint">Click Place Call to talk to Jarvis.</p>
         <ul class="voice-kbd-hints" aria-label="Keyboard shortcuts">
@@ -200,10 +165,10 @@ function buildDockMarkup() {
     </div>
 
     <aside class="voice-settings-sheet" id="voice-settings-sheet" role="dialog" aria-modal="true" aria-labelledby="voice-settings-title" aria-hidden="true" hidden>
-      <div class="voice-settings-grab" aria-hidden="true"></div>
+      <span class="voice-settings-handle" aria-hidden="true"></span>
       <header class="voice-settings-header">
         <h2 id="voice-settings-title" class="voice-settings-title">Call settings</h2>
-        <button class="voice-icon-btn icon-btn" id="voice-settings-close" aria-label="Close settings" title="Close">
+        <button class="voice-icon-btn icon-btn" id="voice-settings-close" aria-label="Close settings" title="Close" type="button">
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
         </button>
       </header>
@@ -217,94 +182,117 @@ function buildDockMarkup() {
 
       <div class="voice-settings-body">
         <section class="voice-settings-panel is-active" id="voice-settings-panel-voice" role="tabpanel" data-settings-panel="voice" aria-labelledby="voice-settings-tab-voice">
-          <div class="voice-control-row" role="radiogroup" aria-label="Listening mode">
-            <span class="voice-control-label label-caps">Mode</span>
-            <div class="segmented mode-seg" id="voice-mode-seg">
-              <button role="radio" type="button" data-mode="live" data-agent-id="voice.mode.live" aria-checked="true" title="Place Call mode — default.">
-                <span>Place Call</span>
-              </button>
-              <button role="radio" type="button" data-mode="wakeword" data-agent-id="voice.mode.wakeword" aria-checked="false" title="Wake word ('Hey Jarvis') — advanced.">
-                <span>Wake Word</span>
-              </button>
+          <div class="voice-settings-row voice-settings-row--labeled voice-settings-row--segmented" role="radiogroup" aria-label="Listening mode">
+            <div class="voice-settings-row-text">
+              <span class="voice-settings-row-label">Mode</span>
+            </div>
+            <div class="voice-settings-row-control">
+              <div class="segmented mode-seg" id="voice-mode-seg">
+                <button role="radio" type="button" data-mode="live" data-agent-id="voice.mode.live" aria-checked="true" title="Place Call mode — default.">
+                  <span>Place Call</span>
+                </button>
+                <button role="radio" type="button" data-mode="wakeword" data-agent-id="voice.mode.wakeword" aria-checked="false" title="Wake word ('Hey Jarvis') — advanced.">
+                  <span>Wake Word</span>
+                </button>
+              </div>
             </div>
           </div>
           <p class="voice-settings-note" id="voice-mode-note"></p>
 
-          <div class="voice-control-row noise-row">
-            <span class="voice-control-label label-caps">Noise</span>
-            <select class="select" id="voice-noise" data-agent-id="voice.noise">
-              <option value="off">Off</option>
-              <option value="phone">Phone line hiss</option>
-              <option value="office" selected>Office chatter</option>
-              <option value="static">Static</option>
-            </select>
-            <input class="slider" type="range" id="voice-noise-vol" data-agent-id="voice.noise_volume" min="0" max="100" value="15" aria-label="Noise volume" />
-          </div>
-
-          <div class="voice-control-row">
-            <label class="toggle" for="voice-phone" title="Narrowband phone compression">
-              <input type="checkbox" id="voice-phone" data-agent-id="voice.phone_compression" checked />
+          <!-- audio-flow: Background audio toggle. Default checked; state
+               persists to localStorage.jarvis.backgroundAudio. -->
+          <div class="voice-settings-row voice-settings-row--toggle">
+            <div class="voice-settings-row-text">
+              <span class="voice-settings-row-label">Background audio</span>
+              <span class="voice-settings-row-helper">Ambience loop plays during the call.</span>
+            </div>
+            <label class="toggle" for="voice-background-toggle" title="Play a quiet ambience loop during the call.">
+              <input type="checkbox" id="voice-background-toggle" data-agent-id="voice.background_toggle" checked />
               <span class="track"></span>
-              <span class="label-caps">Phone-line compression</span>
+              <span class="sr-only">Background audio</span>
             </label>
           </div>
 
-          <div class="voice-control-row compression-strength-row">
-            <span class="voice-control-label label-caps">Strength</span>
-            <input
-              class="slider"
-              type="range"
-              id="voice-compression-strength"
-              data-agent-id="voice.compression_strength"
-              min="0" max="100" step="1" value="50"
-              aria-label="Phone-line compression strength"
-              aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"
-              aria-describedby="voice-compression-strength-readout"
-            />
-            <span class="compression-strength-readout mono" id="voice-compression-strength-readout" aria-live="polite">50%</span>
+          <!-- Phone-line compression: new control wired to
+               agent.setPhoneCompression(). Persists to
+               localStorage.jarvis.phoneCompression. -->
+          <div class="voice-settings-row voice-settings-row--toggle">
+            <div class="voice-settings-row-text">
+              <span class="voice-settings-row-label">Phone-line compression</span>
+              <span class="voice-settings-row-helper">Adds a call-center warmth to Jarvis's voice.</span>
+            </div>
+            <label class="toggle" for="voice-phone-compression-toggle" title="Apply telephone-style compression to the agent's voice.">
+              <input type="checkbox" id="voice-phone-compression-toggle" data-agent-id="voice.phone_compression_toggle" />
+              <span class="track"></span>
+              <span class="sr-only">Phone-line compression</span>
+            </label>
           </div>
 
-          <div class="voice-control-row">
-            <span class="voice-control-label label-caps">Volume</span>
-            <input class="slider" type="range" id="voice-volume" data-agent-id="voice.output_volume" min="0" max="150" value="100" aria-label="Agent output volume" />
+          <div class="voice-settings-row voice-settings-row--labeled voice-settings-row--volume">
+            <div class="voice-settings-row-text">
+              <span class="voice-settings-row-label">Volume</span>
+            </div>
+            <div class="voice-settings-row-control">
+              <input class="slider" type="range" id="voice-volume" data-agent-id="voice.output_volume" min="0" max="150" value="100" aria-label="Agent output volume" />
+              <output class="voice-volume-readout" id="voice-volume-readout" for="voice-volume">100%</output>
+              <div class="voice-volume-ticks" aria-hidden="true">
+                <span style="left: 0%"></span>
+                <span style="left: 33.33%"></span>
+                <span style="left: 66.66%"></span>
+                <span style="left: 100%"></span>
+              </div>
+            </div>
           </div>
         </section>
 
         <section class="voice-settings-panel" id="voice-settings-panel-agent" role="tabpanel" data-settings-panel="agent" aria-labelledby="voice-settings-tab-agent" hidden>
-          <div class="voice-control-row voice-control-row--stack">
-            <span class="voice-control-label label-caps">Persona</span>
-            <div class="segmented persona-seg" role="tablist" id="voice-persona-seg"></div>
+          <div class="voice-settings-row voice-settings-row--segmented">
+            <div class="voice-settings-row-text">
+              <span class="voice-settings-row-label">Persona</span>
+              <span class="voice-settings-row-helper">Choose the voice Jarvis uses on the call.</span>
+            </div>
+            <div class="voice-settings-row-control">
+              <div class="segmented persona-seg" role="tablist" id="voice-persona-seg"></div>
+            </div>
           </div>
         </section>
 
         <section class="voice-settings-panel" id="voice-settings-panel-transcript" role="tabpanel" data-settings-panel="transcript" aria-labelledby="voice-settings-tab-transcript" hidden>
-          <div class="voice-control-row" role="radiogroup" aria-label="Transcript mode">
-            <span class="voice-control-label label-caps">Mode</span>
-            <div class="segmented transcript-seg" id="voice-transcript-seg" data-agent-id="transcript.mode_seg">
-              <button role="radio" type="button" data-mode="off" data-agent-id="transcript.mode.off" aria-checked="true">Off</button>
-              <button role="radio" type="button" data-mode="captions" data-agent-id="transcript.mode.captions" aria-checked="false">Captions</button>
-              <button role="radio" type="button" data-mode="full" data-agent-id="transcript.mode.full" aria-checked="false">Full</button>
+          <div class="voice-settings-row voice-settings-row--labeled voice-settings-row--segmented" role="radiogroup" aria-label="Transcript mode">
+            <div class="voice-settings-row-text">
+              <span class="voice-settings-row-label">Mode</span>
+            </div>
+            <div class="voice-settings-row-control">
+              <div class="segmented transcript-seg" id="voice-transcript-seg" data-agent-id="transcript.mode_seg">
+                <button role="radio" type="button" data-mode="off" data-agent-id="transcript.mode.off" aria-checked="true">Off</button>
+                <button role="radio" type="button" data-mode="captions" data-agent-id="transcript.mode.captions" aria-checked="false">Captions</button>
+                <button role="radio" type="button" data-mode="full" data-agent-id="transcript.mode.full" aria-checked="false">Full</button>
+              </div>
             </div>
           </div>
           <p class="voice-settings-note" id="voice-transcript-note"></p>
-          <div class="voice-control-row voice-settings-actions">
-            <button class="btn btn--ghost btn--sm" id="voice-clear" data-agent-id="voice.clear_transcript">Clear transcript</button>
+          <div class="voice-settings-actions">
+            <button class="btn btn--ghost btn--sm" id="voice-clear" data-agent-id="voice.clear_transcript" type="button">Clear transcript</button>
           </div>
         </section>
 
         <section class="voice-settings-panel" id="voice-settings-panel-theme" role="tabpanel" data-settings-panel="theme" aria-labelledby="voice-settings-tab-theme" hidden>
-          <div class="voice-control-row" role="radiogroup" aria-label="Theme">
-            <span class="voice-control-label label-caps">Theme</span>
-            <div class="segmented theme-seg" id="voice-theme-seg" data-agent-id="theme.toggle">
-              <button role="radio" type="button" data-theme-value="dark" data-agent-id="theme.dark" aria-checked="false">Dark</button>
-              <button role="radio" type="button" data-theme-value="light" data-agent-id="theme.light" aria-checked="false">Light</button>
-              <button role="radio" type="button" data-theme-value="system" data-agent-id="theme.system" aria-checked="false">System</button>
+          <div class="voice-settings-row voice-settings-row--labeled voice-settings-row--segmented" role="radiogroup" aria-label="Theme">
+            <div class="voice-settings-row-text">
+              <span class="voice-settings-row-label">Theme</span>
+            </div>
+            <div class="voice-settings-row-control">
+              <div class="segmented theme-seg" id="voice-theme-seg" data-agent-id="theme.toggle">
+                <button role="radio" type="button" data-theme-value="dark" data-agent-id="theme.dark" aria-checked="false">Dark</button>
+                <button role="radio" type="button" data-theme-value="light" data-agent-id="theme.light" aria-checked="false">Light</button>
+                <button role="radio" type="button" data-theme-value="system" data-agent-id="theme.system" aria-checked="false">System</button>
+              </div>
             </div>
           </div>
         </section>
 
-        <section class="voice-control-row debug-panel" id="voice-debug-panel" hidden>
-          <span class="voice-control-label label-caps">Debug</span>
+        <section class="voice-debug-panel" id="voice-debug-panel" hidden>
+          <span class="voice-settings-row-label">Debug</span>
           <pre class="debug-metrics mono" id="voice-debug-metrics"></pre>
         </section>
       </div>
@@ -338,7 +326,6 @@ function buildHeader() {
     </nav>
     <div class="app-header-right">
       <a href="#voice-dock" class="btn btn--ghost btn--sm app-header-voice-link" data-agent-id="nav.voice_dock" data-external>
-        <span class="app-header-voice-dot" aria-hidden="true"></span>
         <span>Voice</span>
       </a>
     </div>
@@ -358,17 +345,18 @@ function buildSkipLink() {
 
 // --- State rendering (single sink) ---
 
-// Harbor Bridge pill copy per §6.3 of the design spec. Falls back to
-// voice-agent's STATE_COPY when the state isn't in this table.
+// Expressive Console pill copy per §8.1 of the v2 design spec. Sentence
+// case, no all-caps, no wide tracking. Falls back to voice-agent's
+// STATE_COPY when the state isn't in this table.
 const PILL_COPY = Object.freeze({
   idle: 'Stand by',
   arming: 'Armed',
-  dialing: 'Dialling…',
-  live_opening: 'Connecting…',
+  dialing: 'Dialling',
+  live_opening: 'Connecting',
   live_ready: 'Listening',
   model_thinking: 'Thinking',
-  model_speaking: 'Jarvis speaks',
-  tool_executing: 'Taking action…',
+  model_speaking: 'Speaking',
+  tool_executing: 'Taking action',
   closing: 'Hanging up',
   reconnecting: 'Reconnecting',
   error: 'Connection lost'
@@ -385,8 +373,12 @@ function setPill(state, detail) {
   strip.setAttribute('data-state', state);
   if (dock) dock.setAttribute('data-state', state);
   const copy = PILL_COPY[state] || STATE_COPY[state] || state || 'Stand by';
+  // Both `label` and `txt` resolve to `#voice-status-text` in v2 — the
+  // status-pill label IS the status text. `label.textContent` is set
+  // first; the fallback path writes to `#voice-status-text` directly in
+  // case the pill markup is ever restructured again.
   if (label) label.textContent = copy;
-  if (txt) txt.textContent = copy;
+  if (txt && txt !== label) txt.textContent = copy;
 }
 
 /** Render the Place/End/Cancel/Ending-call button for the given state.
@@ -563,50 +555,26 @@ function showPlaybackBlockedHint(agent) {
   setTimeout(() => clearInterval(t), 30_000);
 }
 
-// --- VU meter + Scope canvas ---
+// --- VU meter ---
 
-// Drives both (a) the five `.voice-vu .bar` children that the old contract
-// requires, and (b) the new canvas "Scope" — a radar sweep + burst-dot
-// visualisation whose glyph changes per voice-agent state. Runs as a
-// single rAF loop. Safe if any of agent/pipeline/canvas are missing.
+// Drives the five `.voice-vu .bar` children inside #voice-status-strip.
+// Per v2 §8.4 this is the ONLY visualiser — no canvas, no scope, no
+// compass. Bars are 6 px wide vertical columns that scale in height
+// (4 px floor, 48 px ceiling) as the mic / ambient level changes. Colour
+// is driven by `[data-state]` on the strip via CSS; JS only touches
+// heights. Safe no-op if any of agent / pipeline / bars are missing
+// (preserves the pre-call / route-change edge cases in the original
+// contract).
 function wireVuMeter(agent) {
   const strip = document.getElementById('voice-status-strip');
   const bars = strip ? strip.querySelectorAll('.voice-vu .bar') : [];
-  const canvas = strip ? strip.querySelector('.voice-scope-canvas') : null;
-  const ctx = canvas ? canvas.getContext('2d') : null;
+  if (!bars.length) return;
 
-  const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  let dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-  let cssW = 0, cssH = 0;
-
-  function ensureCanvasSize() {
-    if (!canvas) return false;
-    const rect = canvas.getBoundingClientRect();
-    const w = Math.max(1, Math.floor(rect.width));
-    const h = Math.max(1, Math.floor(rect.height));
-    if (w === cssW && h === cssH) return true;
-    cssW = w; cssH = h;
-    canvas.width = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    return true;
-  }
-  if (canvas) {
-    ensureCanvasSize();
-    window.addEventListener('resize', ensureCanvasSize);
-  }
-
-  // Rolling buffer of burst dots (radar pings).
-  const BURSTS = [];
-  const BURST_TTL = 1200; // ms
-
-  // Rolling waveform window for idle bars (tiny history for smoother bars).
-  const HIST_LEN = 32;
-  const hist = new Array(HIST_LEN).fill(0);
-  let histIdx = 0;
-
-  let lastBurstAt = 0;
-  let start = performance.now();
+  // Symmetric weighting: centre bar leads, outer bars follow. Gives a
+  // pleasant "breathing" shape when the level is steady.
+  const WEIGHTS = [0.55, 0.82, 1.0, 0.82, 0.55];
+  const BAR_MIN = 4;   // px
+  const BAR_MAX = 48;  // px — matches §8.4
 
   function readLevel() {
     try {
@@ -622,191 +590,17 @@ function wireVuMeter(agent) {
     return 0;
   }
 
-  function stateOf() {
-    try {
-      return agent.getState ? agent.getState() : 'idle';
-    } catch { return 'idle'; }
-  }
-
-  // State → accent colour for canvas strokes. Kept in sync with §6.3.
-  function stateColor(s) {
-    const cs = getComputedStyle(document.documentElement);
-    const pick = (v, fb) => (cs.getPropertyValue(v).trim() || fb);
-    switch (s) {
-      case 'live_ready':
-      case 'listening':
-        return pick('--color-state-listening', '#4FD1C5');
-      case 'model_thinking':
-      case 'thinking':
-        return pick('--color-state-thinking', '#C39BE8');
-      case 'model_speaking':
-      case 'speaking':
-        return pick('--color-state-speaking', '#F7B32B');
-      case 'tool_executing':
-        return pick('--color-state-tool', '#F59E3C');
-      case 'error':
-        return pick('--color-state-error', '#E15A4C');
-      case 'dialing':
-      case 'live_opening':
-      case 'reconnecting':
-        return pick('--color-warn', '#F59E3C');
-      case 'closing':
-        return pick('--color-text-dim', '#5B6675');
-      default:
-        return pick('--color-state-idle', '#5B6675');
-    }
-  }
-
-  function tick(now) {
-    // 1. Update bar heights (contract: five bars must animate).
+  function tick() {
     const level = readLevel();
-    hist[histIdx] = level;
-    histIdx = (histIdx + 1) % HIST_LEN;
-
-    if (bars.length) {
-      bars.forEach((b, i) => {
-        const weight = [0.35, 0.55, 0.75, 0.9, 1.0][i] || 1;
-        const h = Math.max(4, Math.round(4 + level * 22 * weight));
-        b.style.height = h + 'px';
-      });
-    }
-
-    // 2. Paint the scope canvas.
-    if (ctx && canvas && cssW > 0 && cssH > 0) {
-      ensureCanvasSize();
-      const s = stateOf();
-      const color = stateColor(s);
-      const cx = cssW / 2;
-      const cy = cssH / 2;
-      const radius = Math.min(cssW, cssH) * 0.42;
-      const t = (now - start) / 1000;
-
-      ctx.save();
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, cssW, cssH);
-
-      // Radar sweep — only rotates when not reduced-motion. Speed varies
-      // by state: fast during dialing, slow during listening.
-      let sweepPeriod = 3.0;
-      let drawSweep = true;
-      if (s === 'dialing' || s === 'live_opening' || s === 'reconnecting') sweepPeriod = 1.2;
-      else if (s === 'model_thinking' || s === 'thinking') sweepPeriod = 2.2;
-      else if (s === 'model_speaking' || s === 'speaking') { drawSweep = false; }
-      else if (s === 'tool_executing') sweepPeriod = 2.8;
-      else if (s === 'error' || s === 'closing' || s === 'idle' || s === 'arming') drawSweep = false;
-
-      if (drawSweep && !reducedMotion) {
-        const sweepAngle = (t / sweepPeriod) * Math.PI * 2;
-        const grad = ctx.createRadialGradient(
-          cx + Math.cos(sweepAngle - Math.PI / 2) * radius * 0.3,
-          cy + Math.sin(sweepAngle - Math.PI / 2) * radius * 0.3,
-          2,
-          cx, cy, radius
-        );
-        grad.addColorStop(0, withAlpha(color, 0.35));
-        grad.addColorStop(1, withAlpha(color, 0));
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        const span = Math.PI / 3; // 60°
-        ctx.arc(cx, cy, radius, sweepAngle - Math.PI / 2 - span, sweepAngle - Math.PI / 2);
-        ctx.closePath();
-        ctx.fill();
-
-        // Leading edge.
-        ctx.strokeStyle = withAlpha(color, 0.6);
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(
-          cx + Math.cos(sweepAngle - Math.PI / 2) * radius,
-          cy + Math.sin(sweepAngle - Math.PI / 2) * radius
-        );
-        ctx.stroke();
-
-        // Deposit burst dots when mic level spikes.
-        if (level > 0.18 && now - lastBurstAt > 80) {
-          lastBurstAt = now;
-          const r = (0.4 + level * 0.55) * radius;
-          BURSTS.push({
-            x: cx + Math.cos(sweepAngle - Math.PI / 2) * r,
-            y: cy + Math.sin(sweepAngle - Math.PI / 2) * r,
-            born: now,
-            life: BURST_TTL
-          });
-          if (BURSTS.length > 40) BURSTS.shift();
-        }
-      }
-
-      // Equalizer bars for speaking / thinking states.
-      if (s === 'model_speaking' || s === 'speaking' || s === 'model_thinking' || s === 'thinking') {
-        const N = 24;
-        const barW = Math.max(2, (radius * 1.6) / (N * 1.5));
-        const gap = barW * 0.5;
-        const totalW = N * barW + (N - 1) * gap;
-        const startX = cx - totalW / 2;
-        ctx.fillStyle = color;
-        for (let i = 0; i < N; i++) {
-          const idx = (histIdx - i + HIST_LEN) % HIST_LEN;
-          const v = hist[idx] || 0;
-          // Blend in a sine so there's movement even with zero input.
-          const jitter = reducedMotion ? 0.5 : (0.35 + 0.35 * Math.sin(t * 3 + i * 0.6));
-          const amp = Math.max(0.08, Math.min(1, v * 1.4 + jitter * 0.35));
-          const h = Math.max(3, amp * radius * 0.9);
-          const x = startX + i * (barW + gap);
-          ctx.fillRect(x, cy - h / 2, barW, h);
-        }
-      }
-
-      // Burst dots fade.
-      for (let i = BURSTS.length - 1; i >= 0; i--) {
-        const b = BURSTS[i];
-        const age = now - b.born;
-        if (age > b.life) { BURSTS.splice(i, 1); continue; }
-        const a = 1 - age / b.life;
-        ctx.fillStyle = withAlpha(color, a * 0.85);
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, 2.2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Error state — static red dash through centre.
-      if (s === 'error') {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.moveTo(cx - radius * 0.6, cy);
-        ctx.lineTo(cx + radius * 0.6, cy);
-        ctx.stroke();
-      }
-
-      ctx.restore();
-    }
-
+    bars.forEach((b, i) => {
+      const weight = WEIGHTS[i] != null ? WEIGHTS[i] : 1;
+      const h = Math.max(BAR_MIN, Math.round(BAR_MIN + level * (BAR_MAX - BAR_MIN) * weight));
+      b.style.height = h + 'px';
+    });
     requestAnimationFrame(tick);
   }
 
-  // If everything's missing, bail — but safely (matches old contract).
-  if (!bars.length && !canvas) return;
   requestAnimationFrame(tick);
-}
-
-// Parse CSS color token + apply alpha. Accepts #RRGGBB or rgb()/rgba().
-function withAlpha(color, alpha) {
-  const c = (color || '').trim();
-  if (c.startsWith('#')) {
-    const h = c.slice(1);
-    const full = h.length === 3
-      ? h.split('').map((x) => x + x).join('')
-      : h.length === 6 ? h : '5B6675';
-    const r = parseInt(full.slice(0, 2), 16);
-    const g = parseInt(full.slice(2, 4), 16);
-    const b = parseInt(full.slice(4, 6), 16);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  }
-  if (c.startsWith('rgba')) return c.replace(/rgba\(([^,]+),([^,]+),([^,]+),[^)]+\)/, `rgba($1,$2,$3,${alpha})`);
-  if (c.startsWith('rgb')) return c.replace(/rgb\(([^,]+),([^,]+),([^)]+)\)/, `rgba($1,$2,$3,${alpha})`);
-  return `rgba(91,102,117,${alpha})`;
 }
 
 // --- Persona buttons ---
@@ -923,18 +717,17 @@ export async function bootstrapVoiceShell() {
   const dock = buildDockMarkup();
   document.body.appendChild(dock);
 
-  // On mobile the dock starts as a compact pill so first paint shows the
-  // page content; user taps the toggle to expand. Desktop stays expanded
-  // because the app shell reserves right-gutter space for it.
+  // v2 "Expressive Console": the dock defaults to MINIMISED on ALL
+  // viewports (desktop + mobile). The minimised pill is actionable — it
+  // contains the Place Call button directly, so users can start a call
+  // without expanding. The caret (`#voice-dock-toggle`) opens the full
+  // panel (transcript, quick-chips, visualiser, kbd pips) on demand.
+  dock.classList.add('is-collapsed');
   try {
-    const isMobile = window.matchMedia('(max-width: 640px)').matches;
-    if (isMobile) {
-      dock.classList.add('is-collapsed');
-      const toggle = dock.querySelector('#voice-dock-toggle');
-      if (toggle) {
-        toggle.setAttribute('aria-expanded', 'false');
-        toggle.setAttribute('title', 'Expand voice panel');
-      }
+    const toggle = dock.querySelector('#voice-dock-toggle');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.setAttribute('title', 'Expand voice panel');
     }
   } catch {}
 
@@ -1042,71 +835,64 @@ export async function bootstrapVoiceShell() {
     }
   }
 
-  // --- Noise + volume + phone compression
-  const noiseSel = $('#voice-noise');
-  noiseSel.value = agent.getNoiseMode();
-  on(noiseSel, 'change', () => agent.setNoiseMode(noiseSel.value));
-  const noiseVol = $('#voice-noise-vol');
-  noiseVol.value = String(Math.round((agent.getNoiseVolume() || 0) * 100));
-  on(noiseVol, 'input', () => agent.setNoiseVolume(Number(noiseVol.value) / 100));
-  const phoneToggle = $('#voice-phone');
-  phoneToggle.checked = !!agent.getCompressionEnabled();
-  on(phoneToggle, 'change', () => agent.setCompressionEnabled(phoneToggle.checked));
-  const volume = $('#voice-volume');
-  on(volume, 'input', () => agent.pipeline.setOutputVolume(Number(volume.value) / 100));
-
-  // --- Compression-strength slider (child of phone-compression).
-  const strength = $('#voice-compression-strength');
-  const strengthRow = strength && strength.closest('.compression-strength-row');
-  const strengthReadout = $('#voice-compression-strength-readout');
-
-  function syncStrengthEnabled() {
-    if (!strength || !strengthRow) return;
-    const on = phoneToggle.checked;
-    strength.disabled = !on;
-    strengthRow.setAttribute('aria-disabled', on ? 'false' : 'true');
-  }
-
-  function reflectStrength(value) {
-    if (!strength || !strengthReadout) return;
-    const v = String(Math.max(0, Math.min(100, Math.round(Number(value) || 0))));
-    strength.value = v;
-    strength.setAttribute('aria-valuenow', v);
-    strengthReadout.textContent = `${v}%`;
-  }
-
-  if (strength) {
-    reflectStrength(typeof agent.getCompressionStrength === 'function' ? agent.getCompressionStrength() : 50);
-    syncStrengthEnabled();
-
-    on(strength, 'input', () => {
-      const v = Number(strength.value);
-      reflectStrength(v);
-      if (typeof agent.setCompressionStrength === 'function') {
-        agent.setCompressionStrength(v);
+  // --- audio-flow: Background audio toggle + phone-line compression +
+  // output volume. The noise dropdown, noise-volume slider, the original
+  // phone-compression checkbox and compression-strength slider were
+  // retired alongside the procedural noise system. The two toggles below
+  // expose the remaining user-facing knobs.
+  const backgroundToggle = $('#voice-background-toggle');
+  if (backgroundToggle) {
+    backgroundToggle.checked = !!agent.getBackgroundEnabled();
+    on(backgroundToggle, 'change', () => agent.setBackgroundEnabled(!!backgroundToggle.checked));
+    // Keep the checkbox in sync when the agent changes the value from
+    // elsewhere (e.g. a future tool call or cross-tab event).
+    agent.addEventListener('background-changed', (e) => {
+      const d = e && e.detail;
+      if (d && typeof d.enabled === 'boolean') {
+        backgroundToggle.checked = !!d.enabled;
       }
     });
-    on(phoneToggle, 'change', syncStrengthEnabled);
+  }
 
-    // Keep the slider in sync when the agent (or a tool call) changes
-    // compression strength from elsewhere.
-    agent.addEventListener('compression-changed', (e) => {
-      const d = e && e.detail;
-      if (d && typeof d.strength === 'number') reflectStrength(d.strength);
-      syncStrengthEnabled();
+  // Phone-line compression. Persistence is owned by the agent
+  // (`voice-agent.js` writes 'on'/'off' to localStorage.jarvis.phoneCompression).
+  // The UI reads initial state via `agent.getPhoneCompression()` so the two
+  // never disagree on serialisation format.
+  const phoneCompressionToggle = $('#voice-phone-compression-toggle');
+  if (phoneCompressionToggle) {
+    const initial = typeof agent.getPhoneCompression === 'function'
+      ? !!agent.getPhoneCompression()
+      : false;
+    phoneCompressionToggle.checked = initial;
+    on(phoneCompressionToggle, 'change', () => {
+      if (typeof agent.setPhoneCompression === 'function') {
+        agent.setPhoneCompression(!!phoneCompressionToggle.checked);
+      }
     });
   }
 
-  // --- Ambient chip toggles on `ambient-changed` events from the agent.
+  const volume = $('#voice-volume');
+  const volumeReadout = $('#voice-volume-readout');
+  function reflectVolumeReadout(val) {
+    if (!volumeReadout) return;
+    volumeReadout.textContent = `${Math.round(Number(val) || 0)}%`;
+  }
+  if (volume) {
+    reflectVolumeReadout(volume.value);
+    on(volume, 'input', () => {
+      reflectVolumeReadout(volume.value);
+      agent.pipeline.setOutputVolume(Number(volume.value) / 100);
+    });
+  }
+
+  // --- Ambient chip mirrors the background audio state. It remains in
+  // the header as the only visible "call-audio is playing" affordance.
   const ambientChip = $('#voice-ambient-chip');
   if (ambientChip) {
     const reflectAmbient = (on) => { ambientChip.hidden = !on; };
-    agent.addEventListener('ambient-changed', (e) => {
-      reflectAmbient(!!(e && e.detail && e.detail.on));
+    agent.addEventListener('background-changed', (e) => {
+      reflectAmbient(!!(e && e.detail && e.detail.playing));
     });
-    // Mirror call-state transitions as a belt-and-suspenders: when the
-    // user ends a call, the chip should drop regardless of whether
-    // ambient-changed fires.
     agent.addEventListener('state', () => {
       if (!agent.isInCall()) reflectAmbient(false);
     });
@@ -1150,13 +936,12 @@ export async function bootstrapVoiceShell() {
 
   // --- Unlock AudioContext on first gesture (fallback for anything
   //     other than the Place Call button — e.g. user clicks a nav link
-  //     before calling).
+  //     before calling). audio-flow: the unlock now also primes the
+  //     three HTMLAudioElement lifecycle clips so the first
+  //     pipeline.callAudio.playStart() isn't blocked by Safari.
   const firstGesture = () => {
     try { agent.unlockAudioSync(); } catch {}
-    agent.pipeline.setNoiseMode(agent.getNoiseMode());
-    agent.pipeline.setOutputVolume(Number(volume.value) / 100);
-    agent.pipeline.setNoiseVolume(agent.getNoiseVolume());
-    agent.pipeline.setBandPassEnabled(agent.getCompressionEnabled());
+    if (volume) agent.pipeline.setOutputVolume(Number(volume.value) / 100);
     wireVuMeter(agent);
     document.removeEventListener('click', firstGesture);
     document.removeEventListener('keydown', firstGesture);

@@ -366,16 +366,20 @@ const STATIC_TOOL_DECLARATIONS = [
       required: ['layer', 'visible']
     }
   },
+  // audio-flow: `end_call` lets the model hang up when the user has
+  // clearly signalled they're done. Socket-close choreography is
+  // handled server-side (see live-bridge.js → onBrowserText handling
+  // the tool forward) and the client's VoiceAgent._gracefullyEndCall
+  // is idempotent so a user click racing this call is safe.
   {
-    name: 'set_compression_strength',
+    name: 'end_call',
     description:
-      'Adjust how much phone-line compression is applied to your voice. Range 0 (studio-clean) to 100 (heavy walkie-talkie). ~50 is the default phone sound. Use when the user says "sound crustier", "sound clearer", "more compression", "less filtering". Persists across reloads.',
+      'Hang up the current voice call with the user. Call this ONLY when the user has clearly signalled they are done — they said goodbye, "thanks, bye", "that\'s all I need", or otherwise ended the conversation. Do NOT call this preemptively. Do NOT call this after a single user turn. Always be certain before ending — you cannot undo a hang-up.',
     parameters: {
       type: 'object',
       properties: {
-        strength: { type: 'number', description: 'Integer 0–100.' }
-      },
-      required: ['strength']
+        reason: { type: 'string', description: 'Brief reason for ending (optional, for server logs).' }
+      }
     }
   }
 ];
@@ -404,7 +408,7 @@ UI helper tools (appended):
 - Use set_quick_actions to offer 2–5 relevant follow-up taps ("Shortlist it", "Log counter"). Replace them when the context shifts.
 - Use open_palette or run_palette_action when the user wants to jump somewhere quickly; run_palette_action is better when you're confident of the action_id.
 - Use set_captions and set_theme ONLY when the user explicitly asks (e.g. "turn on captions", "dark mode"). Don't volunteer these.
-- Use set_compression_strength when the user asks about how you sound ("crustier", "clearer", "more phone-line", "studio"). 0 is clean, 50 is default phone, 100 is heavy walkie-talkie.
+- Use end_call when — and ONLY when — the user has clearly ended the conversation (said "bye", "thanks, that's all", "I'm done", etc.). Never call it after a single exchange, never call it to "be polite", never call it while a task is in flight. When in doubt, stay on the line and ask a clarifying question instead. The hang-up is irreversible.
 - Use map_focus / map_highlight_load / map_show_layer only on the Map page. map_focus accepts city, state, or load/carrier id; prefer load/carrier id when applicable.
 
 Map-tool usage (v2.1):

@@ -1,0 +1,69 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - link "Dhruv FreightOps" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e6]:
+        - generic [ref=e7]: Dhruv
+        - generic [ref=e8]: FreightOps
+    - navigation "Primary" [ref=e9]:
+      - link "Dispatch" [ref=e10] [cursor=pointer]:
+        - /url: /
+      - link "Carriers" [ref=e11] [cursor=pointer]:
+        - /url: /carriers.html
+      - link "Negotiate" [ref=e12] [cursor=pointer]:
+        - /url: /negotiate.html
+      - link "Map" [ref=e13] [cursor=pointer]:
+        - /url: /map.html
+      - link "Contact" [ref=e14] [cursor=pointer]:
+        - /url: /contact.html
+    - link "Voice" [ref=e16] [cursor=pointer]:
+      - /url: "#voice-dock"
+      - generic [ref=e17]: Voice
+  - link "Skip to main content" [ref=e18] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e20]:
+    - generic [ref=e21]:
+      - generic [ref=e23]:
+        - heading "Contact support" [active] [level=1] [ref=e24]
+        - paragraph [ref=e25]: Send a message or ask Jarvis to schedule a callback.
+      - generic [ref=e26]:
+        - form "Contact form" [ref=e27]:
+          - generic [ref=e29]: Send a message
+          - generic [ref=e30]:
+            - generic [ref=e31]:
+              - generic [ref=e32]: Name
+              - textbox "Name" [ref=e33]
+            - generic [ref=e34]:
+              - generic [ref=e35]: Email
+              - textbox "Email" [ref=e36]
+            - generic [ref=e37]:
+              - generic [ref=e38]: Preferred callback
+              - textbox "Preferred callback" [ref=e39]
+            - generic [ref=e40]:
+              - generic [ref=e41]: Message
+              - textbox "Message" [ref=e42]:
+                - /placeholder: What do you need help with?
+            - group "Form actions" [ref=e43]:
+              - button "Send message" [ref=e44] [cursor=pointer]
+        - complementary "Scheduled callbacks" [ref=e45]:
+          - generic [ref=e46]:
+            - generic [ref=e47]: Scheduled callbacks
+            - generic [ref=e48]: Upcoming
+          - generic [ref=e51]: No callbacks scheduled yet.
+  - region "Voice agent" [ref=e52]:
+    - generic [ref=e53]:
+      - generic [ref=e56]: Jarvis
+      - generic [ref=e59]: Stand by
+      - generic [ref=e60]:
+        - button "Mute microphone" [ref=e61] [cursor=pointer]:
+          - img [ref=e62]
+          - generic [ref=e65]: Mute
+        - button "Place a call to Jarvis" [ref=e66] [cursor=pointer]:
+          - img [ref=e68]
+          - generic [ref=e70]: Place Call
+        - button "Call settings" [ref=e71] [cursor=pointer]:
+          - img [ref=e72]
+        - button "Expand voice panel" [ref=e75] [cursor=pointer]:
+          - img [ref=e76]
+          - generic [ref=e78]: Expand voice panel
+  - status [ref=e79]: Loaded Contact Support — Dhruv FreightOps

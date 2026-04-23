@@ -1,0 +1,196 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "Dhruv FreightOps" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e6]:
+        - generic [ref=e7]: Dhruv
+        - generic [ref=e8]: FreightOps
+    - navigation "Primary" [ref=e9]:
+      - link "Dispatch" [ref=e10] [cursor=pointer]:
+        - /url: /
+      - link "Carriers" [ref=e11] [cursor=pointer]:
+        - /url: /carriers.html
+      - link "Negotiate" [ref=e12] [cursor=pointer]:
+        - /url: /negotiate.html
+      - link "Map" [ref=e13] [cursor=pointer]:
+        - /url: /map.html
+      - link "Contact" [ref=e14] [cursor=pointer]:
+        - /url: /contact.html
+    - link "Voice" [ref=e16] [cursor=pointer]:
+      - /url: "#voice-dock"
+      - generic [ref=e17]: Voice
+  - link "Skip to main content" [ref=e18] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e20]:
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - heading "Dispatch board" [level=1] [ref=e24]
+          - paragraph [ref=e25]: Live view of active loads. Click any row or ask Jarvis to take an action.
+        - toolbar "Dispatch actions" [ref=e26]:
+          - button "New load" [ref=e27] [cursor=pointer]
+          - button "Export CSV" [ref=e28] [cursor=pointer]
+      - region "Key metrics" [ref=e29]:
+        - generic [ref=e30]:
+          - generic [ref=e31]: In transit
+          - generic [ref=e32]: "2"
+          - generic [ref=e33]: Moving now
+        - generic [ref=e34]:
+          - generic [ref=e35]: Pending
+          - generic [ref=e36]: "2"
+          - generic [ref=e37]: Awaiting carrier
+        - generic [ref=e38]:
+          - generic [ref=e39]: Delayed
+          - generic [ref=e40]: "1"
+          - generic [ref=e41]: Needs attention
+        - generic [ref=e42]:
+          - generic [ref=e43]: Booked rev.
+          - generic [ref=e44]: $9,770
+          - generic [ref=e45]: 8 loads
+      - region "Filter loads" [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e48]: Search
+          - searchbox "Search" [ref=e49]
+        - generic [ref=e50]:
+          - generic [ref=e51]: Status
+          - combobox "Status" [ref=e52]:
+            - option "All" [selected]
+            - option "In transit"
+            - option "Booked"
+            - option "Pending"
+            - option "Delayed"
+            - option "Delivered"
+        - generic [ref=e53]:
+          - generic [ref=e54]: Lane contains
+          - textbox "Lane contains" [ref=e55]:
+            - /placeholder: e.g. TX, Chicago
+      - region "Loads table" [ref=e56]:
+        - table "Active loads" [ref=e57]:
+          - rowgroup [ref=e58]:
+            - row "Load ID Route Carrier Status Miles Rate ETA" [ref=e59]:
+              - columnheader "Load ID" [ref=e60]
+              - columnheader "Route" [ref=e61]
+              - columnheader "Carrier" [ref=e62]
+              - columnheader "Status" [ref=e63]
+              - columnheader "Miles" [ref=e64]
+              - columnheader "Rate" [ref=e65]
+              - columnheader "ETA" [ref=e66]
+          - rowgroup [ref=e67]:
+            - button "Load LD-10824, Chicago, IL to Dallas, TX" [ref=e68]:
+              - cell "LD-10824" [ref=e69]
+              - cell "Chicago, IL → Dallas, TX" [ref=e70]
+              - cell "Midwest Haulage" [ref=e71]
+              - cell "In transit" [ref=e72]:
+                - generic [ref=e73]: In transit
+              - cell "968 mi" [ref=e74]
+              - cell "$2,450" [ref=e75]
+              - cell "Apr 22, 7:30 PM" [ref=e76]
+            - button "Load LD-10825, Atlanta, GA to Jacksonville, FL" [ref=e77]:
+              - cell "LD-10825" [ref=e78]
+              - cell "Atlanta, GA → Jacksonville, FL" [ref=e79]
+              - cell "Peach Express" [ref=e80]
+              - cell "Booked" [ref=e81]:
+                - generic [ref=e82]: Booked
+              - cell "346 mi" [ref=e83]
+              - cell "$980" [ref=e84]
+              - cell "Apr 23, 4:00 AM" [ref=e85]
+            - button "Load LD-10826, Los Angeles, CA to Phoenix, AZ" [ref=e86]:
+              - cell "LD-10826" [ref=e87]
+              - cell "Los Angeles, CA → Phoenix, AZ" [ref=e88]
+              - cell "—" [ref=e89]
+              - cell "Pending" [ref=e90]:
+                - generic [ref=e91]: Pending
+              - cell "372 mi" [ref=e92]
+              - cell "—" [ref=e93]
+              - cell "—" [ref=e94]
+            - button "Load LD-10827, Seattle, WA to Denver, CO" [ref=e95]:
+              - cell "LD-10827" [ref=e96]
+              - cell "Seattle, WA → Denver, CO" [ref=e97]
+              - cell "Cascade Transit" [ref=e98]
+              - cell "Delayed" [ref=e99]:
+                - generic [ref=e100]: Delayed
+              - cell "1,316 mi" [ref=e101]
+              - cell "$3,125" [ref=e102]
+              - cell "Apr 23, 2:30 PM" [ref=e103]
+            - button "Load LD-10828, Newark, NJ to Charlotte, NC" [ref=e104]:
+              - cell "LD-10828" [ref=e105]
+              - cell "Newark, NJ → Charlotte, NC" [ref=e106]
+              - cell "Liberty Freight" [ref=e107]
+              - cell "In transit" [ref=e108]:
+                - generic [ref=e109]: In transit
+              - cell "633 mi" [ref=e110]
+              - cell "$1,475" [ref=e111]
+              - cell "Apr 23, 12:15 AM" [ref=e112]
+            - button "Load LD-10829, Memphis, TN to Nashville, TN" [ref=e113]:
+              - cell "LD-10829" [ref=e114]
+              - cell "Memphis, TN → Nashville, TN" [ref=e115]
+              - cell "Delta Roadways" [ref=e116]
+              - cell "Delivered" [ref=e117]:
+                - generic [ref=e118]: Delivered
+              - cell "212 mi" [ref=e119]
+              - cell "$620" [ref=e120]
+              - cell "Apr 21, 4:50 PM" [ref=e121]
+            - button "Load LD-10830, Houston, TX to New Orleans, LA" [ref=e122]:
+              - cell "LD-10830" [ref=e123]
+              - cell "Houston, TX → New Orleans, LA" [ref=e124]
+              - cell "—" [ref=e125]
+              - cell "Pending" [ref=e126]:
+                - generic [ref=e127]: Pending
+              - cell "348 mi" [ref=e128]
+              - cell "—" [ref=e129]
+              - cell "—" [ref=e130]
+            - button "Load LD-10831, Minneapolis, MN to Kansas City, MO" [ref=e131]:
+              - cell "LD-10831" [ref=e132]
+              - cell "Minneapolis, MN → Kansas City, MO" [ref=e133]
+              - cell "North Star Logistics" [ref=e134]
+              - cell "Booked" [ref=e135]:
+                - generic [ref=e136]: Booked
+              - cell "438 mi" [ref=e137]
+              - cell "$1,120" [ref=e138]
+              - cell "Apr 23, 1:30 AM" [ref=e139]
+      - generic [ref=e140]:
+        - region "Load detail" [ref=e141]:
+          - generic [ref=e142]: Select a load to see details.
+        - region "Fleet map preview" [ref=e143]:
+          - generic [ref=e144]:
+            - generic [ref=e145]:
+              - generic [ref=e146]: Fleet map
+              - generic [ref=e147]: 7 active · 1 delayed
+            - link "Open map" [ref=e148] [cursor=pointer]:
+              - /url: /map.html
+          - list "Active lanes" [ref=e149]:
+            - button "LD-10824, Chicago, IL to Dallas, TX, in_transit" [ref=e150] [cursor=pointer]:
+              - generic [ref=e152]: Chicago, IL → Dallas, TX
+              - generic [ref=e153]: LD-10824
+            - button "LD-10825, Atlanta, GA to Jacksonville, FL, booked" [ref=e154] [cursor=pointer]:
+              - generic [ref=e156]: Atlanta, GA → Jacksonville, FL
+              - generic [ref=e157]: LD-10825
+            - button "LD-10826, Los Angeles, CA to Phoenix, AZ, pending" [ref=e158] [cursor=pointer]:
+              - generic [ref=e160]: Los Angeles, CA → Phoenix, AZ
+              - generic [ref=e161]: LD-10826
+            - button "LD-10827, Seattle, WA to Denver, CO, delayed" [ref=e162] [cursor=pointer]:
+              - generic [ref=e164]: Seattle, WA → Denver, CO
+              - generic [ref=e165]: LD-10827
+            - button "LD-10828, Newark, NJ to Charlotte, NC, in_transit" [ref=e166] [cursor=pointer]:
+              - generic [ref=e168]: Newark, NJ → Charlotte, NC
+              - generic [ref=e169]: LD-10828
+            - button "LD-10830, Houston, TX to New Orleans, LA, pending" [ref=e170] [cursor=pointer]:
+              - generic [ref=e172]: Houston, TX → New Orleans, LA
+              - generic [ref=e173]: LD-10830
+  - region "Voice agent" [ref=e174]:
+    - generic [ref=e175]:
+      - generic [ref=e178]: Jarvis
+      - generic [ref=e181]: Stand by
+      - generic [ref=e182]:
+        - button "Mute microphone" [ref=e183] [cursor=pointer]:
+          - img [ref=e184]
+          - generic [ref=e187]: Mute
+        - button "Place a call to Jarvis" [ref=e208] [cursor=pointer]:
+          - img [ref=e190]
+          - generic [ref=e192]: Place Call
+        - button "Call settings" [ref=e193] [cursor=pointer]:
+          - img [ref=e194]
+        - button "Expand voice panel" [ref=e197] [cursor=pointer]:
+          - img [ref=e198]
+          - generic [ref=e200]: Expand voice panel
+  - status [ref=e201]: Loaded Dispatch Board — Dhruv FreightOps

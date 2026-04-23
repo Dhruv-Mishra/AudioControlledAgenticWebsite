@@ -1,6 +1,8 @@
-/* map.css — Harbor Bridge map page
+/* map.css — Expressive Console map page (M3, v2)
  * ------------------------------------------------------------
- * Full-bleed layout, filter rail, detail drawer, pin styles, controls.
+ * Full-bleed layout, flat filter rail, M3 filter chips, 28 px pins,
+ * 28 px top-left drawer radius, tonal polylines.
+ *
  * Every JS-queried id (#map-canvas, #map-detail, #map-attribution,
  * #map-filter-rail, #map-filter-list, #map-list-view, #map-list-items,
  * #map-list-toggle, #map-search, #map-zoom-in, #map-zoom-out,
@@ -10,15 +12,15 @@
  */
 
 /* ============================================================
- * 1. Full-bleed container (page-map.js toggles this on <main>)
+ * 1. Full-bleed container (page-map.js toggles .app-main--map on <main>)
  * ============================================================ */
 
 .app-main--map {
   max-width: none;
   padding: 0;
   margin: 0;
-  min-height: calc(100vh - 56px);
-  min-height: calc(100dvh - 56px);
+  min-height: calc(100vh - 64px);
+  min-height: calc(100dvh - 64px);
   display: flex;
 }
 
@@ -33,17 +35,15 @@
 }
 
 /* ============================================================
- * 2. Filter rail (desktop: 320px; tablet: collapsed 56px icon rail;
- *    mobile: bottom-sheet chip bar at top)
+ * 2. Filter rail — flat surface, no amber inset rail
  * ============================================================ */
 
 .map-filter-rail {
   grid-column: 1;
   grid-row: 1;
-  background: var(--color-bg-elev-1);
+  background: var(--md-sys-color-surface-container-low);
   border-right: 1px solid var(--color-border);
-  box-shadow: inset -1px 0 0 rgba(247, 179, 43, 0.10);
-  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
@@ -53,14 +53,13 @@
 
 .map-filter-rail-title {
   font-family: var(--font-sans);
-  font-size: var(--fs-2xs);
-  font-weight: 700;
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-accent);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-normal);
+  text-transform: none;
+  color: var(--color-text-muted);
   margin: 0;
-  padding-bottom: var(--sp-1);
-  border-bottom: 1px solid var(--color-border);
+  padding: 0;
 }
 
 .map-filter-chips {
@@ -69,18 +68,18 @@
   gap: var(--sp-2);
 }
 
-/* chip-btn[aria-pressed="true"] — active filter state */
+/* chip-btn[aria-pressed="true"] — M3 selected filter chip (tonal fill) */
 .map-filter-rail .chip-btn[aria-pressed="true"] {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-  border-color: var(--color-accent-outline);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  border-color: transparent;
 }
 
-/* cyan state dot for delayed (danger-hue) when active */
+/* Delayed chip — error tonal when pressed */
 .map-filter-rail .chip-btn[data-layer="delayed"][aria-pressed="true"] {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  border-color: rgba(225, 90, 76, 0.40);
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+  border-color: transparent;
 }
 
 .map-filter-list {
@@ -100,7 +99,7 @@
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
-  background: var(--color-bg-elev-2);
+  background: var(--md-sys-color-surface-container);
   border: 1px solid var(--color-border);
   cursor: pointer;
   font-family: var(--font-sans);
@@ -108,13 +107,10 @@
   color: var(--color-text);
   text-align: left;
   width: 100%;
-  transition:
-    border-color var(--dur-fast) var(--ease-snap),
-    background var(--dur-fast) var(--ease-snap);
+  transition: background var(--dur-fast) var(--ease-snap);
 }
 .map-filter-list-item:hover {
-  border-color: var(--color-border-strong);
-  background: var(--color-bg-elev-3);
+  background: var(--md-sys-color-surface-container-high);
 }
 .map-filter-list-item:focus-visible {
   outline: none;
@@ -126,16 +122,15 @@
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
 }
 
 .map-filter-list-item .meta {
   display: block;
   font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-xs);
   color: var(--color-text-muted);
   margin-top: 2px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
 }
 
 .map-list-toggle-wrap {
@@ -144,28 +139,6 @@
   border-top: 1px solid var(--color-border);
 }
 .map-list-toggle-wrap .btn { width: 100%; }
-
-/* Metric strip (top of rail) — optional */
-.map-metric-strip {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--color-bg-elev-2);
-  border: 1px solid var(--color-border-accent);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  letter-spacing: 0.02em;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-}
-.map-metric-strip strong {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  color: var(--color-accent);
-  margin-left: 4px;
-}
 
 /* ============================================================
  * 3. Canvas — Leaflet mounts here
@@ -180,10 +153,12 @@
   transition: opacity var(--dur-base) var(--ease-out-expo);
 }
 
-/* Warm-filter on the Leaflet raster tiles — keeps tiles legible but
- * tints them to match the Harbor Bridge palette. Never use invert(). */
 .map-canvas .leaflet-tile {
-  filter: saturate(0.82) brightness(0.92) contrast(1.05);
+  filter: saturate(0.85) brightness(0.95);
+}
+
+[data-theme="light"] .map-canvas .leaflet-tile {
+  filter: saturate(0.95) brightness(1.02);
 }
 
 .map-canvas[aria-hidden="true"] {
@@ -193,7 +168,7 @@
 }
 
 /* ============================================================
- * 4. Loading skeleton (compass-rose pulse)
+ * 4. Loading skeleton — tonal pulse
  * ============================================================ */
 
 .map-skeleton {
@@ -214,36 +189,37 @@
 .map-skeleton.is-hidden[hidden] { display: none; }
 
 .map-skeleton-pulse {
-  width: 160px;
-  height: 160px;
+  width: 140px;
+  height: 140px;
   border-radius: 50%;
   background: radial-gradient(
     circle at center,
-    rgba(247, 179, 43, 0.12) 0%,
-    rgba(247, 179, 43, 0.04) 45%,
+    var(--md-sys-color-primary-container) 0%,
+    color-mix(in oklab, var(--md-sys-color-primary) 8%, transparent) 45%,
     transparent 70%
   );
   animation: map-skeleton-breath 2000ms ease-in-out infinite;
-  filter: blur(6px);
+  filter: blur(4px);
   opacity: 0.7;
 }
 
 .map-skeleton-label {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fs-xs);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-accent);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-normal);
+  text-transform: none;
+  color: var(--color-text-muted);
   margin: 0;
 }
 
 @keyframes map-skeleton-breath {
   0%, 100% { transform: scale(1);    opacity: 0.55; }
-  50%      { transform: scale(1.12); opacity: 0.90; }
+  50%      { transform: scale(1.10); opacity: 0.85; }
 }
 
 /* ============================================================
- * 5. Layer pane visibility (chip fade)
+ * 5. Layer pane visibility
  * ============================================================ */
 
 .leaflet-pane {
@@ -255,55 +231,66 @@
 }
 
 /* ============================================================
- * 6. Pins — circle loads, square carriers, breathing delayed
+ * 6. Pins — 28 px M3 circle, tonal fills
  * ============================================================ */
 
 .map-pin {
-  width: 16px;
-  height: 16px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: var(--color-text-muted);
-  border: 2px solid var(--color-map-pin-ring);
-  box-shadow: var(--shadow-pin);
+  background: var(--md-sys-color-primary);
+  box-shadow:
+    inset 0 0 0 2px var(--color-map-pin-ring),
+    var(--shadow-pin);
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease-snap);
 }
 .map-pin:hover {
-  transform: scale(1.18);
+  transform: scale(1.12);
   outline: none;
 }
 .map-pin:focus-visible {
-  transform: scale(1.28);
+  transform: scale(1.20);
   outline: none;
   box-shadow:
-    0 0 0 2px var(--color-map-pin-ring),
-    0 0 0 5px rgba(247, 179, 43, 0.65),
-    var(--shadow-pin);
+    inset 0 0 0 2px var(--color-map-pin-ring),
+    var(--shadow-pin),
+    var(--shadow-focus-ring-accent);
 }
 
-.map-pin--booked     { background: var(--color-accent); }
-.map-pin--pending    { background: var(--color-warn); }
-.map-pin--delayed    {
-  background: var(--color-danger);
+.map-pin--booked     { background: var(--md-sys-color-primary); }
+.map-pin--pending    { background: var(--md-sys-color-warn); }
+.map-pin--delayed {
+  background: var(--md-sys-color-error);
   animation: map-pin-breath 2000ms ease-in-out infinite;
 }
 .map-pin--delivered  { background: var(--color-text-dim); }
-.map-pin--in_transit { background: var(--color-cyan); }
+.map-pin--in_transit { background: var(--md-sys-color-tertiary); }
 
-/* Carrier pins use a rounded square — distinct silhouette */
+/* Carrier pins — tertiary tonal, rounded-square silhouette */
 .map-pin--carrier {
-  background: var(--color-cyan);
-  border-radius: var(--radius-xs);
+  background: var(--md-sys-color-tertiary);
+  border-radius: var(--radius-sm);
 }
 
 @keyframes map-pin-breath {
-  0%, 100% { box-shadow: var(--shadow-pin), 0 0 0 0 rgba(225, 90, 76, 0.0); }
-  50%      { box-shadow: var(--shadow-pin), 0 0 0 6px rgba(225, 90, 76, 0.22); }
+  0%, 100% {
+    box-shadow:
+      inset 0 0 0 2px var(--color-map-pin-ring),
+      var(--shadow-pin),
+      0 0 0 0 color-mix(in oklab, var(--md-sys-color-error) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 2px var(--color-map-pin-ring),
+      var(--shadow-pin),
+      0 0 0 6px color-mix(in oklab, var(--md-sys-color-error) 28%, transparent);
+  }
 }
 
-/* Agent-highlighted pin — outer amber glow + triple-ring pulse */
+/* Agent-highlighted pin — lime ring pulse */
 .map-pin.is-agent-highlighted {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--md-sys-color-primary);
   outline-offset: 3px;
   position: relative;
   z-index: 2;
@@ -316,8 +303,8 @@
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 16px;
-  height: 16px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   border: 2px solid var(--color-map-highlight-ring);
   transform: translate(-50%, -50%) scale(1);
@@ -331,39 +318,39 @@
 
 @keyframes map-pin-pulse {
   0%   { transform: translate(-50%, -50%) scale(1);   opacity: 0.9; }
-  100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
+  100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
 }
 
 @keyframes map-pin-pulse-shadow {
-  0%   { box-shadow: 0 0 0 4px var(--color-map-highlight-ring), var(--shadow-pin); }
-  60%  { box-shadow: 0 0 0 14px transparent, var(--shadow-pin); }
-  100% { box-shadow: 0 0 0 0 transparent, var(--shadow-pin); }
+  0%   { box-shadow: inset 0 0 0 2px var(--color-map-pin-ring), 0 0 0 4px var(--color-map-highlight-ring), var(--shadow-pin); }
+  60%  { box-shadow: inset 0 0 0 2px var(--color-map-pin-ring), 0 0 0 14px transparent, var(--shadow-pin); }
+  100% { box-shadow: inset 0 0 0 2px var(--color-map-pin-ring), 0 0 0 0 transparent, var(--shadow-pin); }
 }
 
 /* ============================================================
- * 7. Lane polylines — amber solid, warn dashed, cyan marching
+ * 7. Lane polylines — lime active, warn pending, 3 px round
  * ============================================================ */
 
 .leaflet-interactive.map-lane {
   stroke: var(--color-map-polyline);
-  stroke-width: 2.5px;
+  stroke-width: 3px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   stroke-dasharray: none;
-  filter: drop-shadow(0 0 2px rgba(247, 179, 43, 0.35));
 }
 .leaflet-interactive.map-lane--pending {
   stroke: var(--color-map-polyline-pending);
-  stroke-width: 2px;
-  stroke-dasharray: 6 4;
-  filter: none;
+  stroke-width: 3px;
+  stroke-dasharray: 6 5;
 }
-.leaflet-interactive.map-lane:hover { stroke-width: 3px; }
+.leaflet-interactive.map-lane:hover { stroke-width: 4px; }
 
 /* ============================================================
- * 8. Popups — dark-bridge style
+ * 8. Popups — M3 tonal container
  * ============================================================ */
 
 .leaflet-popup-content-wrapper {
-  background: var(--color-bg-elev-3);
+  background: var(--md-sys-color-surface-container-high);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -377,17 +364,17 @@
   line-height: var(--lh-sm);
 }
 .leaflet-popup-tip {
-  background: var(--color-bg-elev-3);
+  background: var(--md-sys-color-surface-container-high);
   border: 1px solid var(--color-border);
 }
 .leaflet-popup-close-button { color: var(--color-text-muted) !important; }
 
 .map-popup-title {
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--color-accent);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-normal);
+  color: var(--color-text);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -401,7 +388,7 @@
 }
 
 /* ============================================================
- * 9. Detail drawer (right on desktop, bottom on mobile)
+ * 9. Detail drawer — 28 px top-left radius, elevation-3, spring
  * ============================================================ */
 
 .map-detail {
@@ -410,13 +397,13 @@
   right: 0;
   height: 100%;
   width: min(400px, 100%);
-  background: var(--color-bg-elev-1);
-  background-image: linear-gradient(180deg, rgba(255, 248, 220, 0.012) 0%, transparent 40%);
+  background: var(--md-sys-color-surface-container-high);
   border-left: 1px solid var(--color-border);
-  box-shadow: var(--shadow-overlay);
+  border-top-left-radius: var(--radius-xl);
+  box-shadow: var(--md-sys-elevation-level-3);
   transform: translateX(100%);
   transition:
-    transform  var(--dur-base) var(--ease-spring),
+    transform var(--dur-slow) var(--md-sys-motion-easing-emphasized),
     box-shadow var(--dur-slow) var(--ease-out-expo);
   z-index: var(--z-map-ui);
   overflow-y: auto;
@@ -425,22 +412,6 @@
 .map-detail[hidden] { display: none; }
 .map-detail.is-open {
   transform: translateX(0);
-  box-shadow: var(--shadow-overlay-strong);
-}
-
-/* Stagger children in after slide */
-.map-detail.is-open > * {
-  opacity: 0;
-  animation: map-detail-stagger var(--dur-base) var(--ease-out-expo) forwards;
-}
-.map-detail.is-open > *:nth-child(1) { animation-delay: 80ms; }
-.map-detail.is-open > *:nth-child(2) { animation-delay: 140ms; }
-.map-detail.is-open > *:nth-child(3) { animation-delay: 200ms; }
-.map-detail.is-open > *:nth-child(n+4) { animation-delay: 260ms; }
-
-@keyframes map-detail-stagger {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0);   }
 }
 
 .map-detail-header {
@@ -453,17 +424,16 @@
   border-bottom: 1px solid var(--color-border);
 }
 .map-detail-header h2 {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: var(--fs-xl);
-  font-weight: 400;
+  font-weight: var(--fw-medium);
   line-height: var(--lh-xl);
   letter-spacing: var(--tracking-tight);
-  font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 1;
   color: var(--color-text);
   margin: 0;
 }
 
-/* Ledger-style detail rows inside the drawer */
+/* Drawer KV list — flat, no ledger rules */
 .map-detail .detail-kv {
   display: grid;
   grid-template-columns: 96px 1fr;
@@ -472,28 +442,29 @@
   font-size: var(--fs-sm);
 }
 .map-detail .detail-kv dt {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  text-transform: none;
+  letter-spacing: var(--tracking-normal);
   color: var(--color-text-muted);
-  line-height: 24px;
+  line-height: var(--lh-base);
   margin: 0;
 }
 .map-detail .detail-kv dd {
   margin: 0;
   color: var(--color-text);
-  line-height: 24px;
+  line-height: var(--lh-base);
 }
 .map-detail .detail-kv dd.mono {
   font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  color: var(--color-accent);
-  letter-spacing: 0.02em;
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  letter-spacing: 0;
 }
 
 /* ============================================================
- * 10. Map controls — bottom-right cluster
+ * 10. Map controls — stacked floating pill, top-right area
+ *     (kept bottom-right for thumb reach; §10 allows either)
  * ============================================================ */
 
 .map-controls {
@@ -502,31 +473,28 @@
   bottom: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: 2px;
   z-index: var(--z-map-ui);
-  background: var(--color-bg-elev-1);
+  background: var(--md-sys-color-surface-container-high);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 4px;
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--md-sys-elevation-level-2);
 }
 .map-controls .icon-btn {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   background: transparent;
   border: none;
   color: var(--color-text);
   font-size: var(--fs-md);
-  font-weight: 500;
-  border-radius: var(--radius-xs);
-  transition:
-    background var(--dur-fast) var(--ease-snap),
-    color var(--dur-fast) var(--ease-snap);
+  font-weight: var(--fw-medium);
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-snap);
   cursor: pointer;
 }
 .map-controls .icon-btn:hover {
   background: var(--color-accent-wash);
-  color: var(--color-accent);
 }
 .map-controls .icon-btn:focus-visible {
   outline: none;
@@ -534,29 +502,29 @@
 }
 
 /* ============================================================
- * 11. Attribution — copper-outlined pill (§8.8)
+ * 11. Attribution — outlined pill
  * ============================================================ */
 
 .map-attribution {
   position: absolute;
   left: var(--sp-3);
   bottom: var(--sp-3);
-  padding: 3px 8px;
-  border: 1px solid var(--color-border-accent);
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
   background: var(--color-overlay-bg);
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--color-text-muted);
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   z-index: var(--z-map-ui);
   pointer-events: auto;
 }
 .map-attribution a { color: var(--color-text-muted); }
-.map-attribution a:hover { color: var(--color-accent); }
+.map-attribution a:hover { color: var(--color-text); }
 
 /* ============================================================
- * 12. Tile-error toast — amber warn, top-center
+ * 12. Tile-error toast — filled error container
  * ============================================================ */
 
 .map-tile-error {
@@ -568,19 +536,19 @@
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-4);
-  background: var(--color-warn-soft);
-  border: 1px solid var(--color-warn);
+  background: var(--md-sys-color-error-container);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
-  color: var(--color-warn);
+  color: var(--md-sys-color-on-error-container);
   font-family: var(--font-sans);
   font-size: var(--fs-sm);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   z-index: var(--z-map-ui);
   opacity: 0;
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--md-sys-elevation-level-2);
   transition:
     opacity   var(--dur-base) var(--ease-out-expo),
-    transform var(--dur-base) var(--ease-spring);
+    transform var(--dur-base) var(--md-sys-motion-easing-emphasized);
   pointer-events: none;
 }
 .map-tile-error:not([hidden]) {
@@ -606,8 +574,8 @@
   transform: translate(-50%, -50%);
   max-width: 300px;
   padding: var(--sp-5);
-  background: var(--color-overlay-bg);
-  border: 1px solid var(--color-border-accent);
+  background: var(--md-sys-color-surface-container-high);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   text-align: center;
   color: var(--color-text-muted);
@@ -615,14 +583,14 @@
   font-size: var(--fs-sm);
   z-index: var(--z-map-ui);
   pointer-events: auto;
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--md-sys-elevation-level-2);
 }
 .map-empty-state[hidden] { display: none; }
 .map-empty-state-title {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: var(--fs-lg);
-  font-weight: 500;
-  font-variation-settings: "opsz" 72, "SOFT" 30, "WONK" 1;
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
   color: var(--color-text);
   margin: 0 0 var(--sp-2) 0;
 }
@@ -634,26 +602,23 @@
 
 .map-load-error {
   padding: var(--sp-3) var(--sp-4);
-  background: var(--color-danger-soft);
-  border: 1px solid var(--color-danger);
+  background: var(--md-sys-color-error-container);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
-  color: var(--color-danger);
+  color: var(--md-sys-color-on-error-container);
   font-family: var(--font-sans);
   font-size: var(--fs-sm);
   margin: var(--sp-3);
 }
 
 /* ============================================================
- * 15. List view — ledger table when toggled
+ * 15. List view — flat M3 table, no ledger rules
  * ============================================================ */
 
 .map-list-view {
   position: absolute;
   inset: 0;
   background: var(--color-bg);
-  background-image:
-    radial-gradient(1000px 500px at 10% -10%, rgba(247, 179, 43, 0.04), transparent 55%),
-    var(--color-bg);
   padding: var(--sp-5);
   overflow-y: auto;
   z-index: calc(var(--z-map-ui) + 1);
@@ -671,24 +636,14 @@
   pointer-events: none;
 }
 .map-list-view h2 {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: var(--fs-xl);
-  font-weight: 400;
+  font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
-  font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 1;
+  color: var(--color-text);
   margin: 0 0 var(--sp-4) 0;
   padding-bottom: var(--sp-3);
   border-bottom: 1px solid var(--color-border);
-  position: relative;
-}
-.map-list-view h2::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  bottom: -1px;
-  width: 64px;
-  height: 2px;
-  background: var(--color-accent);
 }
 
 .map-list-view ul {
@@ -697,36 +652,31 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0;
-  /* ledger rules */
-  background-image: repeating-linear-gradient(
-    180deg,
-    transparent 0 43px,
-    var(--color-border) 43px 44px
-  );
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background-color: var(--color-bg-elev-1);
+  background-color: var(--md-sys-color-surface-container-low);
   overflow: hidden;
 }
 .map-list-view li {
   padding: 0 var(--sp-4);
-  height: 44px;
+  height: 48px;
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: var(--sp-3);
   font-family: var(--font-sans);
   font-size: var(--fs-sm);
-  border-bottom: 1px solid transparent;
   color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  transition: background var(--dur-fast) var(--ease-snap);
 }
 .map-list-view li:last-child { border-bottom: none; }
+.map-list-view li:hover { background: var(--md-sys-color-surface-container); }
 .map-list-view .meta {
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
 }
 
 /* ============================================================
@@ -736,8 +686,8 @@
 /* Tablet: rail collapses to horizontal chip bar at top */
 @media (max-width: 900px) {
   .app-main--map {
-    min-height: calc(100vh - 48px);
-    min-height: calc(100dvh - 48px);
+    min-height: calc(100vh - 56px);
+    min-height: calc(100dvh - 56px);
   }
   .map-page {
     grid-template-columns: 1fr;
@@ -748,9 +698,8 @@
     grid-row: 1;
     border-right: 0;
     border-bottom: 1px solid var(--color-border);
-    box-shadow: inset 0 -1px 0 rgba(247, 179, 43, 0.10);
     flex-direction: row;
-    padding: var(--sp-3) var(--sp-3);
+    padding: var(--sp-3);
     overflow-x: auto;
     overflow-y: visible;
     scrollbar-width: none;
@@ -760,8 +709,7 @@
   .map-filter-rail::-webkit-scrollbar { display: none; }
   .map-filter-list,
   .map-filter-list-item,
-  .map-filter-rail-title,
-  .map-metric-strip { display: none; }
+  .map-filter-rail-title { display: none; }
   .map-filter-chips { flex-wrap: nowrap; }
   .map-filter-rail .input {
     flex: 0 1 240px;
@@ -777,7 +725,7 @@
   .map-canvas { grid-column: 1; grid-row: 2; }
 }
 
-/* Mobile: detail panel = bottom sheet */
+/* Mobile: detail panel = bottom sheet (28 px top radii) */
 @media (max-width: 640px) {
   .map-filter-rail {
     padding: var(--sp-2) var(--sp-3);
@@ -791,15 +739,14 @@
     height: min(60vh, 460px);
     border-left: 0;
     border-top: 1px solid var(--color-border);
-    border-top-left-radius: var(--radius-lg);
-    border-top-right-radius: var(--radius-lg);
+    border-top-left-radius: var(--radius-xl);
+    border-top-right-radius: var(--radius-xl);
     transform: translateY(100%);
     padding: var(--sp-4);
     padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
   }
   .map-detail.is-open { transform: translateY(0); }
   .map-detail::before {
-    /* grab handle */
     content: "";
     position: absolute;
     top: 8px;
@@ -827,7 +774,7 @@
 }
 
 /* ============================================================
- * 17. Reduced-motion matrix
+ * 17. Reduced-motion
  * ============================================================ */
 
 @media (prefers-reduced-motion: reduce) {
@@ -843,7 +790,6 @@
   .map-pin--delayed { animation: none; }
   .map-detail { transition: none; transform: none; }
   .map-detail.is-open { transform: none; }
-  .map-detail.is-open > * { opacity: 1; animation: none; transform: none; }
   .map-pin.is-agent-highlighted { animation: none; }
   .map-pin.is-agent-highlighted::before,
   .map-pin.is-agent-highlighted::after { animation: none; display: none; }

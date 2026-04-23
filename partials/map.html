@@ -2,12 +2,6 @@
   <h1 class="sr-only">Freight map</h1>
 
   <div id="map-filter-rail" class="map-filter-rail" role="group" aria-label="Map filters" data-agent-id="map.filters.rail">
-    <div class="map-metric-strip" aria-hidden="true">
-      <span>LANES<strong id="map-metric-lanes">&mdash;</strong></span>
-      <span>ACTIVE<strong id="map-metric-active">&mdash;</strong></span>
-      <span>DELAYED<strong id="map-metric-delayed">&mdash;</strong></span>
-    </div>
-
     <p class="map-filter-rail-title">Layers</p>
     <div class="map-filter-chips">
       <button class="chip-btn" type="button" data-agent-id="map.filter.loads" data-layer="loads" aria-pressed="true">Loads</button>
@@ -31,7 +25,7 @@
 
   <div id="map-tile-error" class="map-tile-error" role="alert" hidden>
     <span class="map-tile-error-text">Map tiles failed to load.</span>
-    <button class="btn btn--sm" type="button" id="map-tile-retry" data-agent-id="map.tile_retry">Retry</button>
+    <button class="btn btn--sm btn--outlined" type="button" id="map-tile-retry" data-agent-id="map.tile_retry">Retry</button>
   </div>
 
   <aside id="map-detail" class="map-detail" data-agent-id="map.detail" hidden role="complementary" aria-label="Load detail"></aside>

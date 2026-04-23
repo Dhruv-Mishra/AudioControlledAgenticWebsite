@@ -85,10 +85,14 @@ const MIME = {
   '.woff2':'font/woff2',
   '.wav':  'audio/wav',
   '.mp3':  'audio/mpeg',
+  '.webm': 'audio/webm',
+  '.ogg':  'audio/ogg',
   '.map':  'application/json; charset=utf-8'
 };
 
-const STATIC_DIRS = ['css', 'js', 'public', 'data', 'partials'];
+// audio-flow: 'audio' is served so the browser can fetch the three
+// startCall / background / endCall clips (webm primary, mp3 fallback).
+const STATIC_DIRS = ['css', 'js', 'public', 'data', 'partials', 'audio'];
 
 // Routes that the SPA router handles client-side. The server serves the
 // single-page shell (index.html) for each — the History API then rewrites
@@ -117,7 +121,10 @@ function cacheControlFor(pathname) {
   }
   // Top-level JS/CSS: no content hash today, but safe to cache for a day.
   // Long-tail static assets (favicon, data fixtures, fonts) — 1 day is fine.
-  if (/\.(?:js|css|svg|png|jpg|ico|woff|woff2)$/i.test(pathname)) {
+  // audio-flow: the three call-audio clips (mp3/webm) are included here
+  // so the browser can cache them across reloads — they're small and
+  // don't change per deploy.
+  if (/\.(?:js|css|svg|png|jpg|ico|woff|woff2|mp3|webm|ogg|wav)$/i.test(pathname)) {
     return IS_PROD
       ? 'public, max-age=86400, must-revalidate'
       : 'no-cache';

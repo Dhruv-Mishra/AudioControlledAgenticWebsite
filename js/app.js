@@ -124,20 +124,11 @@ async function main() {
     return r.result;
   });
 
-  agent.toolRegistry.registerDomain('set_compression_strength', (args) => {
-    const raw = args == null ? null : args.strength;
-    const n = Math.max(0, Math.min(100, Math.round(Number(raw))));
-    if (!Number.isFinite(n)) throw new Error('set_compression_strength requires a numeric strength.');
-    const el = document.querySelector('[data-agent-id="voice.compression_strength"]');
-    if (el) {
-      el.value = String(n);
-      el.setAttribute('aria-valuenow', String(n));
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    } else if (typeof agent.setCompressionStrength === 'function') {
-      agent.setCompressionStrength(n);
-    }
-    return { ok: true, strength: n };
-  });
+  // audio-flow: the `set_compression_strength` tool has been retired with
+  // the procedural noise / phone-compression system. The agent has no
+  // business adjusting audio DSP any more — the single user-facing
+  // control is now the Background audio toggle in the settings sheet,
+  // which stays user-driven.
 
   // After first paint, dynamic-import the feature modules. Each module
   // owns its own init() which mounts its DOM + wires its own tool handler.

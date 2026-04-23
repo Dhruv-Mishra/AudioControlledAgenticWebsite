@@ -116,8 +116,17 @@ function fireInputEvent(el) {
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-async function waitForIdle(ms = 120) {
-  return new Promise((r) => setTimeout(r, ms));
+// latency-pass: was 120 ms setTimeout per click/fill/select — each tool burned
+// ~120 ms of wall-clock before the action fired. The original intent was "let
+// the flash animation start painting before we interact with the element".
+// rAF-based yield gives the paint a tick (~16 ms on 60 Hz) while cutting the
+// tool-call round-trip by ~100 ms. requestAnimationFrame is synchronous to the
+// next paint; setTimeout(0) can be coalesced far later under load.
+async function waitForIdle() {
+  if (typeof requestAnimationFrame === 'function') {
+    return new Promise((r) => requestAnimationFrame(() => r()));
+  }
+  return new Promise((r) => setTimeout(r, 0));
 }
 
 const DEBUG = (() => {
@@ -321,8 +330,20 @@ export class ToolRegistry {
   }
 
   async handleToolCall({ id, name, args }) {
+    // latency-pass: tool_call → tool_result round-trip telemetry. Gated on
+    // localStorage['jarvis.debug']==='1'; zero cost otherwise. The model
+    // perceives "action speed" as the time from it emitting toolCall to us
+    // returning toolResult — this is priority-3 in the audit.
+    const rttStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     const reply = (payload) => {
       this.send({ type: 'tool_result', id, name, ...payload });
+      try {
+        if (typeof localStorage !== 'undefined' && localStorage.getItem('jarvis.debug') === '1') {
+          const rtt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - rttStart);
+          // eslint-disable-next-line no-console
+          console.log(`[jarvis phase] tool_rtt ${name} ${rtt}ms ok=${payload && payload.ok !== false}`);
+        }
+      } catch {}
     };
     const textVisible = !!this.showText();
     // Mode-gated UI notes: off/captions modes skip transcript noise.

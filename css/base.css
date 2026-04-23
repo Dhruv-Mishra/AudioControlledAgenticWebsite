@@ -1,7 +1,13 @@
-/* Base — reset, layout shell, typography bootstrap, atmosphere.
- * The atmosphere layer (grain, vignette, radial lamp-glow) is the
- * Harbor Bridge signature. Three stacked substrate layers, each under
- * ~3% visible influence.
+/* Expressive Console — base reset + shell layout + typography bootstrap.
+ *
+ * v2 scope: the v1 "Harbor Bridge" atmosphere layer (body grain, shell
+ * vignette, radial amber/cyan lamp halos on <body>) is DELETED. Body is
+ * painted as a flat `var(--color-bg)` surface. No gradients, no noise,
+ * no vignette, no scanlines.
+ *
+ * Preserved from v1: skip-link, #route-target wrapper, semantic-HTML
+ * defaults, focus tidy, `prefers-reduced-motion` block, dock right-gutter
+ * reservation on desktop, and the `h1[tabindex="-1"]` focus tidy.
  */
 
 /* ===== Reset ================================================= */
@@ -22,92 +28,53 @@ html {
 
 html[data-theme="light"] { color-scheme: light; }
 
-/* ===== Body — substrate gradient + atmosphere ================ */
+/* ===== Body — flat M3 surface, no atmosphere ================= */
 body {
   font-family: var(--font-sans);
   font-size: var(--fs-base);
   line-height: var(--lh-base);
   font-weight: var(--fw-regular);
   color: var(--color-text);
-  background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(247, 179, 43, 0.045), transparent 55%),
-    radial-gradient(900px 500px at 100% 100%, rgba(79, 209, 197, 0.030), transparent 55%),
-    var(--color-bg);
-  background-attachment: fixed;
+  background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: "ss01" 1, "ss02" 1, "cv05" 1;
-  font-variant-numeric: tabular-nums;
+  font-feature-settings: "ss01" 1, "ss02" 1, "cv11" 1, "zero" 1;
+  font-variant-numeric: tabular-nums slashed-zero;
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
 }
 
-/* Light-theme substrate: tuned down so the cream reads clean */
-html[data-theme="light"] body {
-  background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(138, 76, 0, 0.030), transparent 55%),
-    radial-gradient(900px 500px at 100% 100%, rgba(26, 106, 99, 0.022), transparent 55%),
-    var(--color-bg);
-}
-
-/* Layer 2 — grain.
- * We ship without a dedicated noise PNG to keep the overhaul scope small.
- * Instead a very faint diagonal hatch via repeating-conic gradient.
- * Opacity capped to ~1% so body copy is unaffected at AAA contrast.
+/* ===== Typography bootstrap ==================================
+ * Headings use Geist medium, not Fraunces. No font-variation-settings
+ * (Fraunces `opsz` / `SOFT` / `WONK` axes are gone).
  */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background-image:
-    repeating-linear-gradient(
-      115deg,
-      var(--color-grain-overlay) 0 1px,
-      transparent 1px 3px
-    ),
-    repeating-linear-gradient(
-      25deg,
-      var(--color-grain-overlay) 0 1px,
-      transparent 1px 4px
-    );
-  opacity: 0.55;
-  mix-blend-mode: overlay;
-}
-
-/* Layer 3 — vignette over the whole shell */
-.app-shell::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: radial-gradient(120% 85% at 50% 50%, transparent 55%, var(--color-vignette) 100%);
-}
-
-/* All actual content lives above the atmosphere */
-.app-shell > * { position: relative; z-index: 1; }
-
-/* ===== Typography bootstrap ================================== */
 h1, h2, h3, h4, h5, h6 {
   margin: 0;
-  font-family: var(--font-display);
-  font-weight: var(--fw-regular);
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  font-feature-settings: "ss01" 1, "ss04" 1;
-  font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 1;
+  font-feature-settings: "ss01" 1, "ss02" 1, "cv11" 1, "zero" 1;
   font-variant-numeric: tabular-nums slashed-zero;
 }
 
 h1 { font-size: var(--fs-2xl); line-height: var(--lh-2xl); }
 h2 { font-size: var(--fs-xl);  line-height: var(--lh-xl); }
 h3 { font-size: var(--fs-lg);  line-height: var(--lh-lg); }
-h4 { font-size: var(--fs-md);  line-height: var(--lh-md); font-family: var(--font-sans); font-weight: var(--fw-semibold); }
-h5 { font-size: var(--fs-sm);  line-height: var(--lh-sm); font-family: var(--font-sans); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--color-text-muted); }
-h6 { font-size: var(--fs-xs);  line-height: var(--lh-xs); font-family: var(--font-sans); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--color-text-muted); }
+h4 { font-size: var(--fs-md);  line-height: var(--lh-md); font-weight: var(--fw-semibold); }
+h5 {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--fw-medium);
+  color: var(--color-text-muted);
+}
+h6 {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--fw-medium);
+  color: var(--color-text-muted);
+}
 
 p { margin: 0; }
 
@@ -117,7 +84,11 @@ a {
   border-radius: var(--radius-xs);
   transition: color var(--dur-fast) var(--ease-snap);
 }
-a:hover { color: var(--color-accent-strong); text-decoration: underline; text-underline-offset: 3px; }
+a:hover {
+  color: var(--color-accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 a:focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus-ring-accent);
@@ -147,24 +118,27 @@ code, pre, .mono, .mono-id {
 .mono-id {
   font-size: var(--fs-xs);
   color: var(--color-text-muted);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--tracking-open);
 }
 
-/* Uppercase instrument micro-labels */
+/* Legacy micro-label class — kept so JS/HTML references don't 404 on style,
+ * but restyled sentence-case M3 medium. No uppercase, no wide tracking. */
 .label-caps {
   font-family: var(--font-sans);
-  font-size: var(--fs-2xs);
-  font-weight: var(--fw-semibold);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-normal);
+  text-transform: none;
   color: var(--color-text-muted);
 }
 
 /* Screen-reader only */
 .sr-only {
   position: absolute;
-  width: 1px; height: 1px;
-  padding: 0; margin: -1px;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
@@ -184,7 +158,10 @@ code, pre, .mono, .mono-id {
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-*::-webkit-scrollbar-thumb:hover { background: var(--color-border-accent); background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-accent);
+  background-clip: padding-box;
+}
 
 /* ===== Skip link ============================================= */
 .skip-link {
@@ -194,21 +171,21 @@ code, pre, .mono, .mono-id {
   padding: var(--sp-2) var(--sp-4);
   background: var(--color-accent);
   color: var(--color-text-inverse);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
   font-family: var(--font-sans);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-medium);
   font-size: var(--fs-sm);
-  letter-spacing: var(--tracking-open);
+  letter-spacing: var(--tracking-normal);
   transform: translateY(-200%);
-  transition: transform var(--dur-base) var(--ease-spring);
+  transition: transform var(--dur-base) var(--ease-snap);
   z-index: var(--z-skip-link);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--md-sys-elevation-level-2);
 }
 .skip-link:focus,
 .skip-link:focus-visible {
   transform: translateY(0);
   outline: none;
-  box-shadow: var(--shadow-overlay), var(--shadow-focus-ring-accent);
+  box-shadow: var(--md-sys-elevation-level-2), var(--shadow-focus-ring-accent);
 }
 
 /* ===== App shell ============================================= */
@@ -219,8 +196,7 @@ code, pre, .mono, .mono-id {
   isolation: isolate;
 }
 
-/* Header is styled in components.css; base.css only reserves the slot.
- * We set z-index + sticky here so the atmosphere vignette sits beneath it. */
+/* Header reservation — full styling lives in components.css. */
 .app-header {
   position: sticky;
   top: 0;
@@ -235,7 +211,7 @@ code, pre, .mono, .mono-id {
   padding: var(--sp-6) var(--sp-6);
 }
 
-/* Full-bleed map variant — the map page toggles this class on .app-main */
+/* Full-bleed map variant */
 .app-main.app-main--map {
   max-width: none;
   padding: 0;
@@ -253,21 +229,18 @@ code, pre, .mono, .mono-id {
     padding: var(--sp-4) var(--sp-3);
     padding-bottom: calc(var(--sp-11) + env(safe-area-inset-bottom, 0px));
   }
-  /* When dock is collapsed on mobile, content only needs room for a pill */
+  /* When the dock is a minimised pill on mobile, content only needs room
+   * for the 60 px pill + safe-area inset. */
   body:has(.voice-dock.is-collapsed) .app-main {
     padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
   }
 }
 
 /* ===== SPA route target =====================================
- * The router swaps #route-target innerHTML between partials.
- * It contributes no layout of its own (display: contents). */
+ * The router swaps #route-target innerHTML between partials. It contributes
+ * no layout (display: contents) — partials own their outer layout. */
 .route-target {
   display: contents;
-}
-.route-target[aria-busy="true"] {
-  /* No CSS hook on a display:contents container; pages.css handles
-   * the fade on the partial root. */
 }
 .route-error {
   padding: var(--sp-6);
@@ -277,12 +250,9 @@ code, pre, .mono, .mono-id {
   color: var(--color-danger);
 }
 
-/* ===== Page-entry stagger orchestration =====================
- * Pages set class="is-mounted" on the partial root in their
- * enter() handler. CSS handles the rest via animation-delay.
- * Reduced motion: durations collapse to 0 via --dur-stage,
- * so animation still fires but is effectively instant.
- */
+/* Page-entry keyframes are KEPT so pages.css rules that reference them
+ * still compile. Duration is driven by `--dur-base` / stagger delays,
+ * all of which collapse to 0 in v2 (see tokens.css). */
 @keyframes page-fade-up {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -308,39 +278,38 @@ code, pre, .mono, .mono-id {
   }
 }
 
-/* ===== Dock reservation =====================================
- * Voice dock is a persistent 420px fixed panel anchored bottom-
- * right. On desktop we reserve right-side gutter space on the
- * main content so it doesn't slide underneath. When the user
- * collapses the dock to the 64px pill, the shell grants that
- * space back to the content (:has() feature query — progressive
- * enhancement; browsers without :has() keep the full reservation).
+/* ===== Dock right-gutter reservation ========================
+ * On desktop the voice dock is a 420-px pill anchored bottom-right. We
+ * reserve matching right-side gutter on main content so tables/cards
+ * don't flow underneath. When the dock is minimised (pill 420 px — same
+ * footprint) the reservation holds; the `:has()` release below frees the
+ * space if a future dock state drops the `.is-collapsed` flag while
+ * shrinking further. The reservation is a progressive enhancement —
+ * browsers without `:has()` keep the full reservation always.
  */
 @media (min-width: 1100px) {
   .app-main {
     padding-right: calc(420px + var(--sp-6) + var(--sp-4));
-    transition: padding-right var(--dur-base) var(--ease-out-expo);
+    transition: padding-right var(--dur-base) var(--ease-snap);
   }
-  /* When the dock is collapsed, free up the right column. */
   .app-shell:has(.voice-dock.is-collapsed) .app-main {
     padding-right: var(--sp-6);
   }
-  /* Map route needs full bleed — map-widget controls its own
-     layout and handles the dock footprint via filter-rail width. */
   .app-main.app-main--map {
     padding-right: 0;
   }
 }
 @media (min-width: 1100px) and (max-width: 1279px) {
   .app-main {
-    /* Tighter reservation on small desktops so data stays readable. */
     padding-right: calc(400px + var(--sp-5));
   }
 }
 
-/* Router focuses the page <h1> on navigation (a11y good). Hide the
- * default outline box for non-keyboard focus; keep the accent ring
- * for keyboard users who tab back to the title. */
+/* ===== h1 focus tidy =========================================
+ * The router focuses the page <h1> on navigation (a11y good). Suppress the
+ * default outline for non-keyboard focus; keep the accent ring for keyboard
+ * users who tab back to the title.
+ */
 #route-target h1[tabindex="-1"]:focus:not(:focus-visible) {
   outline: none;
   box-shadow: none;

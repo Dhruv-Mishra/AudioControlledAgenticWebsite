@@ -1,0 +1,85 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - link "Dhruv FreightOps" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e6]:
+        - generic [ref=e7]: Dhruv
+        - generic [ref=e8]: FreightOps
+    - navigation "Primary" [ref=e9]:
+      - link "Dispatch" [ref=e10] [cursor=pointer]:
+        - /url: /
+      - link "Carriers" [ref=e11] [cursor=pointer]:
+        - /url: /carriers.html
+      - link "Negotiate" [ref=e12] [cursor=pointer]:
+        - /url: /negotiate.html
+      - link "Map" [ref=e13] [cursor=pointer]:
+        - /url: /map.html
+      - link "Contact" [ref=e14] [cursor=pointer]:
+        - /url: /contact.html
+    - link "Voice" [ref=e16] [cursor=pointer]:
+      - /url: "#voice-dock"
+      - generic [ref=e17]: Voice
+  - link "Skip to main content" [ref=e18] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e20]:
+    - generic [ref=e21]:
+      - generic [ref=e23]:
+        - heading "Rate negotiation" [active] [level=1] [ref=e24]
+        - paragraph [ref=e25]: Load LD-10826. Ask Jarvis to set a counter, submit, or accept.
+      - generic [ref=e26]:
+        - form "Negotiation form" [ref=e27]:
+          - generic [ref=e28]:
+            - generic [ref=e29]: Quote
+            - generic [ref=e30]: Draft
+          - generic [ref=e31]:
+            - generic [ref=e33]:
+              - generic [ref=e34]: —
+              - generic [ref=e35]: USD offered
+            - generic [ref=e38]:
+              - generic [ref=e39]:
+                - generic [ref=e40]: Pickup
+                - textbox "Pickup" [ref=e41]: Los Angeles, CA
+              - generic [ref=e42]:
+                - generic [ref=e43]: Dropoff
+                - textbox "Dropoff" [ref=e44]: Phoenix, AZ
+              - generic [ref=e45]:
+                - generic [ref=e46]: Commodity
+                - textbox "Commodity" [ref=e47]: Consumer electronics
+              - generic [ref=e48]:
+                - generic [ref=e49]: Weight (lb)
+                - spinbutton "Weight (lb)" [ref=e50]: "22400"
+              - generic [ref=e51]:
+                - generic [ref=e52]: Target rate (USD)
+                - spinbutton "Target rate (USD)" [ref=e53]
+              - generic [ref=e54]:
+                - generic [ref=e55]: Note for carrier
+                - textbox "Note for carrier" [ref=e56]:
+                  - /placeholder: Optional context
+              - group "Negotiation actions" [ref=e58]:
+                - button "Submit quote" [ref=e59] [cursor=pointer]
+                - button "Log carrier counter" [ref=e60] [cursor=pointer]
+                - button "Accept" [ref=e61] [cursor=pointer]
+        - complementary "Negotiation log" [ref=e62]:
+          - generic [ref=e63]:
+            - generic [ref=e64]: Negotiation log
+            - generic [ref=e65]: Newest first
+          - generic [ref=e68]:
+            - generic [ref=e69]: System · 4:23:01 PM
+            - generic [ref=e70]: "Negotiation opened. Ask Jarvis: \"Set the target rate to 1850 and submit a counter.\""
+  - region "Voice agent" [ref=e71]:
+    - generic [ref=e72]:
+      - generic [ref=e75]: Jarvis
+      - generic [ref=e78]: Stand by
+      - generic [ref=e79]:
+        - button "Mute microphone" [ref=e80] [cursor=pointer]:
+          - img [ref=e81]
+          - generic [ref=e84]: Mute
+        - button "Place a call to Jarvis" [ref=e85] [cursor=pointer]:
+          - img [ref=e87]
+          - generic [ref=e89]: Place Call
+        - button "Call settings" [ref=e90] [cursor=pointer]:
+          - img [ref=e91]
+        - button "Expand voice panel" [ref=e94] [cursor=pointer]:
+          - img [ref=e95]
+          - generic [ref=e97]: Expand voice panel
+  - status [ref=e98]: Loaded Rate Negotiation — Dhruv FreightOps

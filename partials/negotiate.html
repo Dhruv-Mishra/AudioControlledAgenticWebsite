@@ -1,6 +1,6 @@
 <section class="page-header">
   <div class="page-header-text">
-    <h1 class="page-title">Rate Negotiation</h1>
+    <h1 class="page-title">Rate negotiation</h1>
     <p class="page-subtitle muted">Load <span class="mono" id="load-id-readout" data-agent-id="negotiate.load_id"></span>. Ask Jarvis to set a counter, submit, or accept.</p>
   </div>
 </section>
@@ -11,13 +11,17 @@
       <div class="panel-title">Quote</div>
       <span class="chip chip--info">Draft</span>
     </header>
-    <div class="panel-body">
-      <div class="field--wide" style="margin-bottom: var(--sp-4);">
-        <div class="rate-readout">
+    <div class="panel-body stack">
+      <div class="rate-readout">
+        <div class="rate-readout-value">
           <span class="amount" id="rate-readout-amount" data-agent-id="negotiate.readout.amount">&mdash;</span>
           <span class="unit">USD offered</span>
         </div>
+        <div class="rate-progress" aria-hidden="true">
+          <span class="rate-progress-fill"></span>
+        </div>
       </div>
+
       <div class="form-grid">
         <div class="field">
           <label class="field-label" for="field-pickup">Pickup</label>
@@ -57,7 +61,7 @@
   <aside class="panel" aria-label="Negotiation log">
     <header class="panel-header">
       <div class="panel-title">Negotiation log</div>
-      <span class="muted" style="font-size: var(--fs-xs);">Newest first</span>
+      <span class="muted">Newest first</span>
     </header>
     <div class="panel-body">
       <div class="convo-log" id="convo-log" data-agent-id="negotiate.log" aria-live="polite"></div>

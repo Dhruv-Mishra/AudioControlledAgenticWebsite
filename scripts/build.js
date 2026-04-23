@@ -124,7 +124,11 @@ async function copyStatic() {
       }
     }
   }
-  for (const d of ['partials', 'public', 'data']) {
+  // audio-flow: `audio/` ships the three call-lifecycle clips
+  // (startCall / background / endCall, both .webm and .mp3) that the
+  // CallAudioController fetches at `/audio/*`. server.js adds the
+  // directory to STATIC_DIRS so prod serves them straight out of dist.
+  for (const d of ['partials', 'public', 'data', 'audio']) {
     const src = path.join(ROOT, d);
     try {
       const stat = await fsp.stat(src);

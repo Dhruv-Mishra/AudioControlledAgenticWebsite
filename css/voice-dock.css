@@ -1,1067 +1,991 @@
 /* -----------------------------------------------------------------------------
- * Voice Dock — "Harbor Bridge"
+ * Expressive Console dock — M3 minimised pill with in-pill Call button,
+ * expand-on-click panel.
  *
- * The signature surface. An amber-lamp-on-a-chart-paper dock anchored bottom-
- * right on desktop, rising as a bottom-sheet on mobile.
+ * The signature surface of v2. Defaults to a 60 px rounded pill anchored
+ * bottom-right (desktop) / bottom-full-width (mobile). The pill is
+ * actionable — its primary button is #voice-call-btn, a filled-lime
+ * Place Call action. A caret expands the pill into a full panel
+ * (28 px uniform radius, elevation-3, surface-container-highest) that
+ * reveals transcript, visualiser, quick chips, and settings.
  *
  * Row order (expanded):
- *   .voice-dock-header      brand + status pill + chips + icon actions
- *   .voice-dock-body        scope + transcript (+ quick-chips mount)
- *   .voice-dock-action      call button + mic + hint + kbd pips
- *   .voice-settings-sheet   right-slide overlay (desktop) / bottom-sheet (mobile)
+ *   .voice-dock-header          brand dot + pill + chips + mic + call + gear + caret
+ *   .voice-error-banner         hidden by default, appears on error state
+ *   .voice-dock-body            visualiser + transcript (+ quick-chips mount)
+ *   .voice-dock-action          activity indicator + hint + kbd pips
+ *   .voice-settings-sheet       right-slide (desktop) / bottom-sheet (mobile)
  *
- * Every contract from §2/§9 of the architecture plan is preserved. The VU bars
- * still exist (hidden by opacity) so the wireVuMeter animation loop remains a
- * no-op; the real visualiser is the scope canvas above them.
- *
- * State hooks JS toggles (kept visually wired):
- *   [data-state=idle|listening|thinking|speaking|tool|error]   pill + strip
- *   [data-call-state=idle|cancel|end|reconnect|closing]        button
- *   .is-collapsed  .is-open  .is-active  .is-muted  .is-interim .is-hydrated
- *   .is-stale      [data-from=user|agent|system|tool]          transcript lines
- *   [data-interim] on transcript lines
- *   [data-mode]   [data-persona-id]   [data-theme-value]
+ * State hooks JS toggles (all wired in CSS):
+ *   [data-state=idle|listening|thinking|speaking|tool|error]   dock + pill + strip
+ *   [data-call-state=idle|cancel|end|reconnect|closing]        call button
+ *   .is-collapsed .is-open .is-active .is-muted .is-interim
+ *   .is-hydrated  .is-stale  .is-visible
+ *   [data-from=user|agent|system|tool]                         transcript lines
+ *   [data-interim]                                             transcript lines
+ *   [data-mode] [data-persona-id] [data-theme-value]           segmented controls
  * -------------------------------------------------------------------------- */
 
 /* ============ 0. TOKEN FALLBACKS ============
- * Voice dock uses the Harbor Bridge token vocabulary. If Dev A hasn't landed
- * the updated tokens.css yet, fall back to sensible values so the dock still
- * renders. Tokens in the spec (§2/§3/§4) take precedence when defined.
+ * v2 uses the M3 `--md-sys-color-*` palette with legacy `--color-*` aliases
+ * supplied by Dev A (css/tokens.css). If Dev A hasn't landed the updated
+ * tokens yet, this block keeps the dock visually correct by resolving every
+ * token to a sensible fallback. Production values ALWAYS come from tokens.css.
  */
 .voice-dock {
-  --voice-radius-dock: var(--radius-dock, 28px 28px 14px 14px);
-  --voice-radius-xl: var(--radius-xl, 28px);
-  --voice-radius-md: var(--radius-md, 14px);
-  --voice-color-accent: var(--color-accent, #F7B32B);
-  --voice-color-accent-soft: var(--color-accent-soft, #2A1E06);
-  --voice-color-accent-wash: var(--color-accent-wash, rgba(247, 179, 43, 0.08));
-  --voice-color-border-accent: var(--color-border-accent, rgba(247, 179, 43, 0.32));
-  --voice-color-cyan: var(--color-cyan, var(--color-state-listening, #4FD1C5));
-  --voice-color-cyan-soft: var(--color-cyan-soft, rgba(79, 209, 197, 0.10));
-  --voice-color-lavender: var(--color-state-thinking, #C39BE8);
-  --voice-color-vignette: var(--color-vignette, rgba(0, 0, 0, 0.38));
-  --voice-ease-spring: var(--ease-spring, var(--ease-out-expo));
-  --voice-dur-slow: var(--dur-slow, 360ms);
-  --voice-shadow-dock: var(
-    --shadow-dock,
-    0 1px 0 rgba(255, 248, 220, 0.05) inset,
-    0 0 0 1px rgba(247, 179, 43, 0.08),
-    0 28px 60px -18px rgba(0, 0, 0, 0.70),
-    0 -10px 40px -8px rgba(247, 179, 43, 0.06)
-  );
-  --voice-font-display: var(--font-display, "Fraunces", "Iowan Old Style", "Charter", Georgia, serif);
-  --voice-font-mono: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
-  --voice-fs-2xs: var(--fs-2xs, 11px);
-  --voice-tracking-caps: var(--tracking-caps, 0.14em);
+  /* Surface ladder */
+  --voice-surface-minimised: var(--md-sys-color-surface-container-high, var(--color-bg-elev-3, #212A1F));
+  --voice-surface-expanded:  var(--md-sys-color-surface-container-highest, var(--color-bg-elev-4, #2A3327));
+  --voice-surface-body:      var(--md-sys-color-surface-container, var(--color-bg-elev-2, #1A2018));
+  --voice-surface-low:       var(--md-sys-color-surface-container-low, var(--color-bg-elev-1, #151A14));
+
+  /* Text */
+  --voice-on-surface:        var(--md-sys-color-on-surface, var(--color-text, #E3E8DE));
+  --voice-on-surface-variant:var(--md-sys-color-on-surface-variant, var(--color-text-muted, #BFC7B7));
+  --voice-outline:           var(--md-sys-color-outline, var(--color-border-strong, #8A9282));
+  --voice-outline-variant:   var(--md-sys-color-outline-variant, var(--color-border, #424A3C));
+
+  /* Accent (lime) */
+  --voice-primary:           var(--md-sys-color-primary, var(--color-accent, #BEF264));
+  --voice-on-primary:        var(--md-sys-color-on-primary, var(--color-text-inverse, #0F1A00));
+  --voice-primary-container: var(--md-sys-color-primary-container, var(--color-accent-soft, #2F4A00));
+  --voice-on-primary-container: var(--md-sys-color-on-primary-container, #DCFCA0);
+
+  /* Tonal accents */
+  --voice-secondary:         var(--md-sys-color-secondary, #C4CCB3);
+  --voice-secondary-container: var(--md-sys-color-secondary-container, #2B3326);
+  --voice-on-secondary-container: var(--md-sys-color-on-secondary-container, #DDE7CB);
+  --voice-tertiary:          var(--md-sys-color-tertiary, var(--color-info, #8AD4E0));
+
+  /* Semantic state */
+  --voice-state-idle:        var(--color-state-idle, var(--md-sys-color-outline, #8A9282));
+  --voice-state-listening:   var(--color-state-listening, var(--md-sys-color-primary, #BEF264));
+  --voice-state-thinking:    var(--color-state-thinking, var(--md-sys-color-tertiary, #8AD4E0));
+  --voice-state-speaking:    var(--color-state-speaking, var(--md-sys-color-primary, #BEF264));
+  --voice-state-tool:        var(--color-state-tool, var(--md-sys-color-warn, #FFB787));
+  --voice-state-error:       var(--color-state-error, var(--md-sys-color-error, #FFB4AB));
+  --voice-warn:              var(--md-sys-color-warn, var(--color-warn, #FFB787));
+  --voice-error:             var(--md-sys-color-error, var(--color-danger, #FFB4AB));
+  --voice-error-container:   var(--md-sys-color-error-container, var(--color-danger-soft, #93000A));
+  --voice-on-error-container:var(--md-sys-color-on-error-container, #FFDAD6);
+
+  /* Shape */
+  --voice-radius-dock:       var(--radius-dock, var(--md-sys-shape-corner-full, 9999px));
+  --voice-radius-expanded:   var(--radius-dock-expanded, var(--md-sys-shape-corner-xl, 28px));
+  --voice-radius-pill:       var(--md-sys-shape-corner-full, var(--radius-pill, 9999px));
+  --voice-radius-sm:         var(--md-sys-shape-corner-sm, var(--radius-sm, 8px));
+  --voice-radius-md:         var(--md-sys-shape-corner-md, var(--radius-md, 12px));
+  --voice-radius-lg:         var(--md-sys-shape-corner-lg, var(--radius-lg, 16px));
+
+  /* Elevation */
+  --voice-elev-minimised:    var(--md-sys-elevation-level-2,
+    0 1px 2px 0 rgba(0, 0, 0, 0.30),
+    0 2px 6px 2px rgba(0, 0, 0, 0.15));
+  --voice-elev-expanded:     var(--md-sys-elevation-level-3,
+    0 4px 8px 3px rgba(0, 0, 0, 0.15),
+    0 1px 3px 0 rgba(0, 0, 0, 0.30));
+
+  /* Motion */
+  --voice-dur-fast:          var(--dur-fast, 120ms);
+  --voice-dur-base:          var(--dur-base, 180ms);
+  --voice-dur-slow:          var(--dur-slow, 320ms);
+  --voice-ease-spatial:      var(--md-sys-motion-spring-spatial, var(--ease-spring, cubic-bezier(0.2, 0, 0, 1)));
+  --voice-ease-effects:      var(--md-sys-motion-spring-effects, var(--ease-material, cubic-bezier(0.2, 0, 0, 1)));
+  --voice-ease-emphasized:   var(--md-sys-motion-easing-emphasized, var(--ease-snap, cubic-bezier(0.2, 0, 0, 1)));
+
+  /* Type */
+  --voice-font-sans:         var(--font-sans, "Geist", ui-sans-serif, -apple-system, "Segoe UI Variable", "Helvetica Neue", sans-serif);
+  --voice-font-mono:         var(--font-mono, "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace);
+
+  /* Focus */
+  --voice-focus-ring:        var(--shadow-focus-ring-accent,
+    0 0 0 3px color-mix(in oklab, var(--md-sys-color-primary, #BEF264) 38%, transparent));
+  --voice-focus-ring-danger: var(--shadow-focus-ring-danger,
+    0 0 0 3px color-mix(in oklab, var(--md-sys-color-error, #FFB4AB) 38%, transparent));
 }
 
-/* ============ 1. DOCK ROOT ============ */
+/* ============ 1. DOCK ROOT ============
+ * Default state is MINIMISED PILL (60 px × 420 px desktop).
+ * Expanded state is `:not(.is-collapsed)`.
+ */
 .voice-dock {
   position: fixed;
-  bottom: var(--sp-6, 24px);
-  right: var(--sp-6, 24px);
+  bottom: 24px;
+  right: 24px;
   width: 420px;
-  max-width: calc(100vw - var(--sp-5, 20px) * 2);
-  height: min(82vh, 720px);
-  max-height: calc(100dvh - var(--sp-6, 24px) * 2);
-  background: var(--color-bg-elev-1);
-  background-image:
-    radial-gradient(420px 280px at 50% -6%, var(--voice-color-accent-wash), transparent 62%),
-    linear-gradient(180deg, var(--color-bg-elev-1) 0%, var(--color-bg-elev-1) 60%, var(--color-bg-elev-2) 100%);
-  border: 1px solid var(--color-border);
-  border-top-color: var(--voice-color-border-accent);
+  max-width: calc(100vw - 32px);
+  height: 60px;
+  background: var(--voice-surface-minimised);
+  color: var(--voice-on-surface);
+  border: 1px solid var(--voice-outline-variant);
   border-radius: var(--voice-radius-dock);
-  box-shadow: var(--voice-shadow-dock);
+  box-shadow: var(--voice-elev-minimised);
   display: grid;
-  grid-template-rows: 64px auto 1fr auto;   /* header / error / body / action */
+  grid-template-rows: 60px 0fr 0fr 0fr;   /* header / error / body / action */
   z-index: var(--z-dock, 200);
   overflow: hidden;
-  color: var(--color-text);
   isolation: isolate;
+  font-family: var(--voice-font-sans);
   transition:
-    height var(--dur-base, 220ms) var(--voice-ease-spring),
-    width var(--dur-base, 220ms) var(--voice-ease-spring),
-    border-radius var(--dur-base, 220ms) var(--voice-ease-spring),
-    border-color var(--voice-dur-slow, 360ms) var(--voice-ease-spring),
-    box-shadow var(--voice-dur-slow, 360ms) var(--voice-ease-spring);
+    height var(--voice-dur-slow) var(--voice-ease-spatial),
+    width  var(--voice-dur-slow) var(--voice-ease-spatial),
+    border-radius var(--voice-dur-slow) var(--voice-ease-emphasized),
+    background-color var(--voice-dur-slow) var(--voice-ease-emphasized),
+    border-color var(--voice-dur-slow) var(--voice-ease-emphasized),
+    box-shadow var(--voice-dur-slow) var(--voice-ease-emphasized);
 }
 
-/* Lamp halo — painted via pseudo so it sits under header content. */
-.voice-dock-halo {
-  position: absolute; inset: 0 0 auto 0; height: 64px;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(280px 80px at 50% 0%, var(--voice-color-accent-wash), transparent 70%),
-    linear-gradient(180deg, rgba(247, 179, 43, 0.04), transparent 70%);
-  mix-blend-mode: screen;
-  opacity: 0.9;
+/* Minimised is the default — keep it explicit for the state-machine. */
+.voice-dock.is-collapsed {
+  height: 60px;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  border-radius: var(--voice-radius-dock);
+  background: var(--voice-surface-minimised);
+  box-shadow: var(--voice-elev-minimised);
+  grid-template-rows: 60px 0fr 0fr 0fr;
 }
 
-/* Mobile grab-handle (hidden on desktop). */
-.voice-dock-grab {
+.voice-dock.is-collapsed .voice-error-banner,
+.voice-dock.is-collapsed .voice-dock-body,
+.voice-dock.is-collapsed .voice-dock-action {
   display: none;
 }
 
-/* Focus ring on the dock as a whole (keyboard skips in). */
-.voice-dock:focus-within { border-top-color: var(--voice-color-accent); }
-
-/* Dock-level state border tint — subtle, per §6.3. */
-.voice-dock[data-state="listening"]       { border-top-color: var(--color-state-listening); }
-.voice-dock[data-state="live_ready"]      { border-top-color: var(--color-state-listening); }
-.voice-dock[data-state="model_thinking"]  { border-top-color: var(--voice-color-lavender); }
-.voice-dock[data-state="thinking"]        { border-top-color: var(--voice-color-lavender); }
-.voice-dock[data-state="model_speaking"]  { border-top-color: var(--color-state-speaking); }
-.voice-dock[data-state="speaking"]        { border-top-color: var(--color-state-speaking); }
-.voice-dock[data-state="tool_executing"]  { border-top-color: var(--color-state-tool); }
-.voice-dock[data-state="error"]           { border-top-color: var(--color-state-error); }
-.voice-dock[data-state="dialing"]         { border-top-color: var(--color-warn); }
-.voice-dock[data-state="reconnecting"]    { border-top-color: var(--color-warn); }
-.voice-dock[data-state="closing"]         { border-top-color: var(--color-border-strong); }
-
-/* ---- Collapsed pill ---- */
-.voice-dock.is-collapsed {
-  height: 64px;
-  width: 420px;
-  max-width: calc(100vw - var(--sp-5, 20px) * 2);
-  border-radius: var(--radius-pill);
-  grid-template-rows: 64px;
-  cursor: pointer;
+/* Expanded — opened by clicking the caret. */
+.voice-dock:not(.is-collapsed) {
+  width: 440px;
+  height: min(82vh, 720px);
+  max-height: calc(100dvh - 48px);
+  border-radius: var(--voice-radius-expanded);
+  background: var(--voice-surface-expanded);
+  box-shadow: var(--voice-elev-expanded);
+  grid-template-rows: 64px auto auto 1fr auto;  /* header / error / visualiser+transcript grows via body */
 }
-.voice-dock.is-collapsed .voice-dock-body,
-.voice-dock.is-collapsed .voice-error-banner,
-.voice-dock.is-collapsed .voice-dock-action,
-.voice-dock.is-collapsed .voice-settings-sheet { display: none; }
-.voice-dock.is-collapsed .voice-dock-halo { border-radius: var(--radius-pill); }
 
-/* ============ 2. HEADER ============ */
+.voice-dock:not(.is-collapsed) .voice-dock-body { display: flex; }
+.voice-dock:not(.is-collapsed) .voice-dock-action { display: block; }
+.voice-dock:not(.is-collapsed) .voice-error-banner:not([hidden]) { display: block; }
+
+/* Focus-within lifts the border to the accent for keyboard users. */
+.voice-dock:focus-within { border-color: color-mix(in oklab, var(--voice-primary) 60%, var(--voice-outline-variant)); }
+
+/* Dock-level state border tint — subtle, per §8.2. */
+.voice-dock[data-state="listening"],
+.voice-dock[data-state="live_ready"]      { border-color: color-mix(in oklab, var(--voice-state-listening) 45%, var(--voice-outline-variant)); }
+.voice-dock[data-state="model_thinking"],
+.voice-dock[data-state="thinking"]        { border-color: color-mix(in oklab, var(--voice-state-thinking) 45%, var(--voice-outline-variant)); }
+.voice-dock[data-state="model_speaking"],
+.voice-dock[data-state="speaking"]        { border-color: color-mix(in oklab, var(--voice-state-speaking) 60%, var(--voice-outline-variant)); }
+.voice-dock[data-state="tool_executing"]  { border-color: color-mix(in oklab, var(--voice-state-tool) 55%, var(--voice-outline-variant)); }
+.voice-dock[data-state="error"]           { border-color: color-mix(in oklab, var(--voice-state-error) 65%, var(--voice-outline-variant)); }
+.voice-dock[data-state="dialing"],
+.voice-dock[data-state="live_opening"],
+.voice-dock[data-state="reconnecting"]    { border-color: color-mix(in oklab, var(--voice-warn) 55%, var(--voice-outline-variant)); }
+.voice-dock[data-state="closing"]         { border-color: var(--voice-outline); }
+
+/* ============ 2. STATE DOT + BRAND ============ */
 .voice-dock-header {
   position: relative;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--sp-3, 12px);
-  padding: 0 var(--sp-4, 16px);
-  height: 64px;
-  border-bottom: 1px solid var(--color-border);
-  background:
-    linear-gradient(180deg, var(--color-bg-elev-2) 0%, var(--color-bg-elev-1) 100%);
-  box-shadow: 0 1px 0 rgba(247, 179, 43, 0.06);
+  gap: 12px;
+  padding: 0 10px 0 16px;
+  height: 60px;
+  min-width: 0;
   z-index: 1;
 }
-
-/* Collapsed state packs header tighter and shows a condensed chip only. */
-.voice-dock.is-collapsed .voice-dock-header {
-  border-bottom: 0;
+.voice-dock:not(.is-collapsed) .voice-dock-header {
   height: 64px;
-  padding: 0 var(--sp-3, 12px) 0 var(--sp-4, 16px);
+  border-bottom: 1px solid var(--voice-outline-variant);
 }
 
 .voice-dock-brand {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-2, 8px);
+  gap: 10px;
   min-width: 0;
-}
-
-.voice-dock-radar {
-  width: 14px; height: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1px solid var(--voice-color-accent);
-  background: radial-gradient(circle at 40% 40%, var(--voice-color-accent) 0%, transparent 70%);
-  box-shadow:
-    inset 0 0 0 1px rgba(247, 179, 43, 0.15),
-    0 0 10px rgba(247, 179, 43, 0.35);
   flex-shrink: 0;
 }
-.voice-dock-radar-dot {
-  width: 4px; height: 4px; border-radius: 50%;
-  background: var(--voice-color-accent);
-  box-shadow: 0 0 6px var(--voice-color-accent);
+
+.voice-state-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--voice-state-idle);
+  flex-shrink: 0;
+  transition: background-color var(--voice-dur-base) var(--voice-ease-emphasized);
 }
 
+/* State-dot colour per §8.2. */
+.voice-dock[data-state="listening"]       .voice-state-dot,
+.voice-dock[data-state="live_ready"]      .voice-state-dot { background: var(--voice-state-listening); }
+.voice-dock[data-state="model_thinking"]  .voice-state-dot,
+.voice-dock[data-state="thinking"]        .voice-state-dot { background: var(--voice-state-thinking); }
+.voice-dock[data-state="model_speaking"]  .voice-state-dot,
+.voice-dock[data-state="speaking"]        .voice-state-dot { background: var(--voice-state-speaking); }
+.voice-dock[data-state="tool_executing"]  .voice-state-dot { background: var(--voice-state-tool); }
+.voice-dock[data-state="error"]           .voice-state-dot { background: var(--voice-state-error); }
+.voice-dock[data-state="dialing"]         .voice-state-dot,
+.voice-dock[data-state="live_opening"]    .voice-state-dot,
+.voice-dock[data-state="reconnecting"]    .voice-state-dot { background: var(--voice-warn); }
+.voice-dock[data-state="closing"]         .voice-state-dot { background: var(--voice-outline); }
+
+/* Pulse dot during listening / speaking. */
+@keyframes voice-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 40%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in oklab, currentColor 0%, transparent); }
+}
+.voice-dock[data-state="listening"]      .voice-state-dot,
+.voice-dock[data-state="live_ready"]     .voice-state-dot,
+.voice-dock[data-state="model_speaking"] .voice-state-dot,
+.voice-dock[data-state="speaking"]       .voice-state-dot {
+  color: var(--voice-state-listening);
+  animation: voice-dot-pulse 1s var(--voice-ease-effects) infinite;
+}
+.voice-dock[data-state="model_speaking"] .voice-state-dot,
+.voice-dock[data-state="speaking"]       .voice-state-dot { color: var(--voice-state-speaking); }
+
 .voice-dock-brand-name {
-  font-family: var(--voice-font-display);
-  font-size: 16px;
+  font-family: var(--voice-font-sans);
+  font-size: 14px;
   font-weight: 500;
-  letter-spacing: var(--tracking-tight, -0.015em);
-  font-feature-settings: "SOFT" 30, "WONK" 1;
-  color: var(--color-text);
+  letter-spacing: var(--tracking-tight, -0.012em);
+  color: var(--voice-on-surface);
   white-space: nowrap;
 }
 
-/* Header chips cluster (pill + live + muted + ambient). */
+/* ============ 3. STATUS PILL + TIMER CHIP ============ */
 .voice-dock-header-chips {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-2, 8px);
+  gap: 8px;
   min-width: 0;
   overflow: hidden;
+  flex: 1 1 auto;
 }
 
-/* Status pill — primary state signal. */
 .voice-status-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
-  padding: 0 10px 0 8px;
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-elev-3, var(--color-bg-elev-2));
-  border: 1px solid var(--color-border);
-  font-family: var(--font-sans);
-  font-size: var(--voice-fs-2xs);
-  font-weight: 600;
-  letter-spacing: var(--voice-tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-text-muted);
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--voice-radius-pill);
+  background: var(--voice-secondary-container);
+  color: var(--voice-on-secondary-container);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition:
-    background var(--dur-base, 220ms) var(--voice-ease-spring),
-    border-color var(--dur-base, 220ms) var(--voice-ease-spring),
-    color var(--dur-base, 220ms) var(--voice-ease-spring);
-  flex-shrink: 0;
+    background-color var(--voice-dur-base) var(--voice-ease-emphasized),
+    color var(--voice-dur-base) var(--voice-ease-emphasized);
+}
+.voice-status-pill .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.voice-status-pill-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 6px currentColor;
-}
-.voice-status-pill-label { font-weight: 600; }
 
-/* State-driven pill colours — must cover every voice-agent STATES.* value. */
-.voice-status-pill[data-state="idle"],
-.voice-status-pill[data-state="arming"]          { color: var(--color-state-idle); border-color: var(--color-border); }
+/* State-specific pill tinting (filled tonal per §7.2). */
+.voice-status-pill[data-state="listening"],
+.voice-status-pill[data-state="live_ready"] {
+  background: var(--voice-primary-container);
+  color: var(--voice-on-primary-container);
+}
+.voice-status-pill[data-state="model_thinking"],
+.voice-status-pill[data-state="thinking"] {
+  background: color-mix(in oklab, var(--voice-tertiary) 28%, var(--voice-surface-body));
+  color: var(--voice-on-surface);
+}
+.voice-status-pill[data-state="model_speaking"],
+.voice-status-pill[data-state="speaking"] {
+  background: var(--voice-primary-container);
+  color: var(--voice-on-primary-container);
+}
+.voice-status-pill[data-state="tool_executing"] {
+  background: color-mix(in oklab, var(--voice-warn) 35%, var(--voice-surface-body));
+  color: var(--voice-on-surface);
+}
+.voice-status-pill[data-state="error"] {
+  background: var(--voice-error-container);
+  color: var(--voice-on-error-container);
+}
 .voice-status-pill[data-state="dialing"],
 .voice-status-pill[data-state="live_opening"],
-.voice-status-pill[data-state="reconnecting"]    { color: var(--color-warn); border-color: rgba(245, 158, 60, 0.35); background: var(--color-warn-soft, rgba(245, 158, 60, 0.08)); }
-.voice-status-pill[data-state="live_ready"],
-.voice-status-pill[data-state="listening"]       { color: var(--color-state-listening); border-color: rgba(79, 209, 197, 0.35); background: var(--voice-color-cyan-soft); }
-.voice-status-pill[data-state="model_thinking"],
-.voice-status-pill[data-state="thinking"]        { color: var(--voice-color-lavender); border-color: rgba(195, 155, 232, 0.35); background: rgba(195, 155, 232, 0.08); }
-.voice-status-pill[data-state="model_speaking"],
-.voice-status-pill[data-state="speaking"]        { color: var(--color-state-speaking); border-color: rgba(247, 179, 43, 0.35); background: var(--voice-color-accent-wash); }
-.voice-status-pill[data-state="tool_executing"]  { color: var(--color-state-tool); border-color: rgba(245, 158, 60, 0.35); background: var(--color-warn-soft, rgba(245, 158, 60, 0.08)); }
-.voice-status-pill[data-state="closing"]         { color: var(--color-text-muted); border-color: var(--color-border); background: var(--color-bg-elev-2); }
-.voice-status-pill[data-state="error"]           { color: var(--color-danger); border-color: rgba(225, 90, 76, 0.45); background: var(--color-danger-soft, rgba(225, 90, 76, 0.10)); }
+.voice-status-pill[data-state="reconnecting"] {
+  background: color-mix(in oklab, var(--voice-warn) 32%, var(--voice-surface-body));
+  color: var(--voice-on-surface);
+}
 
-/* State-driven pulse per §6.3. */
-@keyframes voice-pulse-slow { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: 0.55; } }
-@keyframes voice-pulse-fast { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.45); opacity: 0.45; } }
-
-.voice-status-pill[data-state="dialing"] .voice-status-pill-dot         { animation: voice-pulse-slow 1.6s ease-in-out infinite; }
-.voice-status-pill[data-state="live_opening"] .voice-status-pill-dot    { animation: voice-pulse-slow 1.6s ease-in-out infinite; }
-.voice-status-pill[data-state="reconnecting"] .voice-status-pill-dot    { animation: voice-pulse-slow 1.6s ease-in-out infinite; }
-.voice-status-pill[data-state="live_ready"] .voice-status-pill-dot,
-.voice-status-pill[data-state="listening"] .voice-status-pill-dot       { animation: voice-pulse-slow 1.4s ease-in-out infinite; }
-.voice-status-pill[data-state="model_thinking"] .voice-status-pill-dot,
-.voice-status-pill[data-state="thinking"] .voice-status-pill-dot        { animation: voice-pulse-fast 0.9s ease-in-out infinite; }
-.voice-status-pill[data-state="model_speaking"] .voice-status-pill-dot,
-.voice-status-pill[data-state="speaking"] .voice-status-pill-dot        { animation: voice-pulse-fast 0.9s ease-in-out infinite; }
-.voice-status-pill[data-state="tool_executing"] .voice-status-pill-dot  { animation: voice-pulse-fast 1.1s ease-in-out infinite; }
-
-/* Ancillary chips */
+/* Timer + muted + ambient chips — small, tonal, pill. */
 .voice-chip {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--voice-radius-pill);
+  background: var(--voice-secondary-container);
+  color: var(--voice-on-secondary-container);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.voice-chip:not([hidden]) { display: inline-flex; }
+.voice-chip--live {
+  background: var(--voice-primary-container);
+  color: var(--voice-on-primary-container);
+}
+.voice-chip--muted {
+  background: var(--voice-error-container);
+  color: var(--voice-on-error-container);
+}
+.voice-chip--ambient {
+  background: color-mix(in oklab, var(--voice-tertiary) 28%, var(--voice-surface-body));
+  color: var(--voice-on-surface);
+}
+.voice-chip-timer {
+  font-family: var(--voice-font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* Collapsed mode: keep only pill + live chip visible so the row doesn't
+ * overflow. Muted + ambient hide; the mic/call button will indicate mute. */
+.voice-dock.is-collapsed .voice-chip--muted,
+.voice-dock.is-collapsed .voice-chip--ambient { display: none !important; }
+
+/* ============ 4. CALL BUTTON (5 states) ============ */
+.voice-call-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  font-family: var(--font-sans);
-  font-size: var(--voice-fs-2xs);
-  font-weight: 600;
-  letter-spacing: var(--voice-tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-text-muted);
+  height: 40px;
+  padding: 0 18px;
+  border-radius: var(--voice-radius-pill);
+  border: 1px solid transparent;
+  background: var(--voice-primary);
+  color: var(--voice-on-primary);
+  font-family: var(--voice-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
   white-space: nowrap;
+  position: relative;
+  transition:
+    background-color var(--voice-dur-base) var(--voice-ease-emphasized),
+    color var(--voice-dur-base) var(--voice-ease-emphasized),
+    border-color var(--voice-dur-base) var(--voice-ease-emphasized),
+    box-shadow var(--voice-dur-fast) var(--voice-ease-emphasized),
+    transform var(--voice-dur-fast) var(--voice-ease-emphasized);
+}
+.voice-call-btn:hover {
+  background: color-mix(in oklab, var(--voice-primary) 90%, white);
+}
+.voice-call-btn:active { transform: scale(0.98); }
+.voice-call-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--voice-focus-ring);
+}
+.voice-call-btn:disabled,
+.voice-call-btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.voice-call-btn-icons {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
-.voice-chip[hidden] { display: none !important; }
-.voice-chip-dot {
-  width: 5px; height: 5px; border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 4px currentColor;
+.voice-call-btn-icons .call-btn-icon { display: none; }
+
+/* All icons overlay at same position so the crossfade stays in place. */
+.voice-call-btn[data-call-state="idle"]      .call-btn-icon--phone,
+.voice-call-btn[data-call-state="end"]       .call-btn-icon--end,
+.voice-call-btn[data-call-state="reconnect"] .call-btn-icon--end,
+.voice-call-btn[data-call-state="closing"]   .call-btn-icon--end,
+.voice-call-btn[data-call-state="cancel"]    .call-btn-icon--cancel {
+  display: block;
 }
 
-.voice-chip--live {
-  color: var(--color-state-listening);
-  background: var(--voice-color-cyan-soft);
-  border-color: rgba(79, 209, 197, 0.30);
-}
-.voice-chip--live .voice-chip-dot { animation: voice-pulse-slow 1.1s ease-in-out infinite; }
-
-.voice-chip-timer {
-  font-family: var(--voice-font-mono);
-  font-size: var(--voice-fs-2xs);
+.voice-call-btn-label {
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
-  text-transform: none;
-  color: currentColor;
-  margin-left: 2px;
 }
 
-.voice-chip--muted {
-  color: var(--color-danger);
-  background: var(--color-danger-soft);
-  border-color: rgba(225, 90, 76, 0.30);
-}
-.voice-chip--ambient {
-  color: var(--color-text-muted);
-  border-color: var(--color-border);
+/* data-call-state="idle" — filled primary lime */
+.voice-call-btn[data-call-state="idle"] {
+  background: var(--voice-primary);
+  color: var(--voice-on-primary);
+  border-color: transparent;
 }
 
-/* Header actions */
+/* data-call-state="cancel" — outlined warn (dialing / live_opening) */
+.voice-call-btn[data-call-state="cancel"] {
+  background: transparent;
+  color: var(--voice-warn);
+  border-color: color-mix(in oklab, var(--voice-warn) 65%, transparent);
+}
+.voice-call-btn[data-call-state="cancel"]:hover {
+  background: color-mix(in oklab, var(--voice-warn) 14%, transparent);
+}
+
+/* data-call-state="end" — filled error (in-call) */
+.voice-call-btn[data-call-state="end"] {
+  background: var(--voice-error-container);
+  color: var(--voice-on-error-container);
+  border-color: transparent;
+}
+.voice-call-btn[data-call-state="end"]:hover {
+  background: color-mix(in oklab, var(--voice-error-container) 85%, white);
+}
+.voice-call-btn[data-call-state="end"]:focus-visible {
+  box-shadow: var(--voice-focus-ring-danger);
+}
+
+/* data-call-state="reconnect" — same as end + attention pulse */
+.voice-call-btn[data-call-state="reconnect"] {
+  background: var(--voice-error-container);
+  color: var(--voice-on-error-container);
+  border-color: transparent;
+  animation: voice-call-pulse 1.4s var(--voice-ease-effects) infinite;
+}
+.voice-call-btn[data-call-state="reconnect"]:focus-visible {
+  box-shadow: var(--voice-focus-ring-danger);
+}
+
+/* data-call-state="closing" — outlined disabled */
+.voice-call-btn[data-call-state="closing"] {
+  background: transparent;
+  color: var(--voice-on-surface-variant);
+  border-color: var(--voice-outline-variant);
+  cursor: not-allowed;
+  animation: none;
+}
+
+@keyframes voice-call-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--voice-error) 40%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in oklab, var(--voice-error) 0%, transparent); }
+}
+
+/* Idle outline ring — 3.2 s pulse, disabled on any other state. */
+.voice-call-btn[data-call-state="idle"]::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  border: 1px solid color-mix(in oklab, var(--voice-primary) 50%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: voice-idle-ring 3.2s var(--voice-ease-effects) infinite;
+}
+@keyframes voice-idle-ring {
+  0%   { transform: scale(1);    opacity: 0.4; }
+  70%  { transform: scale(1.08); opacity: 0; }
+  100% { transform: scale(1.08); opacity: 0; }
+}
+
+/* Expanded-state Call button grows per §8.3 (48 px) when in footer. The
+ * button LIVES in the header always — we just promote it when expanded. */
+.voice-dock:not(.is-collapsed) .voice-call-btn {
+  height: 44px;
+  padding: 0 20px;
+  font-size: 14px;
+}
+
+/* Reduce label visibility on very narrow mobile — icon-only 40×40. */
+@media (max-width: 379px) {
+  .voice-call-btn {
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    justify-content: center;
+  }
+  .voice-call-btn-label { display: none; }
+}
+
+/* ============ 5. MIC BUTTON ============ */
+.voice-mic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--voice-radius-pill);
+  background: transparent;
+  color: var(--voice-on-surface-variant);
+  border: 1px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color var(--voice-dur-fast) var(--voice-ease-emphasized),
+    color var(--voice-dur-fast) var(--voice-ease-emphasized),
+    border-color var(--voice-dur-fast) var(--voice-ease-emphasized);
+}
+.voice-mic-btn:hover {
+  background: color-mix(in oklab, var(--voice-on-surface) 8%, transparent);
+  color: var(--voice-on-surface);
+}
+.voice-mic-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--voice-focus-ring);
+}
+.voice-mic-btn[aria-pressed="true"],
+.voice-mic-btn.is-muted {
+  background: var(--voice-error-container);
+  color: var(--voice-on-error-container);
+}
+
+.voice-mic-btn .mic-icon { display: none; }
+.voice-mic-btn .mic-icon--on { display: block; }
+.voice-mic-btn[aria-pressed="true"] .mic-icon--on,
+.voice-mic-btn.is-muted .mic-icon--on { display: none; }
+.voice-mic-btn[aria-pressed="true"] .mic-icon--off,
+.voice-mic-btn.is-muted .mic-icon--off { display: block; }
+
+/* ============ 6. HEADER ICON BUTTONS + EXPAND CARET ============ */
 .voice-dock-header-actions {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
-/* Icon button — square 36px with keyboard focus ring. */
 .voice-icon-btn {
-  width: 36px; height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--voice-radius-pill);
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--voice-on-surface-variant);
   border: 1px solid transparent;
-  border-radius: var(--radius-sm, 8px);
   cursor: pointer;
+  flex-shrink: 0;
   transition:
-    background var(--dur-fast, 120ms) var(--voice-ease-spring),
-    color var(--dur-fast, 120ms) var(--voice-ease-spring),
-    border-color var(--dur-fast, 120ms) var(--voice-ease-spring);
+    background-color var(--voice-dur-fast) var(--voice-ease-emphasized),
+    color var(--voice-dur-fast) var(--voice-ease-emphasized);
 }
 .voice-icon-btn:hover {
-  background: var(--color-bg-elev-3, var(--color-bg-elev-2));
-  color: var(--color-text);
+  background: color-mix(in oklab, var(--voice-on-surface) 8%, transparent);
+  color: var(--voice-on-surface);
 }
 .voice-icon-btn:focus-visible {
   outline: none;
-  box-shadow: var(--shadow-focus-ring-accent, 0 0 0 3px rgba(247, 179, 43, 0.38));
-  border-color: var(--voice-color-border-accent);
+  box-shadow: var(--voice-focus-ring);
+}
+.voice-icon-btn[aria-expanded="true"] {
+  background: var(--voice-secondary-container);
+  color: var(--voice-on-secondary-container);
 }
 
-/* Collapse button swaps icons based on collapsed state. */
-.voice-icon-btn--collapse .voice-icon--expand { display: none; }
-.voice-dock.is-collapsed .voice-icon-btn--collapse .voice-icon--collapse { display: none; }
-.voice-dock.is-collapsed .voice-icon-btn--collapse .voice-icon--expand   { display: inline-block; }
+/* Caret rotates when the dock is expanded. */
+.voice-icon--caret {
+  transition: transform var(--voice-dur-base) var(--voice-ease-emphasized);
+}
+.voice-dock.is-collapsed .voice-icon--caret { transform: rotate(180deg); }
+.voice-dock:not(.is-collapsed) .voice-icon--caret { transform: rotate(0deg); }
 
-/* ============ 3. ERROR BANNER ============ */
-.voice-error-banner {
-  padding: var(--sp-2, 8px) var(--sp-4, 16px);
-  background: var(--color-danger-soft, rgba(225, 90, 76, 0.12));
-  color: var(--color-danger);
-  font-size: var(--fs-xs, 12px);
-  font-weight: 500;
-  border-bottom: 1px solid rgba(225, 90, 76, 0.25);
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2, 8px);
-  flex-wrap: wrap;
-}
-.voice-error-banner[hidden] { display: none; }
-.voice-error-banner code {
-  font-family: var(--voice-font-mono);
-  font-size: 11px;
-  padding: 1px 5px;
-  background: rgba(225, 90, 76, 0.18);
-  border-radius: 3px;
-}
-.voice-error-banner a,
-.voice-error-banner button {
-  color: var(--color-danger);
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  font-weight: 700;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.voice-error-banner button:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus-ring-danger, 0 0 0 3px rgba(225, 90, 76, 0.38));
-  border-radius: 3px;
-}
-
-/* ============ 4. BODY — SCOPE + (CHIPS) + TRANSCRIPT ============
- * quick-chips.js inserts `#jarvis-chips` as the first child when mounted,
- * so use `grid-auto-rows` for that variable row and fix scope + transcript
- * rows via their own sizing. */
+/* ============ 7. EXPANDED STATE LAYOUT ============ */
 .voice-dock-body {
-  display: flex;
+  display: none;
   flex-direction: column;
   min-height: 0;
-  background: var(--color-bg);
-}
-.voice-dock-body > .voice-scope {
-  flex: 0 0 140px;
-}
-.voice-dock-body > .voice-transcript-pane {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-/* Quick-chips mount — inserted by js/quick-chips.js as the first child
- * of .voice-dock-body. 44px high row, horizontally scrollable. */
-.voice-dock-body .voice-chips {
-  flex: 0 0 auto;
-  min-height: 44px;
-  padding: var(--sp-2, 8px) var(--sp-4, 16px);
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2, 8px);
-  overflow-x: auto;
-  overflow-y: hidden;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-elev-1);
-  scrollbar-width: none;
-  order: -1; /* float to top inside flex body */
-}
-.voice-dock-body .voice-chips::-webkit-scrollbar { display: none; }
-.voice-dock-body .voice-chips[hidden] { display: none !important; }
-.voice-dock-body .voice-chips:not(.is-visible) { display: none; }
-
-/* ---- Scope panel ---- */
-.voice-scope {
-  position: relative;
-  height: 140px;
+  gap: 0;
+  background: var(--voice-surface-expanded);
   overflow: hidden;
-  background:
-    radial-gradient(220px 140px at 50% 50%, rgba(247, 179, 43, 0.04), transparent 70%),
-    var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  display: block;
+  opacity: 0;
+  transition: opacity var(--voice-dur-base) var(--voice-ease-effects);
 }
+.voice-dock:not(.is-collapsed) .voice-dock-body { opacity: 1; }
 
-/* Faint scanline overlay */
-.voice-scope::before {
-  content: "";
-  position: absolute; inset: 0;
-  background-image: repeating-linear-gradient(
-    180deg,
-    transparent 0 2px,
-    rgba(255, 248, 220, 0.018) 2px 3px
-  );
-  pointer-events: none;
-  mix-blend-mode: overlay;
-  opacity: 0.6;
-}
-/* Reticle grid */
-.voice-scope::after {
-  content: "";
-  position: absolute; inset: 0;
-  background-image:
-    linear-gradient(90deg, transparent 49.8%, rgba(79, 209, 197, 0.06) 49.8%, rgba(79, 209, 197, 0.06) 50.2%, transparent 50.2%),
-    linear-gradient(0deg,  transparent 49.8%, rgba(247, 179, 43, 0.06) 49.8%, rgba(247, 179, 43, 0.06) 50.2%, transparent 50.2%);
-  pointer-events: none;
-}
-
-/* Compass rose SVG — static visual anchor under the canvas. */
-.voice-scope-compass {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 100%;
-  height: 100%;
-  color: var(--color-text-dim);
-  pointer-events: none;
-  z-index: 1;
-  transition: color var(--voice-dur-slow, 360ms) var(--voice-ease-spring), opacity var(--voice-dur-slow, 360ms) var(--voice-ease-spring);
-}
-.voice-scope-needle {
-  stroke: var(--voice-color-accent);
-  stroke-opacity: 0.65;
-  transform-origin: 140px 70px;
-  animation: voice-scope-rotate 3s linear infinite;
-}
-.voice-scope-hub { fill: var(--voice-color-accent); }
-
-/* State → compass glyph colour. */
-.voice-scope[data-state="live_ready"] .voice-scope-compass,
-.voice-scope[data-state="listening"]  .voice-scope-compass { color: var(--color-state-listening); }
-.voice-scope[data-state="model_thinking"] .voice-scope-compass,
-.voice-scope[data-state="thinking"]       .voice-scope-compass { color: var(--voice-color-lavender); }
-.voice-scope[data-state="model_speaking"] .voice-scope-compass,
-.voice-scope[data-state="speaking"]       .voice-scope-compass { color: var(--color-state-speaking); opacity: 0.35; }
-.voice-scope[data-state="tool_executing"] .voice-scope-compass { color: var(--color-state-tool); }
-.voice-scope[data-state="error"]          .voice-scope-compass { color: var(--color-danger); opacity: 0.55; }
-.voice-scope[data-state="dialing"]        .voice-scope-compass,
-.voice-scope[data-state="live_opening"]   .voice-scope-compass,
-.voice-scope[data-state="reconnecting"]   .voice-scope-compass { color: var(--color-warn); }
-.voice-scope[data-state="closing"]        .voice-scope-compass { color: var(--color-text-dim); opacity: 0.55; }
-
-/* Needle animation speed per state. */
-.voice-scope[data-state="listening"]   .voice-scope-needle,
-.voice-scope[data-state="live_ready"]  .voice-scope-needle   { animation-duration: 3s; stroke: var(--color-state-listening); }
-.voice-scope[data-state="dialing"]     .voice-scope-needle,
-.voice-scope[data-state="live_opening"] .voice-scope-needle,
-.voice-scope[data-state="reconnecting"] .voice-scope-needle  { animation-duration: 1.2s; stroke: var(--color-warn); }
-.voice-scope[data-state="model_thinking"] .voice-scope-needle,
-.voice-scope[data-state="thinking"]       .voice-scope-needle { animation-duration: 2.2s; stroke: var(--voice-color-lavender); }
-.voice-scope[data-state="model_speaking"] .voice-scope-needle,
-.voice-scope[data-state="speaking"]       .voice-scope-needle,
-.voice-scope[data-state="tool_executing"] .voice-scope-needle,
-.voice-scope[data-state="closing"]        .voice-scope-needle,
-.voice-scope[data-state="error"]          .voice-scope-needle,
-.voice-scope[data-state="idle"]           .voice-scope-needle,
-.voice-scope[data-state="arming"]         .voice-scope-needle { animation: none; opacity: 0; }
-
-@keyframes voice-scope-rotate {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-
-/* The canvas-driven visualiser sits above the compass — it paints sweep,
- * burst dots, and equalizer bars depending on state. */
-.voice-scope-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 2;
-  pointer-events: none;
-}
-
-/* Legacy VU bars — kept present so wireVuMeter's bars.forEach still iterates,
- * but visually folded into the scope's bottom rim as radar reflector dots. */
-.voice-vu {
-  position: absolute;
-  left: 50%;
-  bottom: 10px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  height: 14px;
-  z-index: 3;
-  pointer-events: none;
-}
-.voice-vu .bar {
-  width: 4px;
-  min-height: 4px;
-  border-radius: 2px;
-  background: currentColor;
-  color: var(--color-state-idle);
-  opacity: 0.55;
-  transition:
-    background var(--dur-fast, 120ms) var(--voice-ease-spring),
-    color var(--dur-fast, 120ms) var(--voice-ease-spring),
-    opacity var(--dur-fast, 120ms) var(--voice-ease-spring);
-}
-/* State-driven bar colour (matches scope). */
-.voice-scope[data-state="listening"]     .voice-vu .bar,
-.voice-scope[data-state="live_ready"]    .voice-vu .bar  { color: var(--color-state-listening); opacity: 0.85; }
-.voice-scope[data-state="model_speaking"] .voice-vu .bar,
-.voice-scope[data-state="speaking"]       .voice-vu .bar { color: var(--color-state-speaking); opacity: 0.95; }
-.voice-scope[data-state="model_thinking"] .voice-vu .bar,
-.voice-scope[data-state="thinking"]       .voice-vu .bar { color: var(--voice-color-lavender); opacity: 0.85; }
-.voice-scope[data-state="tool_executing"] .voice-vu .bar { color: var(--color-state-tool); opacity: 0.85; }
-.voice-scope[data-state="dialing"]        .voice-vu .bar,
-.voice-scope[data-state="live_opening"]   .voice-vu .bar,
-.voice-scope[data-state="reconnecting"]   .voice-vu .bar { color: var(--color-warn); opacity: 0.85; }
-.voice-scope[data-state="error"]          .voice-vu .bar { color: var(--color-danger); opacity: 0.85; }
-.voice-scope[data-state="closing"]        .voice-vu .bar { color: var(--color-text-dim); opacity: 0.55; }
-
-/* Readout strip at the top-left of the scope panel. */
-.voice-scope-readout {
-  position: absolute;
-  top: 10px;
-  left: var(--sp-4, 16px);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  z-index: 3;
-  font-family: var(--font-sans);
-  font-size: 10px;
-  letter-spacing: var(--voice-tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-text-dim);
-}
-.voice-scope-readout-label { font-weight: 700; color: var(--color-text-dim); }
-.voice-scope-readout-sep   { color: var(--color-text-dim); opacity: 0.5; }
-.voice-scope-readout-id {
-  font-family: var(--voice-font-mono);
-  font-size: 10px;
-  color: var(--color-text-muted);
-  letter-spacing: 0;
-  text-transform: none;
-}
-.voice-status-text {
-  font-family: var(--font-sans);
-  font-weight: 600;
-  font-size: 10px;
-  letter-spacing: var(--voice-tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-state-idle);
-  transition: color var(--dur-base, 220ms) var(--voice-ease-spring);
-}
-.voice-scope[data-state="listening"]   .voice-status-text,
-.voice-scope[data-state="live_ready"]  .voice-status-text { color: var(--color-state-listening); }
-.voice-scope[data-state="model_speaking"] .voice-status-text,
-.voice-scope[data-state="speaking"]       .voice-status-text { color: var(--color-state-speaking); }
-.voice-scope[data-state="model_thinking"] .voice-status-text,
-.voice-scope[data-state="thinking"]       .voice-status-text { color: var(--voice-color-lavender); }
-.voice-scope[data-state="tool_executing"] .voice-status-text { color: var(--color-state-tool); }
-.voice-scope[data-state="dialing"]        .voice-status-text,
-.voice-scope[data-state="live_opening"]   .voice-status-text,
-.voice-scope[data-state="reconnecting"]   .voice-status-text { color: var(--color-warn); }
-.voice-scope[data-state="error"]          .voice-status-text { color: var(--color-danger); }
-
-/* ---- Transcript pane ---- */
+/* ============ 8. TRANSCRIPT ============ */
 .voice-transcript-pane {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
+  padding: 16px;
+  gap: 8px;
   overflow: hidden;
-  background: var(--color-bg);
 }
 
 .voice-transcript {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 200px;
+  max-height: calc(60dvh - 144px);
   overflow-y: auto;
-  overflow-x: hidden;
-  padding: var(--sp-4, 16px) var(--sp-5, 20px);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3, 12px);
-  font-family: var(--font-sans);
-  font-size: var(--fs-sm, 13px);
-  line-height: 1.55;
-  color: var(--color-text);
-  background-image:
-    repeating-linear-gradient(180deg, transparent 0 23px, rgba(247, 179, 43, 0.035) 23px 24px);
-  -webkit-overflow-scrolling: touch;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border-strong, var(--color-border)) transparent;
+  background: var(--md-sys-color-surface-container-low, var(--voice-surface-low));
+  border: 1px solid var(--voice-outline-variant);
+  border-radius: var(--voice-radius-md);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.54;
+  color: var(--voice-on-surface);
+  scroll-behavior: smooth;
 }
-.voice-transcript::-webkit-scrollbar { width: 8px; }
+.voice-transcript::-webkit-scrollbar { width: 6px; }
 .voice-transcript::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong, var(--color-border));
-  border-radius: 4px;
+  background: var(--voice-outline-variant);
+  border-radius: 3px;
 }
 
-.voice-transcript[hidden] { display: none; }
+/* Tablet / Desktop / Wide height ranges per spec §1.2. */
+@media (min-width: 641px) and (max-width: 1099px) {
+  .voice-transcript { min-height: 240px; max-height: 360px; }
+}
+@media (min-width: 1100px) and (max-width: 1599px) {
+  .voice-transcript { min-height: 260px; max-height: 420px; }
+}
+@media (min-width: 1600px) {
+  .voice-transcript { min-height: 280px; max-height: 480px; }
+}
 
-.voice-transcript:empty::before {
-  content: "Dial Jarvis to begin. Transcript lands here.";
+.voice-transcript .voice-line {
   display: block;
-  padding: var(--sp-6, 24px) var(--sp-4, 16px);
-  text-align: center;
-  font-family: var(--voice-font-display);
-  font-weight: 300;
-  font-style: italic;
-  font-size: 14px;
-  color: var(--color-text-dim);
+  margin-bottom: 8px;
+  padding: 4px 0;
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity var(--voice-dur-base) var(--voice-ease-effects),
+    transform var(--voice-dur-base) var(--voice-ease-effects);
+  color: var(--voice-on-surface);
 }
+/* Extra breathing room between speaker changes (spec §1.4). */
+.voice-transcript .voice-line + .voice-line[data-from]:not([data-from="system"]) {
+  margin-top: 4px;
+}
+.voice-transcript .voice-line.is-hydrated {
+  opacity: 1;
+  transform: none;
+}
+.voice-transcript .voice-line[data-from="user"]   { color: var(--voice-on-surface); }
+.voice-transcript .voice-line[data-from="agent"]  { color: color-mix(in oklab, var(--voice-primary) 85%, var(--voice-on-surface)); }
+.voice-transcript .voice-line[data-from="system"] { color: var(--voice-on-surface-variant); font-style: italic; }
+.voice-transcript .voice-line[data-from="tool"]   { color: var(--voice-tertiary); }
+.voice-transcript .voice-line[data-interim]       { opacity: 0.72; }
+.voice-transcript .voice-line .is-interim         { opacity: 0.72; font-style: italic; }
+.voice-transcript .voice-line.is-stale            { opacity: 0.48; }
 
-/* Feature-flag notes. */
 .voice-transcript-hint,
 .voice-transcript-hidden {
-  padding: var(--sp-2, 8px) var(--sp-5, 20px);
-  font-size: var(--fs-xs, 12px);
-  color: var(--color-text-dim);
-  font-family: var(--voice-font-display);
-  font-weight: 300;
-  font-style: italic;
-  background: var(--color-bg);
-  border-top: 1px solid var(--color-border);
-}
-.voice-transcript-hidden {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-.voice-transcript-hint[hidden],
-.voice-transcript-hidden[hidden] { display: none; }
-
-/* Transcript lines — ledger-ruled two-column layout. */
-.voice-line {
-  display: grid;
-  grid-template-columns: 64px 1fr;
-  gap: var(--sp-3, 12px);
-  align-items: baseline;
-}
-.voice-line-tag {
-  font-family: var(--voice-font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: var(--voice-tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-text-dim);
-  padding-top: 2px;
-}
-.voice-line[data-from="user"]   .voice-line-tag { color: var(--color-state-listening); }
-.voice-line[data-from="agent"]  .voice-line-tag { color: var(--voice-color-accent); }
-.voice-line[data-from="system"] .voice-line-tag { color: var(--color-text-muted); }
-.voice-line[data-from="tool"]   .voice-line-tag { color: var(--color-warn); }
-
-.voice-line-text { color: var(--color-text); }
-.voice-line-text.is-interim,
-.voice-line[data-interim] .voice-line-text {
-  color: var(--color-text-muted);
-  font-style: italic;
-  font-family: var(--voice-font-display);
-  font-weight: 300;
-}
-.voice-line[data-from="tool"] .voice-line-text {
-  font-family: var(--voice-font-mono);
   font-size: 12px;
-  color: var(--color-warn);
-  background: var(--color-warn-soft, rgba(245, 158, 60, 0.10));
-  padding: 2px 6px;
-  border-radius: 4px;
-  display: inline-block;
+  color: var(--voice-on-surface-variant);
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--voice-surface-body);
+  border: 1px dashed var(--voice-outline-variant);
+  border-radius: var(--voice-radius-sm);
 }
 
-/* Session-handoff divider. */
-.voice-line--divider {
-  grid-template-columns: 1fr;
-  align-items: center;
-  padding: var(--sp-1, 4px) 0;
-  color: var(--color-text-muted);
-  font-size: 11px;
-  text-align: center;
-  letter-spacing: var(--voice-tracking-caps);
-  text-transform: uppercase;
-  opacity: 0.8;
+/* Quick-chips row — mounted by quick-chips.js as first child of .voice-dock-body */
+.voice-chips {
+  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px 4px;
+  flex-shrink: 0;
 }
-.voice-line--divider .voice-line-text {
-  color: var(--voice-color-lavender);
-  font-style: italic;
-  display: inline-block;
-  padding: 0 var(--sp-2, 8px);
-  position: relative;
-}
-.voice-line--divider .voice-line-text::before,
-.voice-line--divider .voice-line-text::after {
-  content: "";
-  position: absolute; top: 50%;
-  width: 24px; height: 1px;
-  background: var(--color-border);
-}
-.voice-line--divider .voice-line-text::before { right: 100%; }
-.voice-line--divider .voice-line-text::after  { left:  100%; }
-
-/* Hydrated stale-line dim. */
-.voice-line.is-hydrated.is-stale .voice-line-text,
-.voice-line.is-hydrated.is-stale .voice-line-tag { opacity: 0.55; }
-
-/* ============ 5. ACTION PANEL ============ */
-.voice-dock-action {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2, 8px);
-  padding: var(--sp-3, 12px) var(--sp-5, 20px) var(--sp-4, 16px);
-  background:
-    linear-gradient(180deg, var(--color-bg-elev-2) 0%, var(--color-bg-elev-1) 100%);
-  border-top: 1px solid var(--color-border);
-}
-
-.voice-dock-action-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2, 8px);
-}
-
-.voice-call-btn.call-btn {
-  position: relative;
-  flex: 1;
-  height: 56px;
-  padding: 0 var(--sp-5, 20px);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  font-family: var(--font-sans);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: var(--tracking-open, 0.02em);
-  border-radius: var(--radius-pill);
-  border: 1px solid transparent;
-  color: var(--color-text-inverse);
+.voice-chips.is-visible { display: flex; }
+.voice-chips .chip-btn {
+  font-family: var(--voice-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--voice-radius-pill);
+  background: transparent;
+  color: var(--voice-on-surface-variant);
+  border: 1px solid var(--voice-outline-variant);
   cursor: pointer;
   white-space: nowrap;
   transition:
-    background var(--dur-fast, 120ms) var(--voice-ease-spring),
-    border-color var(--dur-fast, 120ms) var(--voice-ease-spring),
-    box-shadow var(--dur-fast, 120ms) var(--voice-ease-spring),
-    color var(--dur-fast, 120ms) var(--voice-ease-spring),
-    transform var(--dur-instant, 80ms) var(--voice-ease-spring);
-  touch-action: manipulation;
+    background-color var(--voice-dur-fast) var(--voice-ease-emphasized),
+    color var(--voice-dur-fast) var(--voice-ease-emphasized);
 }
-.voice-call-btn-inner {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2, 8px);
+.voice-chips .chip-btn:hover {
+  background: color-mix(in oklab, var(--voice-on-surface) 6%, transparent);
+  color: var(--voice-on-surface);
 }
-.voice-call-btn-icons {
-  width: 22px; height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.voice-chips .chip-btn[aria-pressed="true"],
+.voice-chips .chip-btn.is-active {
+  background: var(--voice-secondary-container);
+  color: var(--voice-on-secondary-container);
+  border-color: transparent;
 }
-.voice-call-btn .call-btn-icon { display: none; width: 22px; height: 22px; }
-.voice-call-btn[data-call-state="idle"]      .call-btn-icon--phone  { display: inline-block; }
-.voice-call-btn[data-call-state="end"]       .call-btn-icon--end    { display: inline-block; }
-.voice-call-btn[data-call-state="reconnect"] .call-btn-icon--end    { display: inline-block; }
-.voice-call-btn[data-call-state="closing"]   .call-btn-icon--end    { display: inline-block; }
-.voice-call-btn[data-call-state="cancel"]    .call-btn-icon--cancel { display: inline-block; }
-
-.voice-call-btn:active { transform: translateY(1px); }
-.voice-call-btn:focus-visible {
+.voice-chips .chip-btn:focus-visible {
   outline: none;
-  box-shadow:
-    0 0 0 3px rgba(247, 179, 43, 0.38),
-    inset 0 1px 0 rgba(255, 248, 220, 0.25);
-}
-.voice-call-btn[disabled] { opacity: 0.65; cursor: not-allowed; }
-
-/* State variants — all five data-call-state values covered. */
-.voice-call-btn[data-call-state="idle"] {
-  background: var(--voice-color-accent);
-  border-color: var(--color-accent-strong, var(--voice-color-accent));
-  color: var(--color-text-inverse);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 248, 220, 0.35),
-    0 0 0 1px rgba(247, 179, 43, 0.14),
-    0 10px 26px -10px rgba(247, 179, 43, 0.45),
-    0 -6px 20px -6px rgba(247, 179, 43, 0.35);
-}
-.voice-call-btn[data-call-state="idle"]:hover { filter: brightness(1.05); }
-
-.voice-call-btn[data-call-state="cancel"] {
-  background: var(--color-warn);
-  border-color: var(--color-warn);
-  color: #1B150A;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 248, 220, 0.30),
-    0 10px 22px -10px rgba(245, 158, 60, 0.45);
-}
-.voice-call-btn[data-call-state="cancel"]:hover { filter: brightness(1.07); }
-
-.voice-call-btn[data-call-state="end"] {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
-  color: #FFF;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 248, 220, 0.25),
-    0 10px 22px -10px rgba(225, 90, 76, 0.55);
-}
-.voice-call-btn[data-call-state="end"]:hover { filter: brightness(1.08); }
-
-.voice-call-btn[data-call-state="reconnect"] {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
-  color: #FFF;
-  animation: voice-call-reconnect 1.4s ease-in-out infinite;
-}
-@keyframes voice-call-reconnect {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 90, 76, 0.55), inset 0 1px 0 rgba(255, 248, 220, 0.25); }
-  50%      { box-shadow: 0 0 0 10px rgba(225, 90, 76, 0), inset 0 1px 0 rgba(255, 248, 220, 0.25); }
+  box-shadow: var(--voice-focus-ring);
 }
 
-.voice-call-btn[data-call-state="closing"] {
-  background: var(--color-bg-elev-3, var(--color-bg-elev-2));
-  border-color: var(--color-border-strong, var(--color-border));
-  color: var(--color-text-muted);
-  box-shadow: none;
-}
-
-/* Mic mute button. */
-.voice-mic-btn {
-  width: 52px; height: 52px;
-  padding: 0;
-  border-radius: var(--radius-pill);
-  display: inline-flex;
+/* ============ 9. VISUALISER (5-bar VU) ============
+ * Lives inside #voice-status-strip — preserves the long-standing contract
+ * that `wireVuMeter` iterates `#voice-status-strip .voice-vu .bar`.
+ * Minimised state hides the strip entirely; expanded state shows it
+ * as a 72 px tall row under the header.
+ */
+.voice-visualiser {
+  display: none;
   align-items: center;
-  justify-content: center;
-  background: var(--color-bg-elev-2);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  cursor: pointer;
-  transition:
-    background var(--dur-fast, 120ms) var(--voice-ease-spring),
-    color var(--dur-fast, 120ms) var(--voice-ease-spring),
-    border-color var(--dur-fast, 120ms) var(--voice-ease-spring);
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  height: 72px;
+  background: var(--voice-surface-expanded);
+  border-bottom: 1px solid var(--voice-outline-variant);
   flex-shrink: 0;
 }
-.voice-mic-btn[hidden] { display: none !important; }
-.voice-mic-btn:hover { background: var(--color-bg-elev-3, var(--color-bg-elev-2)); color: var(--voice-color-accent); border-color: var(--voice-color-border-accent); }
-.voice-mic-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus-ring-accent, 0 0 0 3px rgba(247, 179, 43, 0.38));
+.voice-dock:not(.is-collapsed) .voice-visualiser { display: flex; }
+
+.voice-vu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  height: 48px;
+  min-width: 58px;   /* 5× 6 px + 4× 4 px gap */
 }
-.voice-mic-btn .mic-icon { width: 22px; height: 22px; }
-.voice-mic-btn .mic-icon--off { display: none; }
-.voice-mic-btn.is-muted .mic-icon--on  { display: none; }
-.voice-mic-btn.is-muted .mic-icon--off { display: inline-block; }
-.voice-mic-btn.is-muted {
-  background: var(--color-danger-soft, rgba(225, 90, 76, 0.12));
-  color: var(--color-danger);
-  border-color: rgba(225, 90, 76, 0.45);
+.voice-vu .bar {
+  display: block;
+  width: 6px;
+  height: 4px;
+  border-radius: 3px;
+  background: var(--voice-state-idle);
+  transition:
+    height 90ms linear,
+    background-color var(--voice-dur-base) var(--voice-ease-emphasized);
 }
 
-/* Action footer (hint + kbd pips). Stacked column so the hint
- * always reads on one line and the kbd pips ride below. At ≥480px
- * we lay them out in a row if they fit. */
+/* State colours driven by [data-state] on the strip (preserves JS contract). */
+.voice-visualiser[data-state="listening"]      .voice-vu .bar,
+.voice-visualiser[data-state="live_ready"]     .voice-vu .bar { background: var(--voice-state-listening); }
+.voice-visualiser[data-state="model_thinking"] .voice-vu .bar,
+.voice-visualiser[data-state="thinking"]       .voice-vu .bar { background: var(--voice-state-thinking); }
+.voice-visualiser[data-state="model_speaking"] .voice-vu .bar,
+.voice-visualiser[data-state="speaking"]       .voice-vu .bar { background: var(--voice-state-speaking); }
+.voice-visualiser[data-state="tool_executing"] .voice-vu .bar { background: var(--voice-state-tool); }
+.voice-visualiser[data-state="error"]          .voice-vu .bar { background: var(--voice-state-error); }
+.voice-visualiser[data-state="dialing"]        .voice-vu .bar,
+.voice-visualiser[data-state="live_opening"]   .voice-vu .bar,
+.voice-visualiser[data-state="reconnecting"]   .voice-vu .bar { background: var(--voice-warn); }
+
+.voice-visualiser-readout {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--voice-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.voice-visualiser-label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.voice-visualiser-id {
+  font-family: var(--voice-font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  color: var(--voice-on-surface);
+}
+
+/* ============ 10. ACTION FOOTER ============
+ * In expanded mode only. Hosts activity indicator (mounted here by
+ * activity-indicator.js), hint copy, and the keyboard pips. Two-row
+ * hierarchy per spec §1.5 — hint on its own line, pips on the next. The
+ * Call button does NOT live here — it lives in the header always.
+ */
+.voice-dock-action {
+  display: none;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--voice-outline-variant);
+  background: var(--voice-surface-expanded);
+  flex-shrink: 0;
+}
 .voice-dock-action-footer {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--sp-2, 8px);
+  gap: 8px;
 }
 
 .voice-call-hint {
   margin: 0;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  line-height: 1.4;
-  max-width: 100%;
+  font-size: 13px;
+  line-height: var(--lh-sm, 1.5);
+  color: var(--md-sys-color-on-surface-variant, var(--voice-on-surface-variant));
+  align-self: stretch;
+  min-width: 0;
 }
 
 .voice-kbd-hints {
   list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
   margin: 0;
   padding: 0;
-  display: inline-flex;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 .voice-kbd-hints li {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  color: var(--color-text-dim);
-}
-.voice-kbd-hints li span {
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide, 0.08em);
-  font-weight: 600;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--md-sys-color-outline, var(--voice-outline));
 }
 .voice-kbd {
-  font-family: var(--voice-font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-text);
-  background: var(--color-bg-elev-3, var(--color-bg-elev-2));
-  border: 1px solid var(--color-border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 1px 5px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 20px;
+  height: 22px;
+  padding: 0 6px;
+  font-family: var(--voice-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
   text-align: center;
+  color: var(--md-sys-color-on-surface, var(--voice-on-surface));
+  background: var(--md-sys-color-surface-container-highest, var(--voice-surface-expanded));
+  border: 1px solid var(--voice-outline-variant);
+  border-radius: var(--voice-radius-sm);
 }
 
-@media (max-width: 720px) {
-  .voice-kbd-hints li:nth-child(n+4) { display: none; }
+/* Activity indicator (mounted by activity-indicator.js as first child of
+ * .voice-dock-action). */
+.voice-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--voice-on-surface-variant);
+}
+.voice-activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--voice-primary);
 }
 
-/* ============ 6. SETTINGS SHEET ============ */
+/* ============ 11. SETTINGS SHEET ============ */
 .voice-settings-sheet {
-  position: absolute;
-  top: 0; right: 0; bottom: 0;
-  width: 100%;
-  background:
-    radial-gradient(320px 160px at 50% -5%, var(--voice-color-accent-wash), transparent 70%),
-    linear-gradient(180deg, var(--color-bg-elev-2) 0%, var(--color-bg-elev-1) 100%);
-  border-left: 1px solid var(--voice-color-border-accent);
-  z-index: 4;
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  bottom: 24px;
+  width: min(440px, calc(100vw - 48px));
+  background: var(--md-sys-color-surface-container-high, var(--voice-surface-expanded));
+  color: var(--voice-on-surface);
+  border: 1px solid var(--voice-outline-variant);
+  border-radius: var(--md-sys-shape-corner-xl, var(--voice-radius-expanded));
+  box-shadow: var(--md-sys-elevation-level-3, var(--voice-elev-expanded));
+  z-index: calc(var(--z-dock, 200) + 10);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  transform: translateX(100%);
+  min-height: 0;
+  transform: translateX(calc(100% + 48px));
   opacity: 0;
   transition:
-    transform 320ms var(--voice-ease-spring),
-    opacity 240ms var(--voice-ease-spring);
-  border-radius: inherit;
+    transform 280ms var(--md-sys-motion-spring-spatial, var(--voice-ease-spatial)),
+    opacity var(--voice-dur-base) var(--voice-ease-effects);
 }
-.voice-settings-sheet[hidden] { display: none; }
 .voice-settings-sheet.is-open {
   transform: translateX(0);
   opacity: 1;
 }
+.voice-settings-sheet[hidden] { display: none; }
 
-/* Sheet grab handle (mobile only). */
-.voice-settings-grab { display: none; }
+/* Mobile-only drag affordance (spec §2.2). Hidden on desktop. */
+.voice-settings-handle {
+  display: none;
+  width: 32px;
+  height: 4px;
+  margin: 12px auto 8px;
+  background: var(--md-sys-color-outline, var(--voice-outline));
+  border-radius: var(--voice-radius-pill);
+  flex-shrink: 0;
+}
 
 .voice-settings-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--sp-4, 16px);
-  height: 56px;
-  border-bottom: 1px solid var(--color-border);
-  box-shadow: 0 1px 0 rgba(247, 179, 43, 0.06);
+  gap: 12px;
+  padding: 12px 12px 12px 20px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--voice-outline-variant);
   flex-shrink: 0;
 }
 .voice-settings-title {
   margin: 0;
-  font-family: var(--voice-font-display);
-  font-weight: 500;
-  font-size: 18px;
-  letter-spacing: var(--tracking-tight, -0.015em);
-  color: var(--color-text);
-  font-feature-settings: "SOFT" 30, "WONK" 1;
+  font-size: var(--fs-md, 16px);
+  font-weight: var(--fw-medium, 500);
+  letter-spacing: var(--tracking-tight, -0.012em);
+  color: var(--voice-on-surface);
 }
 
+/* M3 primary tabs with underline indicator (spec §2.4). Replaces the
+   pill-fill active state. */
 .voice-settings-tabs {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  display: flex;
   gap: 0;
-  padding: 0 var(--sp-2, 8px);
-  height: 40px;
-  background: var(--color-bg-elev-1);
-  border-bottom: 1px solid var(--color-border);
+  padding: 0;
+  border-bottom: 1px solid var(--voice-outline-variant);
   flex-shrink: 0;
+  overflow-x: auto;
 }
 .voice-settings-tab {
   position: relative;
-  height: 40px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 48px;
+  padding: 0 16px;
+  font-family: var(--voice-font-sans);
+  font-size: var(--fs-sm, 13px);
+  font-weight: var(--fw-medium, 500);
+  color: var(--voice-on-surface-variant);
   background: transparent;
-  border: 0;
-  color: var(--color-text-muted);
-  font-family: var(--font-sans);
-  font-size: var(--voice-fs-2xs);
-  font-weight: 600;
-  letter-spacing: var(--tracking-wide, 0.08em);
-  text-transform: uppercase;
+  border: none;
+  border-radius: 0;
   cursor: pointer;
-  transition: color var(--dur-fast, 120ms) var(--voice-ease-spring);
+  text-transform: none;
+  letter-spacing: var(--tracking-normal, 0);
+  transition:
+    background-color var(--voice-dur-fast) var(--voice-ease-emphasized),
+    color var(--voice-dur-fast) var(--voice-ease-emphasized);
 }
 .voice-settings-tab::after {
   content: "";
   position: absolute;
-  left: 25%;
-  right: 25%;
+  left: 30%;
+  right: 30%;
   bottom: 0;
   height: 2px;
-  background: var(--voice-color-accent);
+  background: var(--md-sys-color-primary, var(--voice-primary));
+  border-radius: 2px 2px 0 0;
   transform: scaleX(0);
   transform-origin: center;
-  transition: transform var(--dur-base, 220ms) var(--voice-ease-spring);
+  transition: transform 160ms var(--md-sys-motion-easing-emphasized, var(--voice-ease-emphasized));
+  pointer-events: none;
 }
-.voice-settings-tab:hover { color: var(--color-text); }
+.voice-settings-tab:hover {
+  background: color-mix(in oklab, var(--voice-on-surface) 6%, transparent);
+  color: var(--voice-on-surface);
+}
 .voice-settings-tab.is-active,
 .voice-settings-tab[aria-selected="true"] {
-  color: var(--voice-color-accent);
+  color: var(--md-sys-color-primary, var(--voice-primary));
+  background: transparent;
 }
 .voice-settings-tab.is-active::after,
 .voice-settings-tab[aria-selected="true"]::after {
@@ -1069,416 +993,413 @@
 }
 .voice-settings-tab:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px rgba(247, 179, 43, 0.38);
-  border-radius: 4px;
+  box-shadow: var(--shadow-focus-ring-accent, var(--voice-focus-ring));
 }
 
 .voice-settings-body {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: var(--sp-4, 16px) var(--sp-5, 20px);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4, 16px);
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border-strong, var(--color-border)) transparent;
+  padding: 16px 0 20px;
 }
-
 .voice-settings-panel {
+  display: none;
+  flex-direction: column;
+  gap: 0;
+}
+.voice-settings-panel.is-active,
+.voice-settings-panel:not([hidden]) { display: flex; }
+
+/* Row primitive (spec §2.5). Edge-to-edge rows with per-row 16 px
+ * horizontal gutter. Text stack on the left, control on the right,
+ * 1 px bottom divider, 56 px min-height so every row meets the 44 px
+ * hit target. */
+.voice-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--voice-outline-variant);
+  transition: background-color var(--voice-dur-fast) var(--voice-ease-emphasized);
+}
+.voice-settings-row:last-child {
+  border-bottom: 0;
+}
+.voice-settings-row:hover {
+  background: color-mix(in oklab, var(--voice-on-surface) 4%, transparent);
+}
+.voice-settings-row-text {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3, 12px);
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
-.voice-settings-panel[hidden] { display: none; }
-
-.voice-settings-note {
-  margin: 0;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  line-height: 1.45;
-  font-style: italic;
-  font-family: var(--voice-font-display);
-  font-weight: 300;
+.voice-settings-row-label {
+  font-family: var(--voice-font-sans);
+  font-size: var(--fs-sm, 13px);
+  font-weight: var(--fw-medium, 500);
+  color: var(--md-sys-color-on-surface, var(--voice-on-surface));
+  letter-spacing: var(--tracking-normal, 0);
+  text-transform: none;
+}
+.voice-settings-row-helper {
+  font-family: var(--voice-font-sans);
+  font-size: var(--fs-xs, 12px);
+  line-height: var(--lh-sm, 1.5);
+  color: var(--md-sys-color-on-surface-variant, var(--voice-on-surface-variant));
+  margin-top: 2px;
+}
+.voice-settings-row-control {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
-.voice-settings-actions {
-  justify-content: flex-end;
-  border-top: 1px dashed var(--color-border);
-  padding-top: var(--sp-3, 12px);
-  margin-top: var(--sp-2, 8px);
+/* Row with a fixed label column (Mode, Volume). Label sits in a 96 px
+ * column, the control region stretches. */
+.voice-settings-row--labeled .voice-settings-row-label {
+  flex: 0 0 96px;
+  min-width: 96px;
+}
+.voice-settings-row--labeled .voice-settings-row-control {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
+/* Segmented mode row collapses to column only on very narrow mobile. */
+.voice-settings-row--segmented {
+  flex-wrap: wrap;
+}
+@media (max-width: 480px) {
+  .voice-settings-row--segmented {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .voice-settings-row--segmented .voice-settings-row-label {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+  .voice-settings-row--segmented .voice-settings-row-control {
+    margin-left: 0;
+    width: 100%;
+  }
+  .voice-settings-row--segmented .voice-settings-row-control .segmented {
+    width: 100%;
+  }
+}
+
+/* Volume slider row (spec §2.5 Volume). */
+.voice-settings-row--volume .voice-settings-row-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+.voice-settings-row--volume .slider {
+  width: 150px;
+  max-width: 100%;
+}
+@media (max-width: 640px) {
+  .voice-settings-row--volume .voice-settings-row-control {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+  .voice-settings-row--volume .slider {
+    flex: 1 1 auto;
+    width: auto;
+  }
+}
+.voice-volume-ticks {
+  position: relative;
+  width: 150px;
+  height: 8px;
+  margin-top: -6px;
+  pointer-events: none;
+}
+.voice-volume-ticks span {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 8px;
+  background: var(--voice-outline-variant);
+}
+@media (max-width: 640px) {
+  .voice-volume-ticks { display: none; }
+}
+.voice-volume-readout {
+  min-width: 40px;
+  font-family: var(--voice-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm, 13px);
+  color: var(--md-sys-color-on-surface, var(--voice-on-surface));
+  text-align: right;
+}
+
+/* Legacy row primitive — kept for external consumers (e.g. theme.js
+ * injecting a row outside the settings sheet). Not used INSIDE the
+ * sheet anymore; `.voice-settings-row` supersedes it there. */
 .voice-control-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-3, 12px);
+  gap: 12px;
   flex-wrap: wrap;
-}
-.voice-control-row--stack {
-  align-items: flex-start;
-  flex-direction: column;
-  gap: var(--sp-2, 8px);
-}
-.voice-control-row--stack .voice-control-label {
-  min-width: auto;
-}
-.voice-control-label,
-.label-caps {
-  font-family: var(--font-sans);
-  font-size: var(--voice-fs-2xs);
-  font-weight: 600;
-  letter-spacing: var(--voice-tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  min-width: 64px;
-  flex-shrink: 0;
-}
-
-/* Segmented control (mode / persona / transcript / theme). */
-.voice-dock .segmented {
-  display: inline-flex;
-  padding: 3px;
-  background: var(--color-bg-elev-3, var(--color-bg-elev-1));
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-  gap: 2px;
-  flex: 1;
   min-width: 0;
 }
-.voice-dock .segmented button {
-  min-height: 32px;
-  padding: 0 var(--sp-3, 12px);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: transparent;
-  color: var(--color-text-muted);
-  border: 0;
-  border-radius: var(--radius-pill);
-  font-family: var(--font-sans);
+.voice-control-row--stack { align-items: flex-start; flex-direction: column; gap: 8px; }
+.voice-control-label {
+  flex: 0 0 82px;
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: var(--tracking-open, 0.02em);
-  cursor: pointer;
-  transition:
-    background var(--dur-fast, 120ms) var(--voice-ease-spring),
-    color var(--dur-fast, 120ms) var(--voice-ease-spring);
-  flex: 1;
-  white-space: nowrap;
-}
-.voice-dock .segmented button:hover { color: var(--color-text); }
-.voice-dock .segmented button[disabled],
-.voice-dock .segmented button[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
-.voice-dock .segmented button.is-active,
-.voice-dock .segmented button[aria-checked="true"],
-.voice-dock .segmented button[aria-pressed="true"] {
-  color: var(--voice-color-accent);
-  background: var(--voice-color-accent-soft);
-  box-shadow:
-    inset 0 0 0 1px rgba(247, 179, 43, 0.22),
-    0 1px 0 rgba(0, 0, 0, 0.2) inset;
-}
-.voice-dock .segmented button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(247, 179, 43, 0.38);
+  font-weight: 500;
+  color: var(--voice-on-surface-variant);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
-/* Persona dot (set via CSS var). */
-.persona-seg button {
+/* Fallback styling for the segmented control (Dev A owns .segmented). */
+.voice-settings-panel .segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--voice-surface-body);
+  border: 1px solid var(--voice-outline-variant);
+  border-radius: var(--voice-radius-pill);
+}
+.voice-settings-panel .segmented button {
+  min-height: 32px;
+  padding: 0 14px;
+  font-family: var(--voice-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--voice-on-surface-variant);
+  background: transparent;
+  border: none;
+  border-radius: var(--voice-radius-pill);
+  cursor: pointer;
+}
+.voice-settings-panel .segmented button.is-active,
+.voice-settings-panel .segmented button[aria-pressed="true"],
+.voice-settings-panel .segmented button[aria-checked="true"] {
+  background: var(--voice-secondary-container);
+  color: var(--voice-on-secondary-container);
+}
+.voice-settings-panel .segmented button:focus-visible {
+  outline: none;
+  box-shadow: var(--voice-focus-ring);
+}
+.voice-settings-panel .segmented button:disabled,
+.voice-settings-panel .segmented button[aria-disabled="true"] {
+  opacity: 0.5; cursor: not-allowed;
+}
+
+.voice-settings-note {
+  margin: 0;
+  padding: 8px 16px 0;
+  font-size: 12px;
+  line-height: var(--lh-sm, 1.5);
+  color: var(--voice-on-surface-variant);
+}
+.voice-settings-note:empty {
+  padding: 0;
+}
+
+.voice-settings-actions {
+  padding: 12px 16px 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.voice-settings-panel .persona-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
   gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+.voice-settings-panel .persona-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--voice-radius-pill);
+  background: transparent;
+  color: var(--voice-on-surface-variant);
+  border: 1px solid var(--voice-outline-variant);
+}
+.voice-settings-panel .persona-seg button[aria-pressed="true"] {
+  background: var(--voice-secondary-container);
+  color: var(--voice-on-secondary-container);
+  border-color: transparent;
 }
 .persona-dot {
-  width: 8px; height: 8px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--persona-color, var(--voice-color-accent));
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 6px var(--persona-color, var(--voice-color-accent));
+  background: var(--persona-color, var(--voice-primary));
   flex-shrink: 0;
 }
 
-/* Select + slider reuse shared .select / .slider primitives but tighten
- * their layout inside the sheet. */
-.voice-dock .select,
-.voice-dock .input,
-.voice-dock .slider {
-  font-family: var(--font-sans);
-}
-.noise-row .select { flex: 1; min-width: 120px; }
-.noise-row .slider { flex: 1; min-width: 80px; }
-
-.voice-dock .slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  background: var(--color-bg-elev-3, var(--color-bg-elev-2));
-  border-radius: var(--radius-pill);
-  border: 0;
-  outline: none;
-  flex: 1;
-}
-.voice-dock .slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 16px; height: 16px;
-  border-radius: 50%;
-  background: var(--voice-color-accent);
-  border: 2px solid var(--color-bg-elev-1);
-  box-shadow: 0 0 0 1px rgba(247, 179, 43, 0.35), 0 2px 6px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-}
-.voice-dock .slider::-moz-range-thumb {
-  width: 16px; height: 16px;
-  border-radius: 50%;
-  background: var(--voice-color-accent);
-  border: 2px solid var(--color-bg-elev-1);
-  box-shadow: 0 0 0 1px rgba(247, 179, 43, 0.35);
-  cursor: pointer;
-}
-.voice-dock .slider:focus-visible { box-shadow: 0 0 0 3px rgba(247, 179, 43, 0.38); }
-
-/* Toggle (phone-line compression). */
-.voice-dock .toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2, 8px);
-  cursor: pointer;
-  color: var(--color-text);
-}
-.voice-dock .toggle input[type="checkbox"] {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-.voice-dock .toggle .track {
-  width: 36px;
-  height: 20px;
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-elev-3, var(--color-bg-elev-2));
-  border: 1px solid var(--color-border);
-  position: relative;
-  transition: background var(--dur-fast, 120ms) var(--voice-ease-spring);
-  flex-shrink: 0;
-}
-.voice-dock .toggle .track::after {
-  content: "";
-  position: absolute;
-  top: 1px; left: 1px;
-  width: 16px; height: 16px;
-  border-radius: 50%;
-  background: var(--color-text-muted);
-  transition: transform var(--dur-fast, 120ms) var(--voice-ease-spring), background var(--dur-fast, 120ms) var(--voice-ease-spring);
-}
-.voice-dock .toggle input:checked ~ .track {
-  background: var(--voice-color-accent-soft);
-  border-color: var(--voice-color-border-accent);
-}
-.voice-dock .toggle input:checked ~ .track::after {
-  transform: translateX(15px);
-  background: var(--voice-color-accent);
-}
-.voice-dock .toggle input:focus-visible ~ .track {
-  box-shadow: 0 0 0 3px rgba(247, 179, 43, 0.38);
-}
-
-/* Compression strength row. */
-.compression-strength-row {
-  padding-left: var(--sp-5, 20px);
-  gap: var(--sp-3, 12px);
-}
-.compression-strength-row[aria-disabled="true"] {
-  opacity: 0.5;
-  pointer-events: none;
-}
-.compression-strength-readout {
-  min-width: 40px;
-  text-align: right;
-  font-family: var(--voice-font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-/* Debug panel — monospaced metrics dump. */
-.debug-panel {
+.voice-debug-panel {
+  padding: 12px 16px 16px;
+  display: flex;
   flex-direction: column;
   align-items: stretch;
+  gap: 6px;
+  border-top: 1px solid var(--voice-outline-variant);
 }
-.debug-panel pre.debug-metrics {
-  margin: 0;
-  padding: var(--sp-2, 8px) var(--sp-3, 12px);
+.voice-debug-panel[hidden] { display: none; }
+.voice-debug-panel .voice-settings-row-label {
+  font-size: var(--fs-xs, 12px);
+  color: var(--voice-on-surface-variant);
+}
+.debug-metrics {
   font-family: var(--voice-font-mono);
-  font-size: 10px;
-  line-height: 1.5;
-  color: var(--color-text-muted);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm, 8px);
+  font-size: 11px;
   white-space: pre-wrap;
-  overflow-x: hidden;
-}
-.debug-panel[hidden] { display: none; }
-
-/* Utility: sr-only */
-.voice-dock .sr-only {
-  position: absolute;
-  width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  color: var(--voice-on-surface-variant);
+  background: var(--voice-surface-body);
+  border: 1px solid var(--voice-outline-variant);
+  border-radius: var(--voice-radius-sm);
+  padding: 8px 10px;
+  margin: 0;
 }
 
-/* ============ 7. MOBILE BOTTOM SHEET ============ */
+/* ============ 12. ERROR BANNER ============ */
+.voice-error-banner {
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--voice-on-error-container);
+  background: var(--voice-error-container);
+  border: 1px solid color-mix(in oklab, var(--voice-error) 45%, transparent);
+  border-radius: var(--voice-radius-sm);
+}
+.voice-error-banner code {
+  font-family: var(--voice-font-mono);
+  font-size: 11px;
+  padding: 1px 4px;
+  background: color-mix(in oklab, var(--voice-on-error-container) 12%, transparent);
+  border-radius: 3px;
+}
+.voice-error-banner button {
+  margin-left: 8px;
+  height: 28px;
+  padding: 0 10px;
+  font-family: var(--voice-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--voice-on-primary);
+  background: var(--voice-primary);
+  border: none;
+  border-radius: var(--voice-radius-pill);
+  cursor: pointer;
+}
+.voice-error-banner button:hover {
+  background: color-mix(in oklab, var(--voice-primary) 90%, white);
+}
+
+/* ============ 13. MOBILE BOTTOM-SHEET ============ */
 @media (max-width: 640px) {
   .voice-dock {
-    right: var(--sp-4, 16px);
-    left: var(--sp-4, 16px);
-    bottom: calc(var(--sp-4, 16px) + env(safe-area-inset-bottom, 0px));
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0));
     width: auto;
-    max-width: calc(100vw - var(--sp-4, 16px) * 2);
-    height: 56vh;
-    max-height: 94vh;
-    border-radius: var(--voice-radius-xl);
-    border-left: 0;
-    border-right: 0;
-    border-bottom: 0;
-    grid-template-rows: auto 64px auto 1fr auto;
+    max-width: none;
   }
-
-  /* Grab handle at very top. */
-  .voice-dock-grab {
-    display: block;
-    width: 36px;
-    height: 4px;
-    border-radius: var(--radius-pill);
-    background: var(--color-border-strong, var(--color-border));
-    margin: 6px auto 2px auto;
-    opacity: 0.7;
-  }
-
-  .voice-dock-halo {
-    border-radius: var(--voice-radius-xl) var(--voice-radius-xl) 0 0;
-  }
-
-  /* Collapsed mobile pill: full-width, rounded pill, 64px tall. */
   .voice-dock.is-collapsed {
-    bottom: calc(var(--sp-4, 16px) + env(safe-area-inset-bottom, 0px));
-    left: var(--sp-4, 16px);
-    right: var(--sp-4, 16px);
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0));
     width: auto;
-    max-width: calc(100vw - var(--sp-4, 16px) * 2);
-    height: 64px;
-    border-radius: var(--radius-pill);
-    grid-template-rows: 64px;
+    max-width: none;
   }
-  .voice-dock.is-collapsed .voice-dock-grab { display: none; }
-
+  .voice-dock:not(.is-collapsed) {
+    left: 8px;
+    right: 8px;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    max-width: none;
+    height: min(80dvh, 640px);
+    border-radius: 28px 28px 0 0;
+    border-bottom: 0;
+  }
   .voice-dock-header {
-    height: 60px;
-    padding: 0 var(--sp-3, 12px);
+    padding: 0 8px 0 14px;
+    gap: 8px;
   }
+  .voice-dock-brand-name { display: none; }
+  .voice-chip--ambient,
+  .voice-ambient-chip { display: none !important; }
 
-  .voice-dock-body {
-    grid-template-rows: 120px 1fr;
-  }
-  .voice-scope { height: 120px; }
-
-  .voice-transcript {
-    padding: var(--sp-3, 12px) var(--sp-4, 16px);
-  }
-
-  /* Bigger tap targets. */
-  .voice-icon-btn { width: 44px; height: 44px; }
-  .voice-call-btn { height: 56px; font-size: 16px; }
-  .voice-mic-btn  { width: 56px; height: 56px; }
-
-  .voice-dock-action {
-    padding: var(--sp-3, 12px);
-    padding-bottom: calc(var(--sp-3, 12px) + env(safe-area-inset-bottom, 0px));
-  }
-
-  /* Hide brand name when room is tight — radar dot + chip carry identity. */
-  .voice-dock-header-chips { overflow-x: auto; scrollbar-width: none; }
-  .voice-dock-header-chips::-webkit-scrollbar { display: none; }
-
-  /* Settings sheet on mobile — bottom-sheet full-height-inside-dock. */
+  /* Settings sheet = full bottom-sheet on mobile. */
   .voice-settings-sheet {
-    transform: translateY(100%);
-    border-left: 0;
-    border-top: 1px solid var(--voice-color-border-accent);
-    border-radius: var(--voice-radius-xl) var(--voice-radius-xl) 0 0;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: none;
+    border-radius: 28px 28px 0 0;
+    border-bottom: 0;
+    transform: translateY(calc(100% + 24px));
+    height: min(80dvh, 640px);
+    padding-bottom: env(safe-area-inset-bottom, 0);
   }
   .voice-settings-sheet.is-open { transform: translateY(0); }
-  .voice-settings-grab {
-    display: block;
-    width: 36px;
-    height: 4px;
-    border-radius: var(--radius-pill);
-    background: var(--color-border-strong, var(--color-border));
-    margin: 8px auto 0 auto;
-    opacity: 0.7;
-  }
 
-  .voice-kbd-hints { display: none; }
-  .voice-dock-action-footer { justify-content: center; }
+  /* Drag handle visible at mobile widths only. */
+  .voice-settings-handle { display: block; }
+
+  /* Hide the extra kbd pips on mobile — leaves Space / M / Esc. */
+  .voice-kbd-hints > li:nth-child(n+4) { display: none; }
 }
 
-/* Tablet (641px–899px): same desktop layout but slightly narrower dock. */
-@media (min-width: 641px) and (max-width: 899px) {
-  .voice-dock {
-    width: 380px;
-    bottom: var(--sp-5, 20px);
-    right: var(--sp-5, 20px);
-  }
-  .voice-dock.is-collapsed { width: 380px; }
+/* Desktop: explicitly hide the handle in case a JSDOM feature-query
+ * browser misses the default `display: none`. */
+@media (min-width: 641px) {
+  .voice-settings-handle { display: none; }
 }
 
-/* Extra-small (≤ 360px): drop ambient chip, shrink brand. */
-@media (max-width: 360px) {
-  .voice-dock-header-chips .voice-chip--ambient { display: none !important; }
-  .voice-dock-brand-name { display: none; }
-  .voice-kbd-hints { display: none; }
-}
-
-/* ============ 8. REDUCED MOTION ============ */
+/* ============ 14. REDUCED MOTION ============ */
 @media (prefers-reduced-motion: reduce) {
   .voice-dock,
-  .voice-settings-sheet,
+  .voice-dock.is-collapsed,
+  .voice-dock:not(.is-collapsed),
+  .voice-dock-body,
   .voice-call-btn,
-  .voice-status-pill,
-  .voice-icon-btn,
   .voice-mic-btn,
+  .voice-icon-btn,
+  .voice-icon--caret,
+  .voice-state-dot,
+  .voice-status-pill,
   .voice-vu .bar,
-  .voice-scope-compass,
-  .voice-settings-tab::after {
-    transition: none !important;
+  .voice-settings-sheet,
+  .voice-settings-tab,
+  .voice-settings-tab::after,
+  .voice-settings-row,
+  .voice-transcript .voice-line {
+    transition-duration: 0ms !important;
     animation: none !important;
   }
-  .voice-status-pill-dot,
-  .voice-chip--live .voice-chip-dot,
-  .voice-scope-needle,
-  .voice-call-btn[data-call-state="reconnect"] {
-    animation: none !important;
-  }
-  .voice-scope::before { opacity: 0; }
+  .voice-call-btn[data-call-state="idle"]::after { animation: none; opacity: 0; }
 }
 
-/* ============ 9. LIGHT THEME TWEAKS ============
- * Paper-chart cream — inherit token overrides from [data-theme="light"] but
- * tune surface contrast for the dock since it floats. */
-[data-theme="light"] .voice-dock {
-  background:
-    radial-gradient(420px 280px at 50% -6%, rgba(138, 76, 0, 0.06), transparent 62%),
-    var(--color-bg-elev-1);
-}
-[data-theme="light"] .voice-call-btn[data-call-state="idle"] {
-  color: #FBF7EC;
-  background: var(--color-accent, #8A4C00);
-  border-color: var(--color-accent-strong, #5E3400);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 10px 26px -10px rgba(138, 76, 0, 0.45);
-}
-[data-theme="light"] .voice-call-btn[data-call-state="cancel"] { color: #FBF7EC; }
-[data-theme="light"] .voice-transcript {
-  background-image:
-    repeating-linear-gradient(180deg, transparent 0 23px, rgba(138, 76, 0, 0.04) 23px 24px);
+/* ============ 15. VISUALLY-HIDDEN HELPERS ============ */
+.voice-dock .sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

@@ -21,7 +21,10 @@
  *      `session_resume_failed` so the UI can un-dim / fall back cleanly.
  *   7. `page_context` messages from the browser (sent after nav) are turned
  *      into a delimited `<page_context>...</page_context>` system update and
- *      injected via session.sendClientContent({ turnComplete: true }). The
+ *      injected via session.sendRealtimeInput({ text }). (Previously used
+ *      sendClientContent — but that's "seed-history only" on Gemini 3.1
+ *      Flash Live, so the model would silently store the text without
+ *      responding. Realtime-input is honoured on both 3.1 and 2.5.) The
  *      model is taught in the system prompt to acknowledge page changes in
  *      one short sentence unless the user is mid-task.
  *   8. Tool calls: forward to browser; round-trip results; 10s timeout.
@@ -62,7 +65,15 @@ function safeSendJson(ws, obj) {
 
 function safeSendBinary(ws, buf) {
   if (!ws || ws.readyState !== 1) return;
-  try { ws.send(buf, { binary: true }); } catch { /* ignore */ }
+  // latency-pass: disable per-message deflate for PCM audio. ws defaults to
+  // `perMessageDeflate: true` on the server — applied to every frame,
+  // including binary. 16-bit PCM at 16 kHz (8–32 kB/frame) is near-random
+  // at the byte level and doesn't compress well (often ~95 %+ of original).
+  // The CPU cost of deflate per frame (allocate, compress, send) stalls the
+  // event loop on every audio chunk and delays both the TTS return path
+  // AND incoming mic audio forwarding. Opting out with `compress:false`
+  // skips the deflate stage entirely for the frame.
+  try { ws.send(buf, { binary: true, compress: false }); } catch { /* ignore */ }
 }
 
 function buildGenaiClient(apiKey) {
@@ -205,6 +216,37 @@ function attach(browserWs, req, env) {
   let helloReceived = false;
   let closed = false;
   let upstreamEverProducedData = false;
+  // latency-pass: if the browser supplied `greet:{page,title}` in its hello
+  // frame, we inject the <call_initiated> block as soon as the upstream is
+  // ready — saving one browser ↔ server RTT vs waiting for a subsequent
+  // `call_start` message. Cleared after first-use so subsequent reconnects
+  // within the same browser WS don't re-greet.
+  // greeting-fix: explicit state machine. Two gates must close before the
+  // greeting can fire:
+  //   (a) `upstreamSetupComplete` — the upstream session has sent its first
+  //       message (setupComplete from Gemini).
+  //   (b) A greet intent is pending — either from the hello frame or from
+  //       an explicit `call_start` frame.
+  // We fire deterministically as soon as both gates are closed, in either
+  // order — no dependency on any browser-to-server audio frame. This was
+  // the regression: the prior pass correctly scheduled the inject on the
+  // upstream's first message, but the inject itself used `sendClientContent`
+  // which Gemini 3.1 Flash Live does NOT treat as a trigger for model
+  // response. The fix below switches to `sendRealtimeInput({text})` which
+  // IS honoured by 3.1 and does generate the audio greeting.
+  let pendingGreet = null;
+  let greetInjected = false;
+  let upstreamSetupComplete = false; // greeting-fix: explicit gate (a)
+  // audio-flow: gate (c). The browser plays a start-call chime while the
+  // upstream handshake happens. Gemini's greeting must NOT speak over
+  // that clip, so we hold the greet here until the browser sends
+  // `greet_gate_open` (after the chime ends or its safety cap fires).
+  let clientGreetGateOpen = false;
+  // audio-flow: idempotency latch for the agent-initiated end_call tool.
+  // When the model calls end_call we immediately ack the upstream, send
+  // an `end_call_requested` frame to the browser, and mark this flag so
+  // a second invocation in the same call is a no-op.
+  let agentEndCallInFlight = false;
   let resumptionHandle = null;
   // The handle we attempted to resume WITH (distinct from the handle we
   // captured AFTER a successful resume). On the first resumption update the
@@ -279,6 +321,31 @@ function attach(browserWs, req, env) {
         );
       }
       sendToolResponse(id, name, { ok: true, result: { count: out.length, elements: out } });
+      return;
+    }
+
+    // audio-flow: agent-initiated hang-up. The model has decided the
+    // conversation is done. We handle this entirely server-side:
+    //   1. Ack the tool call so Gemini doesn't keep speaking.
+    //   2. Forward an `end_call_requested` frame to the browser — the
+    //      VoiceAgent there runs the same sequence as a user click
+    //      (stop background, play endCall chime, close WS). Its
+    //      `_endingCall` latch guards against double-firing.
+    //   3. Mark `agentEndCallInFlight` so a second tool invocation in
+    //      the same turn is a no-op. The upstream close happens when
+    //      the browser closes the WS — we don't slam it here because
+    //      Gemini's own tool-response ack requires the socket alive.
+    if (name === 'end_call') {
+      const reason = typeof args.reason === 'string' ? String(args.reason).slice(0, 200) : undefined;
+      dlog(sessionId, 'agent_end_call reason=' + (reason || '(none)'));
+      const payload = { ok: true, result: { ended: true, reason: reason || null } };
+      sendToolResponse(id, name, payload);
+      if (!agentEndCallInFlight) {
+        agentEndCallInFlight = true;
+        safeSendJson(browserWs, { type: 'end_call_requested', reason: reason || null });
+      } else {
+        dlog(sessionId, 'agent_end_call duplicate — not re-notifying browser');
+      }
       return;
     }
 
@@ -369,6 +436,20 @@ function attach(browserWs, req, env) {
       resumptionHandle: handle
     });
 
+    // latency-pass: tighten end-of-speech detection for LIVE mode. The upstream
+    // default in gemini-config.js is 500 ms of trailing silence before Gemini
+    // marks end-of-turn and fires the model — felt like a perceptible "wait".
+    // Override to 350 ms here (near the floor of "natural" turn-taking latency
+    // for native English; the human conversation floor is ~200–300 ms). Going
+    // lower starts clipping brief mid-sentence pauses. Wake-word mode keeps
+    // its 700 ms because users trail off after "Hey Jarvis" before the real
+    // request. Done post-build so gemini-config.js stays unchanged.
+    if (mode === 'live'
+        && config.realtimeInputConfig
+        && config.realtimeInputConfig.automaticActivityDetection) {
+      config.realtimeInputConfig.automaticActivityDetection.silenceDurationMs = 350;
+    }
+
     const modelsToTry = [LIVE_MODEL_ID, LIVE_MODEL_FALLBACK];
     let lastErr = null;
 
@@ -435,15 +516,52 @@ function attach(browserWs, req, env) {
     return false;
   }
 
+  // greeting-fix + audio-flow: three-gate deterministic greeting fire.
+  // Called from every site where any of the three gates could be closed:
+  //   1. onUpstreamMessage, first message → upstreamSetupComplete (gate a).
+  //   2. onBrowserText 'hello'            → pendingGreet           (gate b).
+  //   3. onBrowserText 'greet_gate_open'  → clientGreetGateOpen   (gate c).
+  // Guarded on (upstream && upstreamSetupComplete && pendingGreet &&
+  // clientGreetGateOpen && !greetInjected). Uses `sendRealtimeInput({text})`
+  // which IS honoured by Gemini 3.1 Flash Live as a trigger for immediate
+  // model response. `sendClientContent` is documented as "only supported
+  // for seeding initial context history" on 3.1 — it silently stashes
+  // the turn and the model never speaks.
+  function maybeFireGreeting(source) {
+    if (greetInjected) return;
+    if (!pendingGreet) return;
+    if (!upstream) return;
+    if (!upstreamSetupComplete) return;
+    if (!clientGreetGateOpen) return; // audio-flow: gate (c) — wait for startCall chime
+    try {
+      const text = buildCallInitiatedText(pendingGreet);
+      // greeting-fix: sendRealtimeInput({text}) is the 3.1-compatible
+      // trigger. Model responds with audio immediately; turn boundary is
+      // inferred from the text arriving without concurrent user audio.
+      upstream.sendRealtimeInput({ text });
+      greetInjected = true;
+      dlog(sessionId, '[jarvis-phase] greeting_fired src=' + source + ' page=' + pendingGreet.page + ' textLen=' + text.length);
+      pendingGreet = null;
+    } catch (err) {
+      dlog(sessionId, 'greeting fire error src=' + source, err.message || String(err));
+    }
+  }
+
   function onUpstreamMessage(msg) {
     if (!msg) return;
     touchTraffic();
 
     if (!upstreamEverProducedData) {
       upstreamEverProducedData = true;
+      upstreamSetupComplete = true; // greeting-fix: gate (a) closes here.
       dlog(sessionId, 'first message — handshake OK');
       safeSendJson(browserWs, { type: 'setup_complete', sessionId });
       emitState('listening');
+
+      // greeting-fix: fire greeting deterministically from the gate that
+      // just closed. Previously used sendClientContent which 3.1 does not
+      // honour as a turn trigger.
+      maybeFireGreeting('upstream_setup_complete');
     }
 
     if (DEBUG) {
@@ -603,7 +721,28 @@ function attach(browserWs, req, env) {
           }
         }
 
-        dlog(sessionId, 'hello persona=' + persona.id, 'mode=' + mode, 'page=' + pageName, 'elements=' + runtimeElements.length, 'resume=' + (incomingHandle ? 'yes' : 'no'));
+        // latency-pass: accept an optional `greet` field so the server can
+        // inject the <call_initiated> block on the first upstream message
+        // (saves one browser ↔ server RTT vs waiting for `call_start`).
+        // Shape: `{ page: string, title: string }`. Backwards-compatible —
+        // old clients don't set it and the `call_start` path still works.
+        // greeting-fix: the ack flag `eagerGreetAck` must only be set when
+        // BOTH the greet field is present AND the client will send no
+        // follow-up `call_start`. Since the client sets `_greetingSent=true`
+        // on receiving the ack, a truthful ack requires we commit to firing
+        // the greeting. We do so deterministically via `maybeFireGreeting`
+        // below, which is safe to call before the upstream is ready — it
+        // just no-ops until gate (a) closes.
+        let greetAcked = false;
+        if (data.greet && typeof data.greet === 'object') {
+          const gPage = String(data.greet.page || pageName || '/').slice(0, 120);
+          const gTitle = String(data.greet.title || '').slice(0, 120);
+          pendingGreet = { page: gPage, title: gTitle };
+          greetInjected = false;
+          greetAcked = true;
+        }
+
+        dlog(sessionId, 'hello persona=' + persona.id, 'mode=' + mode, 'page=' + pageName, 'elements=' + runtimeElements.length, 'resume=' + (incomingHandle ? 'yes' : 'no'), 'eagerGreet=' + (greetAcked ? 'yes' : 'no'));
         safeSendJson(browserWs, {
           type: 'hello_ack',
           sessionId,
@@ -611,9 +750,17 @@ function attach(browserWs, req, env) {
           personas: publicPersonas(),
           mode,
           resumeRequested: !!incomingHandle,
-          resumeWindowMs: SESSION_RESUME_WINDOW_MS
+          resumeWindowMs: SESSION_RESUME_WINDOW_MS,
+          // latency-pass: tell client we honoured the eager-greet so it can
+          // skip sending an additional `call_start` frame.
+          eagerGreetAck: greetAcked
         });
         openUpstream({ reuseHandle: false, explicitHandle: incomingHandle });
+        // greeting-fix: opportunistic fire. If setupComplete already landed
+        // (unusual: upstream would need to have been kept open), this fires
+        // immediately. Otherwise no-ops until onUpstreamMessage closes the
+        // gate. Either way the greeting lands exactly once.
+        maybeFireGreeting('hello_received');
         return;
       }
       case 'call_start': {
@@ -621,23 +768,20 @@ function attach(browserWs, req, env) {
         // <call_initiated>…</call_initiated> block so the model greets
         // them immediately. Fires once per placeCall on the browser
         // side; on the server side we guard on upstream readiness.
-        if (!upstream || !upstreamEverProducedData) {
-          dlog(sessionId, 'call_start ignored — upstream not ready');
+        // greeting-fix: unified path. Stash a pendingGreet (if not already
+        // stashed via hello.greet) and call maybeFireGreeting. When the
+        // upstream is not yet ready, this is a no-op and the fire will
+        // happen on the subsequent setup_complete. When the eager path
+        // already fired, this is idempotent.
+        if (greetInjected) {
+          dlog(sessionId, 'call_start skipped — greet already fired');
           return;
         }
         const page = String(data.page || pageName || '/').slice(0, 120);
         const title = String(data.title || '').slice(0, 120);
         pageName = page;
-        const text = buildCallInitiatedText({ page, title });
-        try {
-          upstream.sendClientContent({
-            turns: [{ role: 'user', parts: [{ text }] }],
-            turnComplete: true
-          });
-          dlog(sessionId, 'call_initiated_injected page=' + page + ' textLen=' + text.length);
-        } catch (err) {
-          dlog(sessionId, 'call_start inject error', err.message || String(err));
-        }
+        pendingGreet = pendingGreet || { page, title };
+        maybeFireGreeting('call_start');
         return;
       }
       case 'call_end': {
@@ -648,6 +792,17 @@ function attach(browserWs, req, env) {
         dlog(sessionId, 'call_end requested — closing upstream');
         closeUpstream('call_end');
         emitState('idle');
+        return;
+      }
+      case 'greet_gate_open': {
+        // audio-flow: gate (c) closes. The browser has finished playing
+        // the startCall chime (or timed out); Gemini can now speak
+        // without talking over it. If the other two gates are already
+        // closed, the greeting fires immediately.
+        if (clientGreetGateOpen) return;
+        clientGreetGateOpen = true;
+        dlog(sessionId, 'greet_gate_open received — client ready for greeting');
+        maybeFireGreeting('client_greet_gate_open');
         return;
       }
       case 'page_context': {
@@ -666,10 +821,12 @@ function attach(browserWs, req, env) {
         runtimeElements = Array.isArray(data.elements) ? data.elements.slice(0, 500) : runtimeElements;
         const text = buildPageContextText({ page, title, elements });
         try {
-          upstream.sendClientContent({
-            turns: [{ role: 'user', parts: [{ text }] }],
-            turnComplete: true
-          });
+          // greeting-fix: same 3.1 fix as the greeting path — sendClientContent
+          // is "seed-history only" on gemini-3.1-flash-live-preview. Using
+          // sendRealtimeInput({text}) means the model treats this as a user
+          // turn and (per the system prompt) acknowledges the nav in one
+          // short sentence unless mid-task.
+          upstream.sendRealtimeInput({ text });
           dlog(sessionId, 'page_context_injected page=' + page + ' elements=' + elements.length + ' textLen=' + text.length);
         } catch (err) {
           dlog(sessionId, 'page_context inject error', err.message || String(err));
@@ -777,6 +934,26 @@ function attach(browserWs, req, env) {
     try { upstream.close(); } catch { /* ignore */ }
     upstream = null;
     upstreamEverProducedData = false;
+    // latency-pass: reset the eager-greet gate so a re-opened upstream
+    // (persona/mode switch, reconnect) can greet again if the browser asks.
+    // `pendingGreet` is only set on hello; subsequent opens don't auto-greet
+    // unless the client sends it again.
+    greetInjected = false;
+    // greeting-fix: reset gate (a) — the new upstream has to reach setup
+    // again before we can fire any pending greet against it.
+    upstreamSetupComplete = false;
+    // audio-flow: reset gate (c). The new upstream is a new call (from
+    // the browser's POV, a fresh hello on reopen) so the client will
+    // send `greet_gate_open` again after its chime finishes.
+    clientGreetGateOpen = false;
+    // audio-flow: reset the end-call idempotency latch so a follow-up
+    // call in the same WS can hang up again.
+    agentEndCallInFlight = false;
+    // greeting-fix: also drop any stale pendingGreet that survived a close
+    // without firing. Persona/mode switch paths re-open upstream without
+    // a fresh hello, so we want ZERO chance of a delayed greet sneaking in
+    // after a switch. A fresh placeCall always arrives via a new hello.
+    pendingGreet = null;
   }
 
   function cleanup() {
