@@ -2,18 +2,18 @@
 // js/app.js) and survives every SPA route change.
 //
 // UX model: the user must EXPLICITLY place a call. Nothing happens on
-// page load — no WS, no mic, no noise, nothing. When the user clicks
-// "Place Call", the agent transitions IDLE → DIALING, starts ambient
-// noise IMMEDIATELY (so the dialling feels real), opens the WS, waits
-// for Gemini `setup_complete`, and emits a `<call_initiated>` block so
-// the model greets the user before they say anything.
+// page load — no WS, no mic, no audio, nothing. When the user clicks
+// "Place Call", the agent transitions IDLE → DIALING, plays the
+// startCall chime while dialling the WS and opening the mic, holds
+// Gemini's greeting until the chime ends AND setup_complete fires, then
+// begins the looping background ambience.
 //
 // State machine (single source of truth — `VoiceAgent.state`):
 //
 //   IDLE           ← default on page load, after endCall, after idle-timeout
 //   DIALING        ← user clicked Place Call; WS/mic coming up
 //   LIVE_OPENING   ← WS connected, awaiting Gemini setup_complete
-//   LIVE_READY     ← setup_complete received; ambient active; greeting injected
+//   LIVE_READY     ← setup_complete received; background active; greeting injected
 //   MODEL_THINKING ← user audio ended, model hasn't spoken yet
 //   MODEL_SPEAKING ← audio chunks streaming back
 //   TOOL_EXECUTING ← model requested a tool
@@ -22,17 +22,23 @@
 //   RECONNECTING   ← transient network blip mid-call; auto-retry with backoff
 //   ERROR          ← terminal (until user retries Place Call)
 //
-// Ambient noise state machine (overlaid on main state):
-//   ON  for {DIALING, LIVE_OPENING, LIVE_READY, MODEL_*, TOOL_EXECUTING, RECONNECTING}
-//   OFF for {IDLE, ARMING, CLOSING, ERROR}
-//   Fade-in 220 ms; fade-out 300 ms on endCall.
+// audio-flow: Call-audio choreography is owned by AudioPipeline.callAudio
+// and driven from placeCall / the greet-gate / endCall. There is no
+// procedural noise bed any more — just three clips:
+//   • startCall  — plays once on Place Call; dialling buffer.
+//   • background — loops at low volume while the call is live, guarded
+//     by the user's Background audio toggle (default on).
+//   • endCall    — plays once during hangup; awaited before WS close.
 //
-// Greeting injection:
-//   On the first LIVE_READY AFTER a placeCall, VoiceAgent sends a
-//   `call_start` text message to the server which wraps it in a
-//   <call_initiated>…</call_initiated> block and injects via
-//   session.sendClientContent({turnComplete: true}). Fires exactly once
-//   per placeCall (`_greetingSent` flag). Reset on endCall.
+// Greeting injection (greeting-fix + audio-flow):
+//   Three gates must close for the server to release the greeting:
+//     (a) upstream `setup_complete` has arrived,
+//     (b) a greet intent is pending (hello.greet or explicit call_start),
+//     (c) the client's start-audio gate has opened.
+//   Gate (c) is new — the client sends `{type:'greet_gate_open'}` to the
+//   server once the startCall chime has ended (or timed out). Without it
+//   Gemini would speak over the chime. Fires exactly once per placeCall
+//   (`_greetingSent` + `_greetGateOpened` flags). Both reset on endCall.
 //
 // Cross-page / cross-reload resumption:
 //   Session handle is still captured and persisted. Used on:
@@ -50,12 +56,16 @@ import { ToolRegistry, scanAgentElements } from './tool-registry.js';
 import { DEFAULT_PERSONAS, DEFAULT_PERSONA_ID } from './personas.js';
 import { LocalStt } from './local-stt.js';
 
-const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
+// latency-pass: first retry drops 1000ms → 300ms. Transient WS blips (a WAN
+// hiccup, a load-balancer restart) used to cost a full second of dead-air
+// before the browser even tried to reconnect. 300ms is still long enough to
+// let the socket layer settle but short enough that a brief stall doesn't
+// feel like the call died. Subsequent retries keep exponential back-off
+// unchanged so we never hammer the server during a real outage.
+const RECONNECT_DELAYS_MS = [300, 1000, 2500, 6000, 12000];
 const MAX_RECONNECTS = 5;
 const LIVE_IDLE_TIMEOUT_MS = 3 * 60 * 1000;
 const PRESETUP_BUFFER_MAX_BYTES = 96 * 1024;
-const AMBIENT_FADE_IN_MS = 220;
-const AMBIENT_FADE_OUT_MS = 300;
 const DIAL_TIMEOUT_MS = 15 * 1000; // if WS/setup doesn't complete in 15s → error
 
 export const RESUME_WINDOW_MS = 10 * 60 * 1000;
@@ -65,9 +75,35 @@ const SESSION_STORAGE_KEY = 'jarvis.session';
 const MAX_PERSISTED_TRANSCRIPT_LINES = 120;
 const MAX_PERSISTED_TRANSCRIPT_BYTES = 80 * 1024;
 
-const DEFAULT_COMPRESSION_ENABLED = true;
-const DEFAULT_NOISE_MODE = 'office';
-const DEFAULT_NOISE_VOLUME = 0.15;
+// audio-flow: single source of truth for the Background audio toggle.
+// Default ON. Persists to localStorage; takes effect immediately when
+// flipped mid-call.
+const BACKGROUND_AUDIO_STORAGE_KEY = 'jarvis.backgroundAudio';
+const DEFAULT_BACKGROUND_ENABLED = true;
+
+// audio-flow: phone-line compression toggle. Default ON so new visitors
+// hear Jarvis with the intended call-center character. Persists to
+// localStorage; takes effect immediately via a 50ms crossfade.
+// latency-pass: when ON, the server also downshifts agent audio to
+// narrowband (8 kHz mono PCM16) to halve network bytes per frame.
+const PHONE_COMPRESSION_STORAGE_KEY = 'jarvis.phoneCompression';
+const DEFAULT_PHONE_COMPRESSION = true;
+
+// Round-2 req 2: transcript mode defaults to 'full' so first-run users
+// see what Jarvis says. The canonical localStorage key is
+// `liveAgent.transcriptMode`; the pre-round-2 builds wrote to
+// `jarvis.ui.transcriptMode` — we read either (new first, legacy
+// fallback), then write BOTH on every save so a browser cache from any
+// era stays correct. Accepted values: 'off' | 'captions' | 'full'.
+const TRANSCRIPT_MODE_STORAGE_KEY = 'liveAgent.transcriptMode';
+const TRANSCRIPT_MODE_LEGACY_KEY = 'jarvis.ui.transcriptMode';
+const DEFAULT_TRANSCRIPT_MODE = 'full';
+
+// Round-2 req 2: persona, previously session-scoped (sessionStorage via
+// the session blob), is promoted to localStorage so the user's pick
+// survives browser restarts. The session blob still carries persona
+// for mid-session resume — we just mirror it here too.
+const PERSONA_STORAGE_KEY = 'liveAgent.persona';
 
 export const STATES = Object.freeze({
   IDLE: 'idle',
@@ -98,10 +134,9 @@ export const STATE_COPY = Object.freeze({
 });
 
 // Single source of truth: a "call is active" from the moment the user
-// clicks Place Call until the teardown begins. Ambient noise MUST play
-// steadily during every one of these states — no exceptions. Any new
-// mid-call state (e.g. USER_SPEAKING if we ever add one) must be added
-// here so the invariant holds.
+// clicks Place Call until the teardown begins. audio-flow: background
+// ambience follows `isInCall() && backgroundEnabled` — any new mid-call
+// state MUST be added here so the invariant holds.
 const CALL_ACTIVE_STATES = new Set([
   STATES.DIALING,
   STATES.LIVE_OPENING,
@@ -200,15 +235,15 @@ function writeSessionBlob(patch) {
     sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(next));
   } catch {
     try {
+      // audio-flow: fallback blob no longer includes the retired compression /
+      // noise keys. backgroundEnabled lives in localStorage, not the session
+      // blob — it's a cross-call preference, not call-scoped.
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
         handle: next.handle,
         handleIssuedAt: next.handleIssuedAt,
         mode: next.mode,
         persona: next.persona,
         muted: next.muted,
-        compression: next.compression,
-        noise: next.noise,
-        noiseVolume: next.noiseVolume,
         transcript: []
       }));
     } catch {}
@@ -224,6 +259,16 @@ export class VoiceAgent extends EventTarget {
     super();
     this.pipeline = new AudioPipeline();
     this.transcript = transcriptEl ? new TranscriptLog(transcriptEl) : null;
+    // Round-8 test hook: if URL has `?r8hook=1`, stash this instance on
+    // `window.__r8Agent` so the Playwright end-call harness can fire
+    // synthetic server frames into `_onServerMessage`. Gated strictly
+    // to `r8hook=1` so production pages don't expose the agent. Single
+    // line; zero impact on the critical call path.
+    try {
+      if (typeof window !== 'undefined' && /[?&]r8hook=1(&|$)/.test(location.search)) {
+        window.__r8Agent = this;
+      }
+    } catch {}
     this.wake = null;
     this.ws = null;
     this.wsUrl = null;
@@ -232,8 +277,7 @@ export class VoiceAgent extends EventTarget {
     // match the server defaults so pre-flag UI doesn't flash the wrong state.
     this.flags = {
       geminiTranscription: false,
-      showText: true,
-      humanCallLayer: true
+      showText: true
     };
     // Local Web Speech transcriber — USER side only. Instantiated lazily in
     // init() only when the server disabled Gemini transcription AND
@@ -243,10 +287,29 @@ export class VoiceAgent extends EventTarget {
     this.personas = DEFAULT_PERSONAS.slice();
     this.personaId = DEFAULT_PERSONA_ID;
 
-    const restored = readSessionBlob();
-    this._restored = restored;
+    // Drop any prior-call state (resume handle, transcript) so a page
+    // refresh starts fresh — reduces upstream token cost and avoids the
+    // agent "remembering" a previous conversation. Persona/mode survive
+    // because they live in localStorage, read just below.
+    clearSessionBlob();
+    const restored = null;
+    this._restored = null;
 
-    if (restored && restored.persona) this.personaId = String(restored.persona);
+    // Round-2 req 2: persona now persists across browser restarts via
+    // localStorage. Precedence: in-tab session blob (live call restore)
+    // → localStorage pick → hard default. The session blob takes first
+    // place so a mid-session change doesn't get clobbered by a stale
+    // localStorage value from another tab that just wrote.
+    if (restored && restored.persona) {
+      this.personaId = String(restored.persona);
+    } else {
+      try {
+        const stored = localStorage.getItem(PERSONA_STORAGE_KEY);
+        if (stored && this.personas.some((p) => p.id === stored)) {
+          this.personaId = stored;
+        }
+      } catch {}
+    }
     // Mode is now an "advanced" setting. Default Live for Place Call, but
     // persist Wake Word opt-in. Mode is NOT auto-activated on boot.
     if (restored && (restored.mode === 'live' || restored.mode === 'wakeword')) {
@@ -273,18 +336,30 @@ export class VoiceAgent extends EventTarget {
     this.muted = false; // mute is call-scoped; starts off each call
     this.playbackBlocked = false;
 
-    this.compressionEnabled = typeof (restored && restored.compression) === 'boolean'
-      ? restored.compression : DEFAULT_COMPRESSION_ENABLED;
-    // Compression strength (0..100). Prefer localStorage → session blob
-    // → legacy boolean fallback (true→50, false→0) → default 50.
-    this.compressionStrength = this._loadCompressionStrength(restored);
-    // Keep the boolean derived so older call-sites stay consistent.
-    this.compressionEnabled = this.compressionStrength > 0;
-    this.noiseMode = (restored && typeof restored.noise === 'string')
-      ? restored.noise : DEFAULT_NOISE_MODE;
-    this.noiseVolume = Number((restored && restored.noiseVolume) ?? NaN);
-    if (!Number.isFinite(this.noiseVolume)) this.noiseVolume = DEFAULT_NOISE_VOLUME;
-    this.noiseVolume = Math.max(0, Math.min(1, this.noiseVolume));
+    // audio-flow: background-audio toggle. Persists in localStorage; the
+    // session blob is no longer the source of truth so cross-tab changes
+    // stay consistent. Default ON so a fresh visitor hears the ambience.
+    this.backgroundEnabled = this._loadBackgroundEnabled();
+    try { this.pipeline.callAudio.setBackgroundEnabled(this.backgroundEnabled); } catch {}
+
+    // audio-flow: phone-line compression toggle. Persists in localStorage;
+    // default OFF. Applied immediately to the pipeline so a pre-existing
+    // preference survives reloads. The crossfade is a no-op until the
+    // AudioContext exists (first placeCall), so loading it here is safe.
+    this.phoneCompression = this._loadPhoneCompression();
+    try { this.pipeline.setPhoneCompression(this.phoneCompression); } catch {}
+
+    // audio-prefs: the server may negotiate a narrowband output (8 kHz)
+    // when phoneLine=true. Default 24 kHz tracks the Gemini Live native
+    // output rate and is the safe fallback when the server hasn't sent
+    // an `audio_format` message yet.
+    this._agentAudioRate = 24000;
+    this._agentAudioPhoneLine = !!this.phoneCompression;
+
+    // latency-pass: rolling decode-latency buffer for the debug HUD. Keep
+    // only the most recent 256 chunks so it can't leak memory on a long
+    // call. p50 / p95 are computed on demand when the HUD renders.
+    this._decodeLatencyBuf = [];
 
     this.setupComplete = false;
     this.preSetupBuffer = [];
@@ -297,6 +372,36 @@ export class VoiceAgent extends EventTarget {
     // Call-scoped flag: the greeting is sent exactly once per placeCall.
     // Reset on endCall / error.
     this._greetingSent = false;
+    // audio-flow: start-audio gate tracking. Resolves when the startCall
+    // clip has either finished or hit its safety cap. Separate from
+    // `_greetingSent` — we can send `greet_gate_open` to the server
+    // independently of whether Gemini has yet issued the greeting.
+    this._greetGateOpened = false;
+    this._callOpenPromise = null;
+    // audio-flow: idempotency flag for the end-call sequence. Guards
+    // against a user click, a server `end_call_requested`, AND the
+    // agent's own `end_call` tool all firing in quick succession.
+    this._endingCall = false;
+    // Round-6 fix 2: deterministic end-call chain state.
+    //   `_agentEndingArmed` — true after `end_call_requested` arrives
+    //     and until both turn_complete + agent-playback-drained have
+    //     fired (or the safety timeout). Idempotent latch against
+    //     duplicate frames.
+    //   `_agentTurnComplete` / `_agentAudioDrained` — the two event
+    //     flags; both must be true before we call `_gracefullyEndCall`.
+    //   `_agentEndingTimer` — 10 s safety timeout.
+    //   `_agentEndingListeners` — the handlers we attached (for
+    //     teardown). Stored so we can remove them on early kill.
+    this._agentEndingArmed = false;
+    this._agentTurnComplete = false;
+    this._agentAudioDrained = false;
+    this._agentEndingTimer = null;
+    this._agentEndingGraceTimer = null;
+    this._agentEndingListeners = null;
+    // Round-3 fix 1: label for the parallel-init `console.time` span.
+    // Set at the top of placeCall; closed on setup_complete OR on any
+    // teardown so the label never leaks between calls.
+    this._initSpanLabel = null;
     // Set while an explicit placeCall/endCall is in progress so downstream
     // state machines know this is user-initiated, not a reconnect.
     this._callActive = false;
@@ -315,10 +420,6 @@ export class VoiceAgent extends EventTarget {
     this.liveStartedAt = null;
     this.liveIdleTimer = null;
     this.liveLastVoiceAt = null;
-    // Track last-asserted human-call layer state so _updateAmbient only
-    // emits `ambient-changed` on actual transitions (not phantom re-asserts
-    // at init time).
-    this._ambientLayerOn = false;
 
     this.metrics = {
       framesIn: 0,
@@ -382,6 +483,16 @@ export class VoiceAgent extends EventTarget {
         this._announce({ from: 'system', text: 'Mic was muted by the system.' });
       }
     });
+    // audio-flow: forward the "all audio stopped" signal so UI can flip
+    // the End Call button back to green only after every last sample has
+    // played out (requirement 6). Also forward state changes so the dock
+    // can reflect background-playing status.
+    this.pipeline.addEventListener('call-audio-all-stopped', () => {
+      this._publishEvent('call-audio-all-stopped', {});
+    });
+    this.pipeline.addEventListener('call-audio-changed', (e) => {
+      this._publishEvent('call-audio-changed', e && e.detail ? e.detail : {});
+    });
   }
 
   // ---------- public getters ----------
@@ -397,9 +508,11 @@ export class VoiceAgent extends EventTarget {
     return this.transcriptMode || 'off';
   }
   isPlaybackBlocked() { return this.pipeline.isPlaybackBlocked(); }
-  getCompressionEnabled() { return !!this.compressionEnabled; }
-  getNoiseMode() { return this.noiseMode; }
-  getNoiseVolume() { return this.noiseVolume; }
+  /** audio-flow: whether the user wants background ambience during a call. */
+  getBackgroundEnabled() { return !!this.backgroundEnabled; }
+  /** audio-flow: whether the user wants Jarvis filtered through the
+   *  phone-line compression sub-graph (bandpass + compressor). */
+  getPhoneCompression() { return !!this.phoneCompression; }
   isResuming() { return !!this.resuming; }
   /** Runtime feature flags fetched from /api/config. Clone so callers
    *  can't mutate our copy. */
@@ -427,16 +540,11 @@ export class VoiceAgent extends EventTarget {
     };
   }
 
-  /** Create + resume AudioContext synchronously from a user gesture. */
+  /** Create + resume AudioContext synchronously from a user gesture.
+   *  audio-flow: also primes the HTMLAudioElement lifecycle clips so the
+   *  first playCallOpen() isn't blocked by Safari's autoplay policy. */
   unlockAudioSync() {
     const ctx = this.pipeline.unlockAudioSync();
-    // Push the persisted compression strength into the newly-built
-    // playback graph. The pipeline self-applies its own default (50) in
-    // _buildPlaybackGraph, so this overwrite is only meaningful when the
-    // user had a different value in localStorage.
-    if (ctx && typeof this.compressionStrength === 'number') {
-      try { this.pipeline.setCompressionStrength(this.compressionStrength); } catch {}
-    }
     return ctx;
   }
   async unlockAudio() {
@@ -450,13 +558,18 @@ export class VoiceAgent extends EventTarget {
    * handler so the AudioContext unlock + getUserMedia gesture lineage
    * works on Chrome/iOS Safari.
    *
-   * Flow:
-   *   1. Unlock AudioContext synchronously (no await yet).
-   *   2. Start ambient noise immediately — user hears the call "dial".
-   *   3. Mark state DIALING.
+   * audio-flow flow:
+   *   1. Unlock AudioContext + <audio> elements synchronously (no await yet).
+   *   2. Mark state DIALING.
+   *   3. Kick off the callOpen clip WITHOUT awaiting it — it runs
+   *      in parallel with the WS/mic handshake. We capture a promise
+   *      (`_callOpenPromise`) that resolves on ended/error/timeout.
    *   4. Open mic (await getUserMedia).
-   *   5. Open WS → hello → wait for setup_complete.
-   *   6. On setup_complete: transition to LIVE_READY + inject greeting.
+   *   5. Open WS → hello (with greet intent) → wait for setup_complete.
+   *   6. When BOTH the call-open promise resolves AND setup_complete
+   *      fires, send `greet_gate_open` to the server — that releases
+   *      Gemini's greeting — and start the background audio loop (if
+   *      the user's toggle is on).
    *
    * If the user clicks Cancel during dialing, `cancelDial()` tears down
    * without reaching LIVE_READY and returns to IDLE.
@@ -468,8 +581,53 @@ export class VoiceAgent extends EventTarget {
     }
     dlog('placeCall: user initiated');
 
-    // Synchronously unlock audio BEFORE any await so Chrome honours the gesture.
+    // Round-3 fix 1: the critical-path ordering inside this click-tick
+    // determines how much agent init overlaps with the callOpen audio.
+    // We explicitly front-load the steps whose network/permission cost
+    // is longest — WebSocket handshake + getUserMedia — BEFORE we start
+    // playing the 15.7 s callOpen clip. The audio then runs in parallel
+    // with WS handshake → hello → upstream Gemini handshake →
+    // `setup_complete`. Both tracks converge at the listen-gate
+    // (round-2 req 3): capture un-pauses when BOTH the near-end audio
+    // event AND `setup_complete` have fired. Target: setup_complete
+    // should land within ~0.5–2 s of the click, i.e. many seconds
+    // BEFORE the audio's last-second listen-gate.
+
+    // latency-pass (round-3 fix 1): phase telemetry stamped AT THE VERY
+    // TOP of the tick so every downstream sub-span is measurable. Zero
+    // cost unless `jarvis.debug=1` — `_logPhase` is a no-op then — but
+    // we still stamp the timestamps so production can be instrumented
+    // without re-deploying. Also writes a pair of `console.time` marks
+    // so DevTools' Performance panel shows the parallel init span.
+    const placeCallAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    this._phaseTimestamps = {
+      placeCallAt,
+      wsCreatedAt: null,
+      wsOpenAt: null,
+      micRequestedAt: null,
+      micReadyAt: null,
+      audioPlayStartedAt: null,
+      audioListenGateAt: null,  // retained for round-2 compat (no longer wired)
+      audioEndedAt: null,        // round-4: callOpen fully finished
+      firstFrameSentAt: null,
+      setupCompleteAt: null,
+      firstTokenAt: null
+    };
+    if (DEBUG && typeof console !== 'undefined' && typeof console.time === 'function') {
+      // A unique label per placeCall avoids collisions across retries.
+      this._initSpanLabel = 'jarvis.init-parallel-span.' + Math.random().toString(36).slice(2, 8);
+      try { console.time(this._initSpanLabel); } catch {}
+    } else {
+      this._initSpanLabel = null;
+    }
+
+    // 1. SYNC: unlock the AudioContext + <audio> elements. Must happen
+    //    before anything awaits so Chrome/iOS honour the user-gesture
+    //    for autoplay. Cheap (~0.1 ms).
     try { this.pipeline.unlockAudioSync(); } catch {}
+    // audio-flow: clear any hard-kill latch left over from the previous
+    // endCall so the new call's audio can play.
+    try { this.pipeline.callAudio.armForNextCall(); } catch {}
 
     // Force this call to be Live (continuous) unless the user explicitly
     // chose Wake Word. Mode persists in storage but is not coercive here.
@@ -477,6 +635,33 @@ export class VoiceAgent extends EventTarget {
 
     this._callActive = true;
     this._greetingSent = false;
+    // audio-flow: reset gate + idempotency state for this call.
+    this._greetGateOpened = false;
+    this._endingCall = false;
+    // audio-flow: explicit "start-call chime has settled" flag. Cleaner
+    // than poking the controller's internal `_startPlaying` — this flips
+    // exactly when we want the greet-gate logic to proceed.
+    this._callOpenSettled = false;
+    // Round-2 req 3 (updated in round-4): listening gate. The mic stays
+    // PAUSED (no frames forwarded upstream) until BOTH:
+    //   (a) `_listenGateOpen` — callOpen playback has ACTUALLY ENDED
+    //       (round-4: moved from the round-2 "last 1 second" trigger to
+    //       the clean `ended` event), OR the audio fell back via
+    //       error / timeout / hard-kill / no-duration. AND
+    //   (b) `_listenGateSetupComplete` — server `setup_complete` has
+    //       fired.
+    // `_openListenGateIfReady()` wraps the AND and calls
+    // `setCapturePaused(false)` once both are true.
+    this._listenGateOpen = false;
+    this._listenGateSetupComplete = false;
+    this._listenGateFallbackLogged = false;
+    // Round-5: client-side playback buffering was retired. The upstream
+    // (api/live-bridge.js::maybeFireGreeting) already gates the greeting
+    // trigger on the client's `greet_gate_open` frame, which is itself
+    // sent only after callOpen's `ended` event. No TTS audio can be
+    // generated during callOpen, so no client-side buffer is needed.
+    // A safety-belt log in `_onWsMessage` catches any regression.
+    this._preSettleAudioWarned = false;
     this.closedByUser = false;
     this.reconnectIdx = 0;
     this.muted = false;
@@ -493,20 +678,45 @@ export class VoiceAgent extends EventTarget {
     // DIAL_TIMEOUT_MS, give up and surface an error.
     this._armDialTimer();
 
-    // Open the mic (async). getUserMedia gesture lineage works because
-    // placeCall was called synchronously from a click handler.
-    try {
-      await this._openMic();
-    } catch (err) {
-      dlog('placeCall mic open failed', err && err.message);
-      this._setState(STATES.ERROR, 'mic_failed');
-      this._tearDownCall();
-      return false;
+    // 2. FIRE WebSocket FIRST. `new WebSocket(...)` is synchronous; the
+    //    TCP + TLS handshake runs off-thread in the browser. By kicking
+    //    this off before any other work we give the handshake the
+    //    earliest possible head-start — typically ~50–150 ms of raw
+    //    wall-clock savings vs. running this after playCallOpen's
+    //    setup work.
+    this._connect();
+    if (this._phaseTimestamps) {
+      this._phaseTimestamps.wsCreatedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this._logPhase('ws_created', this._phaseTimestamps.placeCallAt, this._phaseTimestamps.wsCreatedAt);
     }
 
-    // Start local STT (user side only) — only runs when server has
-    // GEMINI_TRANSCRIPTION=false AND SHOW_TEXT=true. Try the Whisper
-    // controller first; fall back to Web Speech if unavailable.
+    // 3. FIRE mic permission / getUserMedia. Gesture lineage is
+    //    preserved because we're still inside the click-tick (no await
+    //    has happened yet). If the user hasn't granted mic before, the
+    //    prompt appears now and the user can click Allow while the
+    //    audio is already playing and the WS is already opening.
+    if (this._phaseTimestamps) {
+      this._phaseTimestamps.micRequestedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this._logPhase('mic_requested', this._phaseTimestamps.placeCallAt, this._phaseTimestamps.micRequestedAt);
+    }
+    const micPromise = this._openMic()
+      .then((result) => {
+        if (this._phaseTimestamps) {
+          this._phaseTimestamps.micReadyAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+          this._logPhase('mic_ready', this._phaseTimestamps.placeCallAt, this._phaseTimestamps.micReadyAt);
+        }
+        return result;
+      })
+      .catch((err) => {
+        dlog('placeCall mic open failed', err && err.message);
+        this._setState(STATES.ERROR, 'mic_failed');
+        this._tearDownCall();
+        throw err;
+      });
+
+    // 4. FIRE the STT controller dynamic import in parallel with
+    //    everything else. Non-blocking — starts the chunk fetch so the
+    //    worker + WASM are warm by the time the user actually speaks.
     this._ensureSttController().then((ctrl) => {
       if (ctrl) {
         try { ctrl.start(); } catch {}
@@ -517,9 +727,78 @@ export class VoiceAgent extends EventTarget {
       if (this.localStt && this.localStt.supported) this.localStt.start();
     });
 
-    // Open the WS (non-blocking — onopen handles the rest).
-    this._connect();
+    // 5. FIRE the callOpen audio clip LAST in the click-tick. The WS +
+    //    mic + STT imports are now all racing; the ~15.7 s audio runs
+    //    in parallel with them. `playCallOpen` never rejects — the
+    //    wrapper IIFE swallows any controller surprises.
+    //
+    //    Round-4: BOTH the listen gate (capture → upstream) AND the
+    //    playback gate (agent PCM → speakers) are now tied to the
+    //    actual `ended` event — not the round-2 "last 1 second" lead.
+    //    The `onAudioEnded` callback fires once on `ended` / `short_clip`
+    //    / fallback reasons. `listenGateLeadMs: 0` disables the
+    //    near-end preview callback completely. Direct consequence of
+    //    the user's round-4 directive: "THE AGENT SHOULD ONLY START
+    //    SPEAKING AND LISTENING ONCE THE CALL OPEN AUDIO IS FINISHED
+    //    PLAYING".
+    if (this._phaseTimestamps) {
+      this._phaseTimestamps.audioPlayStartedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this._logPhase('audio_play_started', this._phaseTimestamps.placeCallAt, this._phaseTimestamps.audioPlayStartedAt);
+    }
+    this._callOpenPromise = (async () => {
+      try {
+        await this.pipeline.callAudio.playCallOpen({
+          listenGateLeadMs: 0,
+          onAudioEnded: ({ reason }) => {
+            if (this._phaseTimestamps && this._phaseTimestamps.audioEndedAt == null) {
+              this._phaseTimestamps.audioEndedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+              this._logPhase('audio_ended', this._phaseTimestamps.placeCallAt, this._phaseTimestamps.audioEndedAt);
+            }
+            this._onCallOpenEnded(reason);
+          }
+        });
+      } catch { /* controller never rejects but defend anyway */ }
+      this._callOpenSettled = true;
+      this._tryOpenGreetGate('call_open_ended');
+    })();
+
+    // 6. AWAIT the mic promise so the public `placeCall()` return
+    //    reflects ok/fail. The WS + audio are already racing in the
+    //    background — this await does NOT block setup_complete. On
+    //    Chrome with a prior permission grant this resolves in ~10–50
+    //    ms; first-time users see a prompt. Either way,
+    //    `setup_complete` can land before `micPromise` resolves — the
+    //    listen-gate only opens when BOTH gates AND the mic is
+    //    actually open (we don't forward frames from a non-existent
+    //    capture graph).
+    try {
+      await micPromise;
+    } catch {
+      return false;
+    }
     return true;
+  }
+
+  /** Round-6 fix 2: unwire the deterministic end-call waiters. Safe
+   *  to call even if nothing was armed. Called from teardown paths
+   *  + early-kill (user click interrupting the wait). */
+  _cancelAgentEndingWait(why) {
+    if (!this._agentEndingArmed && !this._agentEndingTimer && !this._agentEndingListeners && !this._agentEndingGraceTimer) return;
+    dlog('agent-end-call wait cancelled why=' + (why || '?'));
+    this._agentEndingArmed = false;
+    if (this._agentEndingTimer) {
+      clearTimeout(this._agentEndingTimer);
+      this._agentEndingTimer = null;
+    }
+    if (this._agentEndingGraceTimer) {
+      clearTimeout(this._agentEndingGraceTimer);
+      this._agentEndingGraceTimer = null;
+    }
+    if (this._agentEndingListeners) {
+      try { this.removeEventListener('turn-complete', this._agentEndingListeners.onTurnComplete); } catch {}
+      try { this.pipeline.removeEventListener('agent-playback-drained', this._agentEndingListeners.onAgentDrained); } catch {}
+      this._agentEndingListeners = null;
+    }
   }
 
   /**
@@ -528,6 +807,7 @@ export class VoiceAgent extends EventTarget {
    */
   async cancelDial() {
     if (this.state !== STATES.DIALING && this.state !== STATES.LIVE_OPENING) return;
+    this._cancelAgentEndingWait('cancelDial');
     dlog('cancelDial: user initiated');
     await this._gracefullyEndCall('user_cancel');
   }
@@ -535,16 +815,39 @@ export class VoiceAgent extends EventTarget {
   /**
    * User clicked End Call. Graceful: send server close, fade ambient,
    * close mic + WS, return to IDLE.
+   *
+   * Round-6 fix 2: if a deterministic agent-end-call wait is armed,
+   * skip it entirely — user intent wins. Round-1 req 7 ("immediate
+   * stop on user click") is preserved — we cut through the wait and
+   * run teardown synchronously.
    */
   async endCall() {
+    if (this._agentEndingArmed) {
+      dlog('endCall: user overrode pending agent_end_call wait');
+      this._cancelAgentEndingWait('endCall_user_override');
+    }
     if (!this.isInCall() && this.state !== STATES.DIALING) return;
     dlog('endCall: user initiated');
     await this._gracefullyEndCall('user_end');
   }
 
   async _gracefullyEndCall(reason) {
+    // audio-flow: idempotent — the end-call sequence can be triggered by
+    // a user click, a server `end_call_requested` frame, AND the agent's
+    // own `end_call` tool in close succession. Use a latch so the
+    // endCall chime plays exactly once, the WS closes exactly once, and
+    // the state machine transitions exactly once.
+    if (this._endingCall) {
+      dlog('_gracefullyEndCall skipped — already ending (reason=' + reason + ')');
+      return;
+    }
+    this._endingCall = true;
+    // Round-6 fix 2: cancel any armed deterministic-end-call wait.
+    // If the user clicked End Call while we were waiting for
+    // turn_complete + agent-playback-drained, skip the wait and kill.
+    this._cancelAgentEndingWait('_gracefullyEndCall');
+
     const prevState = this.state;
-    // _setState(CLOSING) drives _updateAmbient → OFF with fade-out.
     this._setState(STATES.CLOSING, reason);
     this.closedByUser = true;
     clearTimeout(this.dialTimer); this.dialTimer = null;
@@ -554,26 +857,114 @@ export class VoiceAgent extends EventTarget {
       try { this._sttController.stop(); } catch {}
     }
 
-    // Flush any in-flight playback (no more Jarvis audio).
-    this.pipeline.flushPlayback();
-    if (this.transcript) this.transcript.turnBreak();
+    // Round-8: two strictly-distinct end-call paths.
+    //
+    // AGENT path (`agent_end_call` / `agent_end_call_timeout`):
+    //   • The deterministic chain already waited for turn_complete +
+    //     agent-playback-drained. Agent audio has physically left the
+    //     speakers; agent's last sample is silent.
+    //   • Stop background (so the chime plays against silence).
+    //   • Play callClose in full, await its onended.
+    //   • Round-8 A.4: background off → brief silence → chime → teardown.
+    //
+    // USER path (`user_end` / `user_cancel`):
+    //   • User clicked End Call. Round-8 Path B: ZERO audio, ZERO wait.
+    //   • The UI click handler has ALREADY synchronously called
+    //     `pipeline.stopAllAudio()` which latched `_hardKilled=true`
+    //     and stopped every source. The `_agentEndingArmed` wait (if
+    //     armed) was already cancelled by `endCall()`.
+    //   • We DO NOT call `armForNextCall()` here — that would clear
+    //     the hard-kill latch right before we try to play callClose.
+    //     We DO NOT call `playCallClose()` at all. The latch is cleared
+    //     naturally at the top of the NEXT `placeCall()`.
+    //   • Skip straight to WS close + state reset. Same-frame teardown.
+    const isAgentPath = reason === 'agent_end_call' || reason === 'agent_end_call_timeout';
 
-    // Tell the server we're done — they'll close upstream cleanly.
-    try { this._sendJson({ type: 'call_end' }); } catch {}
+    this.pipeline.setCapturePaused(true);
+    this.preSetupBuffer = [];
+    this.preSetupBytes = 0;
+
+    // Round-6 fix 2: phase-logged end-call trace. Always-on so a
+    // regression is obvious in the console without a debug flag.
+    const teardownAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    // eslint-disable-next-line no-console
+    console.log('[jarvis phase] end_call_teardown_start reason=' + reason + ' path=' + (isAgentPath ? 'agent' : 'user'));
+
+    let closeOutcome = { ok: true, reason: 'skipped_user_path' };
+
+    if (isAgentPath) {
+      // Agent path only: stop background cleanly, then play callClose.
+      // `stopAllCallAudio` latches `_hardKilled=true` + stops background
+      // + stops any in-flight callOpen source (no-op by this point since
+      // callOpen ended ~conversation-ago). It does NOT touch callClose
+      // (round-6 fix 2 kept callClose untouched there so play works).
+      try { this.pipeline.callAudio.stopAllCallAudio(); } catch {}
+      // Clear the hard-kill latch JUST for the end-call chime. Safe on
+      // the agent path because the user hasn't asked for silence.
+      try { this.pipeline.callAudio.armForNextCall(); } catch {}
+      if (this.transcript) this.transcript.turnBreak();
+
+      // Tell the server we're done — they'll close upstream cleanly.
+      try { this._sendJson({ type: 'call_end' }); } catch {}
+
+      // Play the end-call chime. `playCallClose` is an
+      // AudioBufferSourceNode (round 7) — deterministic `onended`
+      // fires exactly once. Awaited so the UI doesn't flip to green
+      // until the chime is physically done.
+      try { closeOutcome = await this.pipeline.callAudio.playCallClose(); } catch {}
+    } else {
+      // User path: ZERO audio. The UI click handler already called
+      // `pipeline.stopAllAudio()` — `_hardKilled` is true, every
+      // source is stopped, background is paused. We do NOT re-arm
+      // (`armForNextCall` is deliberately skipped — it would unlatch
+      // the hard-kill and allow a stray late `playCallClose` call to
+      // succeed). The latch is cleared naturally at the top of the
+      // next `placeCall()`.
+      //
+      // Defensive belt: call stopAllAudio again here in case the
+      // current _gracefullyEndCall entrypoint wasn't preceded by the
+      // UI's explicit call (e.g. programmatic `agent.endCall()` from
+      // a test or a future code path).
+      try { this.pipeline.stopAllAudio(); } catch {}
+      if (this.transcript) this.transcript.turnBreak();
+
+      // Tell the server we're done. No callClose — user wanted instant.
+      try { this._sendJson({ type: 'call_end' }); } catch {}
+      closeOutcome = { ok: true, reason: 'skipped_user_path' };
+    }
+
+    const closeEndedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    // eslint-disable-next-line no-console
+    console.log('[jarvis phase] end_call_chime_done ms=' + Math.round(closeEndedAt - teardownAt) + ' outcome=' + (closeOutcome && closeOutcome.reason));
 
     // Close mic + WS.
     try { await this._closeMic(); } catch {}
     this.pipeline.stopCapture();
-    try { if (this.ws) this.ws.close(); } catch {}
+    try { if (this.ws) this.ws.close(1000, 'call-ended'); } catch {}
     this.ws = null;
 
     this._callActive = false;
     this._greetingSent = false;
+    this._greetGateOpened = false;
+    this._callOpenSettled = false;
+    this._callOpenPromise = null;
     this.setupComplete = false;
     this.preSetupBuffer = [];
     this.preSetupBytes = 0;
     this.liveStartedAt = null;
     this.liveLastVoiceAt = null;
+    this._phaseTimestamps = null; // latency-pass: reset so next call restamps
+    // Round-3 fix 1: close the init span label so a re-placeCall doesn't
+    // collide on the same console.time label. No-op if already closed.
+    if (this._initSpanLabel && typeof console !== 'undefined' && typeof console.timeEnd === 'function') {
+      try { console.timeEnd(this._initSpanLabel); } catch {}
+    }
+    this._initSpanLabel = null;
+    // Round-2 req 3: reset listen-gate flags so the next call starts
+    // with both gates closed.
+    this._listenGateOpen = false;
+    this._listenGateSetupComplete = false;
+    this._listenGateFallbackLogged = false;
 
     // Announce in the transcript so the user has a visual confirmation.
     this._announce({ from: 'system', text: 'Call ended.' });
@@ -587,6 +978,7 @@ export class VoiceAgent extends EventTarget {
       this._setState(STATES.IDLE);
     }
 
+    this._endingCall = false;
     this._persistSessionBlob();
     this._publishEvent('call-ended', { reason, prevState });
   }
@@ -595,25 +987,39 @@ export class VoiceAgent extends EventTarget {
   _tearDownCall() {
     clearTimeout(this.dialTimer); this.dialTimer = null;
     clearInterval(this.liveIdleTimer); this.liveIdleTimer = null;
+    // Round-6 fix 2: cancel any armed deterministic end-call wait.
+    this._cancelAgentEndingWait('_tearDownCall');
     if (this.localStt) this.localStt.stop();
     if (this._sttController) {
       try { this._sttController.stop(); } catch {}
     }
-    this.pipeline.flushPlayback();
+    // audio-flow: hard-stop ALL call-audio on error. No end-chime here —
+    // this path is for invalid keys / mic death, not user intent. The
+    // hard-kill latch is cleared next time placeCall() runs.
+    try { this.pipeline.stopAllAudio(); } catch {}
     this.pipeline.stopCapture();
     try { if (this.ws) this.ws.close(); } catch {}
     this.ws = null;
     this._callActive = false;
     this._greetingSent = false;
+    this._greetGateOpened = false;
+    this._callOpenSettled = false;
+    this._callOpenPromise = null;
     this.setupComplete = false;
     this.preSetupBuffer = [];
     this.preSetupBytes = 0;
     this.liveStartedAt = null;
     this.liveLastVoiceAt = null;
-    // Ambient follows isInCall() via _updateAmbient when state becomes
-    // ERROR (which the caller of _tearDownCall typically sets first).
-    // Defensive call in case caller didn't transition state:
-    this._updateAmbient();
+    this._phaseTimestamps = null; // latency-pass: reset so next call restamps
+    // Round-3 fix 1: close the init span label (see _gracefullyEndCall).
+    if (this._initSpanLabel && typeof console !== 'undefined' && typeof console.timeEnd === 'function') {
+      try { console.timeEnd(this._initSpanLabel); } catch {}
+    }
+    this._initSpanLabel = null;
+    // Round-2 req 3: reset listen-gate flags.
+    this._listenGateOpen = false;
+    this._listenGateSetupComplete = false;
+    this._listenGateFallbackLogged = false;
   }
 
   _armDialTimer() {
@@ -630,24 +1036,39 @@ export class VoiceAgent extends EventTarget {
 
   // ---------- Preferences ----------
 
+  /** Round-2 req 2: ship-time default is 'full'. Two persistence keys
+   *  are honoured:
+   *    • `liveAgent.transcriptMode` — canonical key going forward.
+   *    • `jarvis.ui.transcriptMode` — legacy key (backward compatible);
+   *      values read from here are migrated to the new key on the next
+   *      save so old browser caches don't lose their preference.
+   *  A missing / unrecognised value falls through to the 'full' default. */
   _loadTranscriptMode() {
     try {
-      const raw = localStorage.getItem('jarvis.ui.transcriptMode');
-      if (raw === 'off' || raw === 'captions' || raw === 'full') return raw;
+      const canonical = localStorage.getItem(TRANSCRIPT_MODE_STORAGE_KEY);
+      if (canonical === 'off' || canonical === 'captions' || canonical === 'full') return canonical;
+      const legacy = localStorage.getItem(TRANSCRIPT_MODE_LEGACY_KEY);
+      if (legacy === 'off' || legacy === 'captions' || legacy === 'full') {
+        try { localStorage.setItem(TRANSCRIPT_MODE_STORAGE_KEY, legacy); } catch {}
+        return legacy;
+      }
     } catch {}
-    return 'off';
+    return DEFAULT_TRANSCRIPT_MODE;
   }
 
   /** Persist + broadcast a transcript display mode. Server override takes
-   *  precedence at render time (see `getTranscriptMode`). */
+   *  precedence at render time (see `getTranscriptMode`). Writes to the
+   *  canonical key; the legacy key is kept in sync so a downgrade to an
+   *  older build still picks up the user's choice. */
   setTranscriptMode(mode) {
-    const next = (mode === 'off' || mode === 'captions' || mode === 'full') ? mode : 'off';
+    const next = (mode === 'off' || mode === 'captions' || mode === 'full') ? mode : DEFAULT_TRANSCRIPT_MODE;
     if (next === this.transcriptMode) {
       this._publishEvent('transcript-mode-changed', { mode: this.getTranscriptMode(), serverForced: !this.flags.showText });
       return next;
     }
     this.transcriptMode = next;
-    try { localStorage.setItem('jarvis.ui.transcriptMode', next); } catch {}
+    try { localStorage.setItem(TRANSCRIPT_MODE_STORAGE_KEY, next); } catch {}
+    try { localStorage.setItem(TRANSCRIPT_MODE_LEGACY_KEY, next); } catch {}
     this._publishEvent('transcript-mode-changed', { mode: this.getTranscriptMode(), serverForced: !this.flags.showText });
     return next;
   }
@@ -673,64 +1094,92 @@ export class VoiceAgent extends EventTarget {
     this._publishEvent('transcript-cleared', {});
   }
 
-  setCompressionEnabled(on) {
-    // Binary callers map to strength 50 (default phone) or 0 (pass-through).
-    this.setCompressionStrength(on ? 50 : 0);
-  }
-
-  /** Continuous-strength setter. 0 = pass-through, 50 = default phone,
-   *  100 = heavy walkie-talkie. Ramps params (no clicks), persists to
-   *  localStorage + session blob, broadcasts `compression-changed`. */
-  setCompressionStrength(strength) {
-    const s = Math.max(0, Math.min(100, Number(strength) || 0));
-    if (s === this.compressionStrength) {
-      // Still republish so UI can reconcile disabled state if caller
-      // toggled the parent switch without changing strength.
-      this.compressionEnabled = s > 0;
-      this.pipeline.setCompressionStrength(s);
-      return;
+  // audio-flow: background-audio toggle. Persists to localStorage and
+  // takes effect immediately — if enabled mid-call, starts the loop; if
+  // disabled mid-call, stops it. Fires `background-changed` so the UI
+  // can reflect the state without reading private fields.
+  setBackgroundEnabled(on) {
+    const next = !!on;
+    if (next === this.backgroundEnabled) {
+      this._publishEvent('background-changed', { enabled: this.backgroundEnabled, playing: this.pipeline.callAudio.isBackgroundPlaying() });
+      return next;
     }
-    this.compressionStrength = s;
-    this.compressionEnabled = s > 0;
-    this.pipeline.setCompressionStrength(s);
-    try { localStorage.setItem('jarvis.compressionStrength', String(s)); } catch {}
-    this._persistSessionBlob();
-    this._publishEvent('compression-changed', { strength: s, enabled: this.compressionEnabled });
-  }
-
-  getCompressionStrength() { return this.compressionStrength; }
-
-  _loadCompressionStrength(restored) {
+    this.backgroundEnabled = next;
+    try { localStorage.setItem(BACKGROUND_AUDIO_STORAGE_KEY, next ? 'on' : 'off'); } catch {}
     try {
-      const raw = localStorage.getItem('jarvis.compressionStrength');
-      if (raw != null && raw !== '') {
-        const n = Number(raw);
-        if (Number.isFinite(n)) return Math.max(0, Math.min(100, n));
+      this.pipeline.callAudio.setBackgroundEnabled(next);
+      // Mid-call: start or stop the loop to match the new preference.
+      if (this.isInCall() && this._greetGateOpened) {
+        if (next) this.pipeline.callAudio.startBackground();
+        else this.pipeline.callAudio.stopBackground();
       }
     } catch {}
-    if (restored && Number.isFinite(Number(restored.compressionStrength))) {
-      return Math.max(0, Math.min(100, Number(restored.compressionStrength)));
-    }
-    if (restored && typeof restored.compression === 'boolean') {
-      return restored.compression ? 50 : 0;
-    }
-    return DEFAULT_COMPRESSION_ENABLED ? 50 : 0;
+    this._publishEvent('background-changed', { enabled: next, playing: this.pipeline.callAudio.isBackgroundPlaying() });
+    return next;
   }
-  setNoiseMode(mode) {
-    this.noiseMode = String(mode || 'off');
-    this.pipeline.setNoiseMode(this.noiseMode);
-    // Delegate to the single ambient driver — respects isInCall() and
-    // the updated noiseMode together.
-    this._updateAmbient();
-    this._persistSessionBlob();
-    this._publishEvent('noise-changed', { mode: this.noiseMode, volume: this.noiseVolume });
+
+  _loadBackgroundEnabled() {
+    try {
+      const raw = localStorage.getItem(BACKGROUND_AUDIO_STORAGE_KEY);
+      if (raw === 'on')  return true;
+      if (raw === 'off') return false;
+    } catch {}
+    return DEFAULT_BACKGROUND_ENABLED;
   }
-  setNoiseVolume(v) {
-    const n = Number(v);
-    this.noiseVolume = Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
-    this.pipeline.setNoiseVolume(this.noiseVolume);
-    this._persistSessionBlob();
-    this._publishEvent('noise-changed', { mode: this.noiseMode, volume: this.noiseVolume });
+
+  // audio-flow: phone-line compression toggle. Persists to localStorage
+  // and applies immediately via a 50ms crossfade inside the pipeline.
+  // Safe to call pre-call (graph not yet built) or mid-call.
+  setPhoneCompression(on) {
+    const next = !!on;
+    if (next === this.phoneCompression) {
+      this._publishEvent('phone-compression-changed', { enabled: this.phoneCompression });
+      return next;
+    }
+    this.phoneCompression = next;
+    try { localStorage.setItem(PHONE_COMPRESSION_STORAGE_KEY, next ? 'on' : 'off'); } catch {}
+    try { this.pipeline.setPhoneCompression(next); } catch {}
+    // audio-prefs: tell the server so it can re-negotiate the output
+    // bitrate. No-op pre-call (WS is closed) — the hello frame will
+    // include the fresh preference on the next placeCall.
+    this._sendJson({ type: 'audio_prefs', phoneLine: next });
+    this._publishEvent('phone-compression-changed', { enabled: next });
+    return next;
+  }
+
+  /** latency-pass: record a client-side decode span (ms). Bounded buffer;
+   *  read by the debug HUD. */
+  _recordDecodeLatency(ms) {
+    if (!this._decodeLatencyBuf) this._decodeLatencyBuf = [];
+    this._decodeLatencyBuf.push(Number(ms) || 0);
+    if (this._decodeLatencyBuf.length > 256) this._decodeLatencyBuf.shift();
+  }
+
+  /** latency-pass: percentiles for the HUD. Returns `{p50, p95, max, n}` in
+   *  milliseconds. */
+  getDecodeLatencyStats() {
+    const arr = (this._decodeLatencyBuf || []).slice().sort((a, b) => a - b);
+    if (arr.length === 0) return { p50: 0, p95: 0, max: 0, n: 0 };
+    return {
+      p50: arr[Math.floor(arr.length * 0.50)] || 0,
+      p95: arr[Math.floor(arr.length * 0.95)] || 0,
+      max: arr[arr.length - 1] || 0,
+      n: arr.length
+    };
+  }
+
+  /** latency-pass: current agent-audio rate the playback graph is
+   *  decoding at. Exposed for the HUD. */
+  getAgentAudioRate() { return this._agentAudioRate || 24000; }
+  getAgentAudioPhoneLine() { return !!this._agentAudioPhoneLine; }
+
+  _loadPhoneCompression() {
+    try {
+      const raw = localStorage.getItem(PHONE_COMPRESSION_STORAGE_KEY);
+      if (raw === 'on')  return true;
+      if (raw === 'off') return false;
+    } catch {}
+    return DEFAULT_PHONE_COMPRESSION;
   }
 
   /** Advanced-setting: switch between live-call and wake-word modes.
@@ -764,6 +1213,10 @@ export class VoiceAgent extends EventTarget {
     if (!this.personas.some((p) => p.id === id)) return;
     if (id === this.personaId) return;
     this.personaId = id;
+    // Round-2 req 2: mirror persona into localStorage so cross-session
+    // restarts remember the pick (session blob still carries it for
+    // in-tab resumption).
+    try { localStorage.setItem(PERSONA_STORAGE_KEY, id); } catch {}
     // If we're mid-call, a persona switch closes + reopens the upstream.
     // Reset setup gate and re-send.
     if (this.isInCall()) {
@@ -784,6 +1237,12 @@ export class VoiceAgent extends EventTarget {
     this.setupComplete = false;
     this.preSetupBuffer = [];
     this.preSetupBytes = 0;
+    // Round-2 req 3: the setup-complete half of the listen-gate must
+    // close too so a persona-switch / reconnect doesn't keep forwarding
+    // mic frames while the upstream is handshaking again.
+    this._listenGateSetupComplete = false;
+    // Proactively pause capture until the new setup_complete arrives.
+    try { this.pipeline.setCapturePaused(true); } catch {}
   }
 
   setMuted(muted) {
@@ -836,9 +1295,32 @@ export class VoiceAgent extends EventTarget {
   }
 
   async _openMic() {
-    await this._ensureCaptureStarted();
-    this.pipeline.setCapturePaused(false);
-    return true;
+    // latency-pass: guard against concurrent opens. The parallel-dial change
+    // in placeCall() + the defensive `if (!this.pipeline.capture) _openMic()`
+    // fallback in _onSetupComplete can race if WS reaches setup_complete
+    // before getUserMedia resolves. Without this cache, two concurrent
+    // _ensureCaptureStarted() calls would each fire getUserMedia, allocate
+    // two MediaStreams, and leak one worklet + one track. A single shared
+    // promise ensures exactly one capture graph is built per call.
+    //
+    // Round-2 req 3: the hardware mic is opened here but capture stays
+    // PAUSED (no frames forwarded upstream) until the listening gates
+    // are both open. `_openListenGateIfReady()` is the single call-site
+    // that un-pauses, triggered by `_onListenGateFromAudio` (callOpen
+    // reached last 1 s) AND `_onSetupComplete` (upstream ready).
+    if (this._openMicPromise) return this._openMicPromise;
+    this._openMicPromise = (async () => {
+      try {
+        await this._ensureCaptureStarted();
+        // Hardware is live; frame forwarder remains paused until the
+        // gate opens. `startCapture` initialises `capturePaused = true`.
+        this._openListenGateIfReady('mic_open');
+        return true;
+      } finally {
+        this._openMicPromise = null;
+      }
+    })();
+    return this._openMicPromise;
   }
 
   async _closeMic() {
@@ -846,21 +1328,62 @@ export class VoiceAgent extends EventTarget {
   }
 
   // ---------- WebSocket lifecycle (only used while a call is active) ----------
+  //
+  // Nonce flow: before every WS open we fetch a fresh single-use token from
+  // /api/ws-nonce and pass it via `?token=`. The request is small (~60 B
+  // JSON response) and resolves in ~1 RTT — we pipeline it alongside mic +
+  // audio in placeCall so there's zero net increase in perceived latency.
+  // A fetched nonce older than its exp is rejected by the server; stale
+  // tokens from a previous attempt are never reused.
+  async _fetchWsNonce() {
+    try {
+      const r = await fetch('/api/ws-nonce', { cache: 'no-store' });
+      if (!r.ok) return null;
+      const j = await r.json();
+      if (!j || typeof j.nonce !== 'string' || !j.nonce) return null;
+      return j.nonce;
+    } catch {
+      return null;
+    }
+  }
+
   _connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    this.wsUrl = `${proto}://${location.host}/api/live`;
     this._setState(STATES.LIVE_OPENING);
-    try {
-      this.ws = new WebSocket(this.wsUrl);
-      this.ws.binaryType = 'arraybuffer';
-    } catch (err) {
-      this._setState(STATES.ERROR, 'ws_failed');
-      this._tearDownCall();
-      return;
-    }
+    // Fetch a fresh nonce first. The WS open is the inner callback so we
+    // never open without a token when the server requires one.
+    this._fetchWsNonce().then((token) => {
+      if (!this._callActive && !this.isInCall()) return; // user cancelled
+      const qs = token ? ('?token=' + encodeURIComponent(token)) : '';
+      this.wsUrl = `${proto}://${location.host}/api/live${qs}`;
+      try {
+        this.ws = new WebSocket(this.wsUrl);
+        this.ws.binaryType = 'arraybuffer';
+        // latency-pass: confirm in the console that the handshake uses a
+        // nonce. Only when debug=1 — do not spam prod logs.
+        if (DEBUG) {
+          // eslint-disable-next-line no-console
+          console.log('[jarvis] ws nonce handshake', token ? 'ok' : 'skipped');
+        }
+      } catch (err) {
+        this._setState(STATES.ERROR, 'ws_failed');
+        this._tearDownCall();
+        return;
+      }
+      this._attachWsListeners();
+    });
+  }
+
+  _attachWsListeners() {
     this.ws.onopen = () => {
       this.reconnectIdx = 0;
       this.metrics.connectedAt = Date.now();
+      // latency-pass: record WS-open time so we can diff against placeCall
+      // click. Zero-cost when phase telemetry isn't enabled.
+      if (this._phaseTimestamps) {
+        this._phaseTimestamps.wsOpenAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        this._logPhase('ws_open', this._phaseTimestamps.placeCallAt, this._phaseTimestamps.wsOpenAt);
+      }
       const elements = scanAgentElements();
       dlog('ws onopen, sending hello mode=' + this.mode + ' resume=' + (this.resumeHandle ? 'yes' : 'no'));
       const hello = {
@@ -874,6 +1397,22 @@ export class VoiceAgent extends EventTarget {
       if (this.resumeHandle) {
         hello.resumeHandle = this.resumeHandle;
         hello.resumeHandleIssuedAt = this.resumeHandleIssuedAt || Date.now();
+      }
+      // audio-prefs: piggyback the current phone-line compression state on
+      // hello so the very first agent-audio chunk lands at the right rate
+      // — no first-chunk resample cost and no extra round-trip.
+      hello.audioPrefs = { phoneLine: !!this.phoneCompression };
+      // latency-pass: piggyback the greeting inject on `hello` when this WS
+      // open is for a fresh placeCall (not a reconnect / persona-switch /
+      // mode-switch). Server honours `greet.{page,title}` by injecting the
+      // <call_initiated> block as soon as the upstream is ready — one RTT
+      // faster than the prior flow (wait for setup_complete, THEN send
+      // call_start). The server acks with `eagerGreetAck:true` so we know
+      // to skip the follow-up call_start.
+      if (this._callActive && !this._greetingSent) {
+        const page = this._currentPathname || location.pathname;
+        const title = (document.title || '').slice(0, 120);
+        hello.greet = { page, title };
       }
       this._sendJson(hello);
     };
@@ -924,7 +1463,33 @@ export class VoiceAgent extends EventTarget {
       this.metrics.framesIn += 1;
       this.metrics.audioBytesIn += data.byteLength;
       dlog('audio frame bytes=' + data.byteLength, 'samples=' + pcm.length, 'ctx=' + (this.pipeline.ctx ? this.pipeline.ctx.state : 'none'));
-      this.pipeline.enqueuePcm24k(pcm);
+      // Round-5 safety-belt: agent audio must never arrive before
+      // callOpen has settled. The upstream gates greeting generation on
+      // `greet_gate_open` (client sends that after callOpen.ended), so
+      // if this branch logs anything, something in the server-side
+      // gating has regressed. Logged at error level so regressions are
+      // LOUD in DevTools. One-shot per call to avoid spam.
+      if (!this._callOpenSettled && !this._preSettleAudioWarned) {
+        this._preSettleAudioWarned = true;
+        // eslint-disable-next-line no-console
+        console.error('[jarvis] agent audio arrived before callOpen.ended — server-side greeting gate regression. bytes=' + data.byteLength);
+      }
+      // latency-pass: stamp first-token for perceived-response-start. Diff
+      // against firstFrameSentAt is the priority-2 bucket (user spoke → Jarvis
+      // starts speaking).
+      if (this._phaseTimestamps && this._phaseTimestamps.firstTokenAt == null) {
+        this._phaseTimestamps.firstTokenAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        if (this._phaseTimestamps.firstFrameSentAt != null) {
+          this._logPhase('first_audio_frame_sent_to_first_token', this._phaseTimestamps.firstFrameSentAt, this._phaseTimestamps.firstTokenAt);
+        }
+        this._logPhase('setup_complete_to_first_token', this._phaseTimestamps.setupCompleteAt || this._phaseTimestamps.placeCallAt, this._phaseTimestamps.firstTokenAt);
+      }
+      // latency-pass: measure client-side decode (just the int16→buffer
+      // copy and schedule). Useful HUD signal when debug=1.
+      const _tDec0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this.pipeline.enqueuePcm24k(pcm, this._agentAudioRate || 24000);
+      const _tDec1 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this._recordDecodeLatency(_tDec1 - _tDec0);
       this._setState(STATES.MODEL_SPEAKING);
     }
   }
@@ -932,9 +1497,47 @@ export class VoiceAgent extends EventTarget {
   _onServerMessage(msg) {
     dlog('server msg', msg.type, msg.state || msg.from || msg.code || '');
     switch (msg.type) {
+      case 'audio_format': {
+        // audio-prefs: server authoritative frame declaring the current
+        // sample rate for incoming agent PCM. We store it so
+        // `enqueuePcm` schedules buffers at the right rate.
+        const rate = Math.max(4000, Math.min(48000, Number(msg.outSampleRate) || 24000));
+        this._agentAudioRate = rate;
+        this._agentAudioPhoneLine = !!msg.phoneLine;
+        if (DEBUG) {
+          // eslint-disable-next-line no-console
+          console.log('[jarvis] audio_format codec=' + (msg.codec || '?') + ' rate=' + rate + ' phoneLine=' + !!msg.phoneLine);
+        }
+        this._publishEvent('audio-format-changed', {
+          outSampleRate: rate,
+          phoneLine: !!msg.phoneLine
+        });
+        return;
+      }
+      case 'encode_stats': {
+        // latency-pass: HUD-only telemetry from the server. Re-dispatch
+        // as a generic `server-frame` so the ui.js HUD can consume it
+        // without adding a bespoke listener on every new frame type.
+        this._publishEvent('server-frame', msg);
+        return;
+      }
       case 'hello_ack':
         if (Array.isArray(msg.personas) && msg.personas.length) this.personas = msg.personas;
         if (msg.mode && msg.mode !== this.mode) this.mode = msg.mode;
+        // latency-pass: server confirms it will auto-inject <call_initiated>
+        // on the first upstream message. Mark the greeting as sent so the
+        // setup_complete handler doesn't issue a redundant `call_start`.
+        // greeting-fix: only trust the ack when _callActive AND the server
+        // actually set the flag. If the ack is false (server decided not to
+        // eager-inject, e.g. hello.greet was missing or malformed), the
+        // setup_complete handler falls through and issues call_start as
+        // before — no silent failure mode.
+        if (msg.eagerGreetAck === true && this._callActive) {
+          this._greetingSent = true;
+          this.pageContextInjected = true;
+          this._logPhase('eager_greet_ack', this._phaseTimestamps && this._phaseTimestamps.placeCallAt, typeof performance !== 'undefined' ? performance.now() : Date.now());
+          dlog('eager-greet ack received — skipping follow-up call_start');
+        }
         this._publishEvent('personas-ready', { personas: this.personas });
         return;
       case 'setup_complete':
@@ -970,6 +1573,111 @@ export class VoiceAgent extends EventTarget {
         this._setState(STATES.TOOL_EXECUTING, msg.name);
         this.toolRegistry.handleToolCall(msg);
         return;
+      case 'end_call_requested': {
+        // Round-6 fix 2: DETERMINISTIC end-call chain.
+        //
+        // No more timer guess (was 3 s). The model decides to hang up
+        // and produces its sign-off audio; we wait for two discrete,
+        // deterministic signals before proceeding:
+        //   1. `turn-complete` from Gemini — the model has finished
+        //      generating audio for this turn (i.e. "Have a nice day!"
+        //      is fully produced, including the trailing silence
+        //      Gemini puts at the end of a turn).
+        //   2. `agent-playback-drained` from the pipeline — every
+        //      scheduled AudioBufferSourceNode has drained (i.e. the
+        //      last PCM sample has left the speakers).
+        // When BOTH have fired, `_gracefullyEndCall` runs and plays
+        // the callClose chime.
+        //
+        // Idempotent: `_agentEndingArmed` latches on first fire so a
+        // duplicate frame is dropped.
+        //
+        // Safety timeout: 10 s wallclock after we arm. If Gemini
+        // silently dies between tool ack and turn_complete, we proceed
+        // with teardown so the call doesn't hang forever. Logged at
+        // error level so it's visible in DevTools.
+        //
+        // User kill during the wait: `endCall()` calls
+        // `_gracefullyEndCall` directly with `reason='user_end'` which
+        // short-circuits the wait (idempotent latch in
+        // `_gracefullyEndCall` means the second call is a no-op).
+        dlog('end_call_requested reason=' + (msg.reason || '—'));
+        if (this._agentEndingArmed) {
+          dlog('end_call_requested duplicate — already armed');
+          return;
+        }
+        this._agentEndingArmed = true;
+        this._agentTurnComplete = false;
+        this._agentAudioDrained = !this.pipeline.isAgentAudioPlaying();
+        const reasonForLog = msg.reason || null;
+        this._publishEvent('agent-end-call-pending', { reason: reasonForLog });
+
+        const tryFinish = (trigger) => {
+          if (!this._agentEndingArmed) return;
+          if (!this._agentTurnComplete || !this._agentAudioDrained) {
+            dlog('agent-end-call waiting — turn=' + this._agentTurnComplete +
+              ' drained=' + this._agentAudioDrained + ' via=' + trigger);
+            // end-call-latency: once audio has drained (user heard the
+            // last word), cap the additional wait for turn_complete.
+            // Gemini often sends turn_complete a few hundred ms AFTER
+            // audio generation finishes; without this cap, the user
+            // hears "Have a good day!" then a noticeable pause before
+            // the callClose chime. 300 ms is well under the perceptual
+            // threshold for a conversational turn and still gives the
+            // turn_complete frame ample time to arrive.
+            if (this._agentAudioDrained && !this._agentTurnComplete && !this._agentEndingGraceTimer) {
+              this._agentEndingGraceTimer = setTimeout(() => {
+                this._agentEndingGraceTimer = null;
+                if (!this._agentEndingArmed) return;
+                dlog('agent-end-call grace-expired — proceeding without turn_complete');
+                this._agentTurnComplete = true;
+                tryFinish('grace_timeout');
+              }, 300);
+            }
+            return;
+          }
+          // Both gates closed — run teardown.
+          clearTimeout(this._agentEndingTimer); this._agentEndingTimer = null;
+          clearTimeout(this._agentEndingGraceTimer); this._agentEndingGraceTimer = null;
+          this._agentEndingArmed = false;
+          dlog('agent-end-call deterministic fire via=' + trigger);
+          this._gracefullyEndCall('agent_end_call').catch(() => {});
+        };
+
+        const onTurnComplete = () => {
+          if (!this._agentEndingArmed) return;
+          this._agentTurnComplete = true;
+          tryFinish('turn_complete');
+        };
+        const onAgentDrained = () => {
+          if (!this._agentEndingArmed) return;
+          this._agentAudioDrained = true;
+          tryFinish('agent_drained');
+        };
+        this.addEventListener('turn-complete', onTurnComplete);
+        this.pipeline.addEventListener('agent-playback-drained', onAgentDrained);
+        this._agentEndingListeners = { onTurnComplete, onAgentDrained };
+        this._agentEndingGraceTimer = null;
+
+        // Safety timeout: 3 s. If Gemini dies mid-turn, proceed anyway.
+        // Reduced from 10 s — that was a worst-case guard but meant the
+        // call could hang for ages if a signal genuinely failed.
+        this._agentEndingTimer = setTimeout(() => {
+          if (!this._agentEndingArmed) return;
+          // eslint-disable-next-line no-console
+          console.error('[jarvis] agent-end-call timeout — turn_complete or drained never fired. Proceeding with teardown.');
+          this._agentEndingArmed = false;
+          clearTimeout(this._agentEndingGraceTimer); this._agentEndingGraceTimer = null;
+          this._gracefullyEndCall('agent_end_call_timeout').catch(() => {});
+        }, 3000);
+
+        // If audio was ALREADY drained at the moment the tool fired
+        // (no sign-off was ever scheduled), we still wait for
+        // turn_complete — the model may not have emitted any audio
+        // parts but Gemini will still signal end-of-turn.
+        if (this._agentAudioDrained) tryFinish('already_drained');
+        return;
+      }
       case 'transcript_delta':
         this._onTranscriptDelta(msg);
         if (msg.from === 'user') this.liveLastVoiceAt = Date.now();
@@ -1005,6 +1713,30 @@ export class VoiceAgent extends EventTarget {
 
   _onSetupComplete() {
     dlog('setup_complete');
+    // latency-pass: stamp setup-complete so we can diff placeCall → setup.
+    if (this._phaseTimestamps && this._phaseTimestamps.setupCompleteAt == null) {
+      this._phaseTimestamps.setupCompleteAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this._logPhase('setup_complete_from_click', this._phaseTimestamps.placeCallAt, this._phaseTimestamps.setupCompleteAt);
+      // Round-3 fix 1: log the parallel overlap — how much of the audio
+      // playback already elapsed by the time setup_complete landed. A
+      // negative delta would mean setup beat the audio start (should
+      // never happen); a small positive number means init ran mostly
+      // in parallel with audio; a number close to the audio duration
+      // (~15 s) means init was mostly serial (the old bug).
+      if (this._phaseTimestamps.audioPlayStartedAt != null) {
+        const overlapMs = Math.round(
+          this._phaseTimestamps.setupCompleteAt - this._phaseTimestamps.audioPlayStartedAt
+        );
+        // Always log (not DEBUG-gated) so production can diagnose
+        // regression without a debug flag.
+        // eslint-disable-next-line no-console
+        console.log('[jarvis phase] setup_complete_vs_audio_start ' + overlapMs + 'ms');
+      }
+      if (this._initSpanLabel && typeof console !== 'undefined' && typeof console.timeEnd === 'function') {
+        try { console.timeEnd(this._initSpanLabel); } catch {}
+        this._initSpanLabel = null;
+      }
+    }
     this.setupComplete = true;
     // Clear the dial watchdog — we made it.
     clearTimeout(this.dialTimer); this.dialTimer = null;
@@ -1022,14 +1754,31 @@ export class VoiceAgent extends EventTarget {
       this._openMic().catch(() => {});
     }
 
-    // Greeting injection — exactly once per placeCall cycle.
+    // Round-2 req 3: flip the second listen-gate. `_openListenGateIfReady`
+    // un-pauses capture only when BOTH this flag AND the callOpen
+    // near-end flag are set. On a RECONNECT there is no callOpen chime,
+    // so force the audio gate open too — the user was already talking
+    // and expects to keep talking.
+    this._listenGateSetupComplete = true;
+    if (!this._listenGateOpen && this._callOpenSettled) {
+      // Reconnect path: callOpen already settled (from the original
+      // placeCall) and no new chime is played; open the gate.
+      this._listenGateOpen = true;
+    }
+    this._openListenGateIfReady('setup_complete');
+
+    // Greeting injection — exactly once per placeCall cycle. audio-flow:
+    // hello.greet already carries the greet intent for fresh calls, so we
+    // only emit the fallback `call_start` for paths that didn't use it
+    // (reconnect / persona-switch). Either way, the actual greeting is
+    // gated server-side on the `greet_gate_open` frame the client sends
+    // once the startCall chime has ended — see _tryOpenGreetGate.
     if (this._callActive && !this._greetingSent) {
       this._greetingSent = true;
       const page = this._currentPathname || location.pathname;
       const title = (document.title || '').slice(0, 120);
-      dlog('greeting injection for page=' + page);
+      dlog('greeting call_start injected for page=' + page);
       this._sendJson({ type: 'call_start', page, title });
-      // Mark page_context as injected too — the greeting covers the page.
       this.pageContextInjected = true;
     } else if (this._pendingPageContext) {
       // Normal mid-call navigation drain.
@@ -1043,6 +1792,101 @@ export class VoiceAgent extends EventTarget {
     }
 
     this._armLiveIdleTimer();
+
+    // audio-flow: setup_complete is one of the two conditions for the
+    // greet gate. If the start-audio chime has already finished, the
+    // gate opens now; otherwise it opens when the chime resolves.
+    this._tryOpenGreetGate('setup_complete');
+  }
+
+  /** Round-5: callback from the audio pipeline when the callOpen clip
+   *  has FINISHED playing (or bailed out on a fallback reason). Opens
+   *  the LISTEN gate only (round-2); the PLAYBACK gate from round-4
+   *  was removed because the server-side greeting trigger is already
+   *  gated on `greet_gate_open` which the client sends in
+   *  `_tryOpenGreetGate` only after callOpen settles — no TTS audio
+   *  can arrive during callOpen, so no client-side buffer is needed.
+   *
+   *  Clean finish reasons: `ended`, `short_clip`, `paused` (only when
+   *  the call is still active — `paused` during teardown is ignored).
+   *  Fallback reasons: `error`, `timeout`, `no_duration` — still open
+   *  the listen gate to avoid permanently-muted capture. `hard_killed`
+   *  is always ignored: it only fires when the pipeline latched for
+   *  teardown and a late call to playCallOpen returned immediately. */
+  _onCallOpenEnded(reason) {
+    // Ignore when the call has already been torn down — this callback
+    // can fire from `stopAllCallAudio()` pausing the element during
+    // endCall, and we must NOT re-open the gate mid-teardown.
+    if (!this._callActive || this._endingCall) {
+      dlog('callOpen ended reason=' + reason + ' — ignored (call inactive or ending)');
+      return;
+    }
+    if (reason === 'hard_killed') {
+      dlog('callOpen ended hard_killed — gate stays closed');
+      return;
+    }
+    const isFallback = !(reason === 'ended' || reason === 'short_clip' || reason === 'paused');
+    if (isFallback && !this._listenGateFallbackLogged) {
+      this._listenGateFallbackLogged = true;
+      // eslint-disable-next-line no-console
+      console.warn('[jarvis] callOpen ended with fallback reason — opening listen gate anyway (reason=' + reason + ')');
+    }
+    dlog('callOpen ended reason=' + reason);
+
+    // Open the listen gate (mic → upstream). `_openListenGateIfReady`
+    // is the single un-pause site; it also waits on setup_complete.
+    if (!this._listenGateOpen) {
+      this._listenGateOpen = true;
+      this._openListenGateIfReady('audio_ended_' + reason);
+    }
+  }
+
+  /** Round-2 req 3: un-pauses capture only when BOTH `_listenGateOpen`
+   *  (callOpen near-end or fallback) AND `_listenGateSetupComplete`
+   *  (upstream ready) are true. Safe to call many times. */
+  _openListenGateIfReady(source) {
+    if (!this._callActive) return;
+    if (!this._listenGateOpen || !this._listenGateSetupComplete) {
+      dlog('listen gate waiting — audio=' + this._listenGateOpen + ' setup=' + this._listenGateSetupComplete + ' via=' + source);
+      return;
+    }
+    if (!this.pipeline || !this.pipeline.capture) return;
+    if (!this.pipeline.capturePaused) return; // already forwarding
+    dlog('listen gate OPEN via=' + source + ' — unpausing capture');
+    this.pipeline.setCapturePaused(false);
+  }
+
+  /** Round-6 fix 1: signal the server that the callOpen chime has
+   *  ended so it can release its pre-greet buffer. Generation was
+   *  fired into Gemini the moment upstream setup completed (in
+   *  parallel with callOpen playback). Any frames produced during
+   *  the chime sit in a server-side buffer; this signal flushes
+   *  them immediately.
+   *
+   *  Fires exactly once per call (latched on `_greetGateOpened`). We
+   *  keep the internal flag name `_greetGateOpened` for low-churn
+   *  across teardown paths; the wire frame name changed from
+   *  `greet_gate_open` → `audio_prelude_ended` to reflect the new
+   *  semantic (gates RELEASE, not INJECTION). The server accepts
+   *  both names for backward compat during rolling deploys. */
+  _tryOpenGreetGate(source) {
+    if (!this._callActive) return;
+    if (this._greetGateOpened) return;
+    if (!this.setupComplete) return;
+    // Still require BOTH setup_complete AND callOpen settled — this
+    // is the gate for ACK'ing "safe to speak aloud". Unchanged.
+    if (!this._callOpenSettled) {
+      dlog('audio-prelude gate waiting — ' + source + ' before call-open settled');
+      return;
+    }
+    this._greetGateOpened = true;
+    dlog('audio-prelude gate OPEN via=' + source);
+    // Tell the server to release its buffered greeting frames.
+    try { this._sendJson({ type: 'audio_prelude_ended' }); } catch {}
+    // audio-flow: background ambience starts here — exactly at the
+    // moment Gemini's greeting begins. If the user disabled the
+    // toggle the controller will no-op.
+    try { this.pipeline.callAudio.startBackground(); } catch {}
   }
 
   handleRouteChange({ path }) {
@@ -1058,16 +1902,15 @@ export class VoiceAgent extends EventTarget {
 
   _persistSessionBlob() {
     const transcript = this.transcript ? this.transcript.serialize() : [];
+    // audio-flow: `compression` / `noise` fields have been retired with
+    // the procedural noise system. `backgroundEnabled` lives in
+    // localStorage (cross-tab) so it isn't duplicated here.
     writeSessionBlob({
       handle: this.resumeHandle,
       handleIssuedAt: this.resumeHandleIssuedAt || (this.resumeHandle ? Date.now() : null),
       mode: this.mode,
       persona: this.personaId,
       muted: !!this.muted,
-      compression: !!this.compressionEnabled,
-      compressionStrength: this.compressionStrength,
-      noise: this.noiseMode,
-      noiseVolume: this.noiseVolume,
       lastPath: this._currentPathname || location.pathname,
       transcript
     });
@@ -1180,6 +2023,12 @@ export class VoiceAgent extends EventTarget {
       return;
     }
     this._sendBinaryRaw(copy.buffer);
+    // latency-pass: stamp the first audio-frame-sent time once per call.
+    // Diff against placeCall → this tells us priority-1 user-perceived latency.
+    if (this._phaseTimestamps && this._phaseTimestamps.firstFrameSentAt == null) {
+      this._phaseTimestamps.firstFrameSentAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this._logPhase('first_audio_frame_sent', this._phaseTimestamps.placeCallAt, this._phaseTimestamps.firstFrameSentAt);
+    }
     this.liveLastVoiceAt = Date.now();
   }
 
@@ -1246,13 +2095,14 @@ export class VoiceAgent extends EventTarget {
     try {
       const cfg = await fetch('/api/config', { cache: 'no-store' }).then((r) => r.json());
       if (Array.isArray(cfg.personas) && cfg.personas.length) this.personas = cfg.personas;
-      if (cfg.defaultPersona && !(this._restored && this._restored.persona)) {
-        this.personaId = cfg.defaultPersona;
+      if (cfg.defaultPersona) {
+        let hasUserPersona = false;
+        try { hasUserPersona = !!localStorage.getItem(PERSONA_STORAGE_KEY); } catch {}
+        if (!hasUserPersona) this.personaId = cfg.defaultPersona;
       }
       if (cfg.flags && typeof cfg.flags === 'object') {
         this.flags.geminiTranscription = !!cfg.flags.geminiTranscription;
         this.flags.showText = cfg.flags.showText !== false; // default true
-        this.flags.humanCallLayer = cfg.flags.humanCallLayer !== false; // default true
       }
       // STT backend preference — used by stt-controller.js.
       if (typeof cfg.sttBackend === 'string') {
@@ -1446,58 +2296,26 @@ export class VoiceAgent extends EventTarget {
 
   _setState(state, detail) {
     if (this.state === state && this.lastDetail === detail) return;
-    const wasActive = CALL_ACTIVE_STATES.has(this.state);
     this.state = state;
     this.lastDetail = detail;
     dlog('state ->', state, detail || '');
-
-    // Ambient noise: single-point driver. Invariant is "isInCall()"
-    // AND the user hasn't picked noise=off. No other code path in the
-    // agent should touch setAmbientOn directly.
-    this._updateAmbient({ wasActive });
-
     this._publishEvent('state', { state, detail });
-  }
-
-  /** Single place that maps agent state → AudioPipeline.setAmbientOn +
-   *  setHumanLayerOn. Called from _setState on every transition AND from
-   *  setNoiseMode (so flipping noise mode mid-call reflects immediately).
-   *
-   *  Ambient continuity invariant (Oracle v2 Decision 2):
-   *  - Primary ambient AND the new human-call layer BOTH run continuously
-   *    while `isInCall()` is true. Mid-call state transitions re-assert
-   *    the SAME steady target with fadeMs=40 — the setTargetAtTime ramp
-   *    is a no-op at identical targets, so there is no audible dip during
-   *    DIALING → LIVE_OPENING → LIVE_READY → MODEL_* → TOOL_EXECUTING →
-   *    RECONNECTING transitions.
-   *  - Fade-in (220 ms) fires only on the IDLE/ERROR → in-call entry edge.
-   *  - Fade-out (300 ms) fires only on the in-call → IDLE/ERROR exit edge.
-   *  - `CALL_ACTIVE_STATES` at line 105 is the canonical list. Any new
-   *    mid-call state MUST be added there so this invariant holds.
-   *  - The human layer is orthogonal to `noiseMode`: muffle/wind/breath
-   *    run regardless of which primary bed (office/phone/static) is
-   *    selected. A `humanCallLayer` flag from /api/config can disable it. */
-  _updateAmbient({ wasActive = CALL_ACTIVE_STATES.has(this.state) } = {}) {
-    const shouldBeOn = this.isInCall() && this.noiseMode !== 'off';
-    const fadeMs = shouldBeOn
-      ? (wasActive ? 40 : AMBIENT_FADE_IN_MS)
-      : AMBIENT_FADE_OUT_MS;
-    this.pipeline.setAmbientOn(shouldBeOn, { fadeMs });
-    // Human-call layer piggybacks on isInCall() — runs continuously
-    // regardless of noiseMode selection. Honours the server flag if off.
-    const humanShouldBeOn = this.isInCall() && this.flags.humanCallLayer !== false;
-    const humanFadeMs = humanShouldBeOn
-      ? (wasActive ? 40 : AMBIENT_FADE_IN_MS)
-      : AMBIENT_FADE_OUT_MS;
-    this.pipeline.setHumanLayerOn(humanShouldBeOn, { fadeMs: humanFadeMs });
-    if (this._ambientLayerOn !== humanShouldBeOn) {
-      this._ambientLayerOn = humanShouldBeOn;
-      this._publishEvent('ambient-changed', { on: humanShouldBeOn });
-    }
   }
 
   _publishEvent(name, payload) {
     this.dispatchEvent(new CustomEvent(name, { detail: payload }));
+  }
+
+  /** latency-pass: phase telemetry gated on localStorage['jarvis.debug']==='1'.
+   *  Prints a single [phase] line per transition so we can measure the key
+   *  latency buckets (connect, first-frame, first-token, tool-RTT) without
+   *  perturbing any existing dlog lines that other JS or tests rely on. */
+  _logPhase(label, fromTs, toTs) {
+    if (!DEBUG) return;
+    if (typeof fromTs !== 'number' || typeof toTs !== 'number') return;
+    const ms = Math.round(toTs - fromTs);
+    // eslint-disable-next-line no-console
+    console.log(`[jarvis phase] ${label} ${ms}ms`);
   }
 
   _announce({ from, text }) {

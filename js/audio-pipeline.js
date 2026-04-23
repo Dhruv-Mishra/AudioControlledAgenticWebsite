@@ -1,26 +1,28 @@
 // Audio pipeline: capture (AudioWorklet → PCM16 16 kHz chunks to caller),
-// playback of 24 kHz PCM16 chunks with optional phone-line band-pass
-// compression, and procedural ambient noise as an *independent*
-// always-connected branch to ctx.destination.
+// playback of 24 kHz PCM16 chunks, and call-audio choreography (call-open
+// chime, background ambience loop, call-close chime) driven off three
+// HTMLAudioElement instances.
 //
-// Design notes (from specs/live-implementation-audit.md):
+// audio-flow: The procedural noise-bed / human-call-layer systems that
+// previously lived here have been removed. Phone-line compression has
+// been re-introduced as an opt-in Web Audio sub-graph applied to the
+// agent playback chain. The three <audio> elements remain:
 //
-//   • Single AudioContext for BOTH capture and playback. Two contexts was
-//     an accident of history and made the first-click gesture-lineage
-//     flaky because only the playback one was unlocked synchronously.
-//   • Noise branch connects DIRECTLY to ctx.destination via its own gain
-//     node — it is NOT routed through `playbackGain` (agent output), so
-//     ambient noise plays continuously during the call even when Gemini
-//     is silent.
-//   • Phone-line compression filters the AGENT path only. Ambient noise
-//     bypasses it — a real phone line only compresses what's travelling
-//     across the line, not the room you're sitting in.
-//   • Noise state machine: `setAmbientOn(true/false, { fadeMs })`. Caller
-//     (VoiceAgent) drives it off session state transitions.
-//   • `unlockAudioSync()` creates+resumes the ctx in the same synchronous
-//     task as the user click, so Chrome honours the gesture activation.
+//   • callOpen   — one-shot ring-then-pickup; covers dialling / setup.
+//   • background — loops at low volume for the duration of the call.
+//   • callClose  — one-shot hangup-then-disconnect; plays during teardown.
 //
-// No ScriptProcessorNode anywhere.
+// HTMLAudioElement is intentional: it obeys the OS volume mixer, costs
+// nothing to keep loaded, and doesn't need the Web Audio graph (which is
+// still used for PCM capture + Gemini voice playback).
+//
+// Design notes:
+//   • Single AudioContext for BOTH mic capture and Gemini playback.
+//   • `unlockAudioSync()` creates + resumes the ctx synchronously inside a
+//     user gesture (Chrome autoplay policy).
+//   • The Place Call click also primes the three <audio> elements via
+//     `unlockCallAudio()` so Safari / iOS honours the first `.play()`.
+//   • No ScriptProcessorNode anywhere.
 
 /** Encode an Int16Array of PCM samples into an AudioBuffer for playback. */
 function int16ToAudioBuffer(ctx, int16, sampleRate) {
@@ -30,165 +32,564 @@ function int16ToAudioBuffer(ctx, int16, sampleRate) {
   return buf;
 }
 
-/** Sized white noise -> 1/f-ish pink via IIR low-pass approximation. */
-function makeNoiseBuffer(ctx, durationSec, type = 'pink') {
-  const sr = ctx.sampleRate;
-  const len = Math.round(durationSec * sr);
-  const buf = ctx.createBuffer(1, len, sr);
-  const data = buf.getChannelData(0);
-  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-  for (let i = 0; i < len; i++) {
-    const white = Math.random() * 2 - 1;
-    if (type === 'pink') {
-      // Paul Kellet pink noise filter
-      b0 = 0.99886 * b0 + white * 0.0555179;
-      b1 = 0.99332 * b1 + white * 0.0750759;
-      b2 = 0.96900 * b2 + white * 0.1538520;
-      b3 = 0.86650 * b3 + white * 0.3104856;
-      b4 = 0.55000 * b4 + white * 0.5329522;
-      b5 = -0.7616 * b5 - white * 0.0168980;
-      const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
-      b6 = white * 0.115926;
-      data[i] = pink * 0.11;
-    } else if (type === 'brown') {
-      b0 = (b0 + 0.02 * white) / 1.02;
-      data[i] = b0 * 3.5;
-    } else {
-      data[i] = white * 0.5;
-    }
-  }
-  return buf;
-}
+// audio-flow: volume constants for the three HTMLAudioElement layers.
+// BACKGROUND_VOLUME is tuned quiet so it sits under Gemini's voice and
+// doesn't force the user to keep turning the OS volume down.
+const BACKGROUND_VOLUME = 0.15;
+const START_END_VOLUME = 0.85;
+// audio-flow: safety cap on how long we wait for callOpen / callClose
+// clips to finish before we move on. A missing or corrupt file must never
+// block the call flow — we log and continue.
+//   • callOpen cap: 20000ms — the combined ring-then-pickup asset is
+//     ~15.8s (FULL startCall + phonePick). 20s gives the asset room to
+//     finish naturally even on a slow first decode while still bounding
+//     the greet delay if the file is corrupt.
+//   • callClose cap: 6000ms — combined hangup + 3× end-call beeps is ~4.1s.
+const START_AUDIO_MAX_MS = 20000;
+const END_AUDIO_MAX_MS = 6000;
 
-/** Phone-line hiss: brown-ish noise under a narrow band-pass. */
-function buildPhoneHissGraph(ctx, destGain) {
-  const src = ctx.createBufferSource();
-  src.buffer = makeNoiseBuffer(ctx, 8, 'brown');
-  src.loop = true;
-  const bp = ctx.createBiquadFilter();
-  bp.type = 'bandpass';
-  bp.frequency.value = 1400;
-  bp.Q.value = 0.6;
-  const g = ctx.createGain();
-  g.gain.value = 0.35;
-  src.connect(bp).connect(g).connect(destGain);
-  return { start: () => src.start(), stop: () => { try { src.stop(); } catch {} } };
-}
-
-/** Static: loud white with periodic crackle. */
-function buildStaticGraph(ctx, destGain) {
-  const src = ctx.createBufferSource();
-  src.buffer = makeNoiseBuffer(ctx, 4, 'white');
-  src.loop = true;
-  const hp = ctx.createBiquadFilter();
-  hp.type = 'highpass';
-  hp.frequency.value = 600;
-  const g = ctx.createGain();
-  g.gain.value = 0.22;
-  src.connect(hp).connect(g).connect(destGain);
-  return { start: () => src.start(), stop: () => { try { src.stop(); } catch {} } };
-}
-
-/** Office chatter: many overlapping detuned oscillators + filtered noise. */
-function buildChatterGraph(ctx, destGain) {
-  const nodes = [];
-  const noise = ctx.createBufferSource();
-  noise.buffer = makeNoiseBuffer(ctx, 6, 'pink');
-  noise.loop = true;
-  const lp = ctx.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.value = 1800;
-  const g = ctx.createGain();
-  g.gain.value = 0.25;
-  noise.connect(lp).connect(g).connect(destGain);
-  nodes.push(noise);
-
-  // Slow amplitude wobble so it breathes like a room.
-  const lfo = ctx.createOscillator();
-  const lfoGain = ctx.createGain();
-  lfo.frequency.value = 0.18;
-  lfoGain.gain.value = 0.06;
-  lfo.connect(lfoGain).connect(g.gain);
-  nodes.push(lfo);
-
-  // Modulated carriers to hint at far-off voices.
-  for (let i = 0; i < 4; i++) {
-    const carrier = ctx.createOscillator();
-    carrier.type = 'sine';
-    carrier.frequency.value = 180 + i * 53;
-    const modGain = ctx.createGain();
-    modGain.gain.value = 0.012;
-    const ring = ctx.createOscillator();
-    ring.type = 'triangle';
-    ring.frequency.value = 0.9 + i * 0.25;
-    const ringGain = ctx.createGain();
-    ringGain.gain.value = 8;
-    ring.connect(ringGain).connect(carrier.frequency);
-    carrier.connect(modGain).connect(destGain);
-    nodes.push(carrier, ring);
-  }
-
-  return {
-    start() { nodes.forEach((n) => { try { n.start(); } catch {} }); },
-    stop()  { nodes.forEach((n) => { try { n.stop();  } catch {} }); }
-  };
-}
-
-const NOISE_FACTORIES = {
-  off:      () => null,
-  phone:    buildPhoneHissGraph,
-  office:   buildChatterGraph,
-  static:   buildStaticGraph
+// audio-flow: candidate asset paths. We probe <audio>.canPlayType for
+// Opus-in-WebM up-front; if it returns a non-empty string we use .webm,
+// otherwise we fall back to .mp3. This keeps download size down on
+// modern browsers while keeping iOS Safari working.
+//   • callOpen  = startCall (ring) + phonePick concatenated.
+//   • callClose = phoneCut + endCall concatenated.
+const CALL_AUDIO_SOURCES = {
+  callOpen:   { webm: '/audio/callOpen.webm',   mp3: '/audio/callOpen.mp3' },
+  background: { webm: '/audio/background.webm', mp3: '/audio/background.mp3' },
+  callClose:  { webm: '/audio/callClose.webm',  mp3: '/audio/callClose.mp3' }
 };
 
-const FADE_MS_DEFAULT = 220;
-
-// Compression strength ladder (Oracle Decision 3). Indexed rows; we
-// linearly interpolate between them for any strength in [0..100].
-// HP 0 / LP 20000 / threshold 0 / ratio 1 / shaper=linear → pass-through at 0.
-const COMPRESSION_LADDER = [
-  { strength:   0, hp:    0, lp: 20000, threshold:   0, ratio: 1.0, attack: 0.003, release: 0.25, drive: 0.0 },
-  { strength:  25, hp:  200, lp:  6000, threshold: -12, ratio: 2.5, attack: 0.004, release: 0.22, drive: 1.1 },
-  { strength:  50, hp:  300, lp:  3400, threshold: -18, ratio: 4.5, attack: 0.006, release: 0.18, drive: 1.8 },
-  { strength:  75, hp:  360, lp:  3300, threshold: -22, ratio: 6.5, attack: 0.008, release: 0.14, drive: 2.4 },
-  { strength: 100, hp:  400, lp:  3200, threshold: -24, ratio: 8.0, attack: 0.010, release: 0.10, drive: 2.8 }
-];
-
-function lerp(a, b, t) { return a + (b - a) * t; }
-
-/** Linear-interpolate ladder params for strength s in [0..100]. */
-function interpolateCompressionParams(s) {
-  const clamped = Math.max(0, Math.min(100, Number(s) || 0));
-  for (let i = 0; i < COMPRESSION_LADDER.length - 1; i++) {
-    const a = COMPRESSION_LADDER[i];
-    const b = COMPRESSION_LADDER[i + 1];
-    if (clamped >= a.strength && clamped <= b.strength) {
-      const t = (clamped - a.strength) / (b.strength - a.strength);
-      return {
-        hp:        lerp(a.hp,        b.hp,        t),
-        lp:        lerp(a.lp,        b.lp,        t),
-        threshold: lerp(a.threshold, b.threshold, t),
-        ratio:     lerp(a.ratio,     b.ratio,     t),
-        attack:    lerp(a.attack,    b.attack,    t),
-        release:   lerp(a.release,   b.release,   t),
-        drive:     lerp(a.drive,     b.drive,     t)
-      };
-    }
+let _webmOpusProbeResult = null;
+function canPlayWebmOpus() {
+  if (_webmOpusProbeResult !== null) return _webmOpusProbeResult;
+  try {
+    // audio-flow: one-shot probe. We test an HTMLAudioElement (not a
+    // MediaSource) because the former matches the runtime we'll use.
+    // Cached so we don't spin up a throwaway element per clip.
+    const probe = new Audio();
+    const result = typeof probe.canPlayType === 'function'
+      ? probe.canPlayType('audio/webm;codecs=opus')
+      : '';
+    _webmOpusProbeResult = !!(result && result !== '');
+  } catch {
+    _webmOpusProbeResult = false;
   }
-  // Out-of-range: clamp to endpoints.
-  return clamped <= 0 ? COMPRESSION_LADDER[0] : COMPRESSION_LADDER[COMPRESSION_LADDER.length - 1];
+  return _webmOpusProbeResult;
 }
 
-/** 1024-sample tanh soft-clip curve. `drive` 0 = linear (pass-through). */
-function makeSaturationCurve(drive) {
-  const n = 1024;
-  const curve = new Float32Array(n);
-  const d = Math.max(0, Number(drive) || 0);
-  for (let i = 0; i < n; i++) {
-    const x = (i / (n - 1)) * 2 - 1;
-    curve[i] = d <= 0.001 ? x : Math.tanh(d * x);
+function pickCallAudioSrc(kind) {
+  const pair = CALL_AUDIO_SOURCES[kind];
+  if (!pair) return null;
+  return canPlayWebmOpus() ? pair.webm : pair.mp3;
+}
+
+/** audio-flow: call-audio choreography.
+ *
+ *  Round-7: callOpen and callClose migrated from HTMLAudioElement to
+ *  Web-Audio `AudioBufferSourceNode`. HTMLAudioElement's `ended` event
+ *  was unreliable in browser reproductions (sometimes never firing,
+ *  sometimes firing after stale timing), which cascaded into the
+ *  user-visible flakiness of "background starts with callOpen" and
+ *  "agent speaks during callOpen". AudioBufferSourceNode has a
+ *  deterministic single-fire `onended` that triggers exactly once —
+ *  either on natural completion or on `stop()`. It also removes the
+ *  muted-play-then-pause unlock-dance for these two clips (the
+ *  AudioContext itself is the unlock target, and `unlockAudioSync`
+ *  has already resumed it synchronously inside the click handler).
+ *
+ *  Background audio stays HTMLAudioElement: it's a long-running loop,
+ *  its start/stop timing is non-critical, and HTMLMediaElement's
+ *  streaming + range-request support is what it's designed for.
+ *
+ *  Contract:
+ *   • `prepareBuffers(ctx)` — eagerly fetch + decode callOpen + callClose
+ *     into an AudioBuffer cache. Called at AudioContext creation, not
+ *     at click-time, so the first placeCall is instant.
+ *   • `playCallOpen({onAudioEnded})` — schedule a new BufferSource,
+ *     fire the callback exactly once from `onended`. Stale event-order
+ *     bugs impossible — no timeupdate, no pause, no loadedmetadata.
+ *   • `stopAllCallAudio()` — sets `_hardKilled` + calls `.stop(0)` on
+ *     any active open/close source. The source's `onended` still fires
+ *     but the callback checks the stopped flag and reports
+ *     `reason='stopped'`.
+ *
+ *  Background-loop watchdog for the HTMLAudioElement that DOES remain:
+ *  `loop=true` occasionally no-ops on Chrome after tab blur. We
+ *  defensively listen for `ended` and, if we still believe the
+ *  ambience should be running, rewind + play again. */
+class CallAudioController {
+  constructor({ onStateChange, onAllStopped, pipeline } = {}) {
+    this._onStateChange = typeof onStateChange === 'function' ? onStateChange : () => {};
+    // audio-flow: `onAllStopped` fires when the call-audio layer goes
+    // quiet (no open/background/close playing). UI listens to this so
+    // the End Call button reverts to green ONLY when every audio element
+    // has stopped (requirement 6).
+    this._onAllStopped = typeof onAllStopped === 'function' ? onAllStopped : () => {};
+    this._pipeline = pipeline;  // round-7: shared AudioContext + playbackGain accessor
+    this._backgroundEnabled = true; // default ON; VoiceAgent overrides from localStorage
+
+    // Round-7: callOpen + callClose are now AudioBufferSourceNodes.
+    // `_buffers` caches the decoded AudioBuffer per kind; populated by
+    // `prepareBuffers`. `_activeOpenSource` / `_activeCloseSource` hold
+    // the live source handle so `stopAllCallAudio` can kill them.
+    this._buffers = { callOpen: null, callClose: null };
+    this._buffersLoading = null;   // Promise<void> while decoding
+    this._activeOpenSource = null;
+    this._activeCloseSource = null;
+    this._activeOpenStopped = false;
+    this._activeCloseStopped = false;
+
+    // Background stays HTMLAudioElement (long-lived loop).
+    this.backgroundAudio = this._buildAudio('background', { loop: true, volume: BACKGROUND_VOLUME });
+
+    this._unlocked = false;
+    this._openPlaying = false;
+    this._backgroundPlaying = false;
+    this._closePlaying = false;
+    // audio-flow: latch set by `stopAllCallAudio()` — bars any further
+    // playback kick-offs until the next call is placed. Prevents a stale
+    // `startBackground()` or a scheduled `playCallClose()` from firing
+    // after the user has smashed End Call.
+    this._hardKilled = false;
+
+    this._bgRestartAttempts = 0;
+    this.backgroundAudio.addEventListener('ended', () => {
+      if (!this._backgroundEnabled || !this._backgroundPlaying) return;
+      // eslint-disable-next-line no-console
+      console.warn('[audio-flow] background ended while loop expected; restarting');
+      this._restartBackground('ended');
+    });
+    this.backgroundAudio.addEventListener('pause', () => {
+      if (!this._backgroundPlaying) return;
+      // eslint-disable-next-line no-console
+      console.warn('[audio-flow] background paused unexpectedly; restarting');
+      this._restartBackground('pause');
+    });
   }
-  return curve;
+
+  /** Round-7: fetch + decode callOpen and callClose into AudioBuffer
+   *  instances. Idempotent — safe to call multiple times; re-uses the
+   *  first decode. Called from `AudioPipeline.unlockAudioSync` right
+   *  after the context is created so the first placeCall is instant
+   *  (the 15.7 s callOpen fetch finishes by then even on slow links).
+   *  Returns a Promise that resolves once both buffers are ready OR
+   *  a fatal decode failure has been logged (never rejects). */
+  prepareBuffers(ctx) {
+    if (!ctx) return Promise.resolve();
+    if (this._buffersLoading) return this._buffersLoading;
+    if (this._buffers.callOpen && this._buffers.callClose) return Promise.resolve();
+    this._buffersLoading = (async () => {
+      const kinds = ['callOpen', 'callClose'];
+      for (const kind of kinds) {
+        if (this._buffers[kind]) continue;
+        const url = pickCallAudioSrc(kind);
+        if (!url) continue;
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const bytes = await res.arrayBuffer();
+          // decodeAudioData accepts both promise and callback forms
+          // across browsers; wrap defensively.
+          const buf = await new Promise((resolve, reject) => {
+            try {
+              const ret = ctx.decodeAudioData(bytes, resolve, reject);
+              if (ret && typeof ret.then === 'function') ret.then(resolve).catch(reject);
+            } catch (err) { reject(err); }
+          });
+          this._buffers[kind] = buf;
+          // eslint-disable-next-line no-console
+          console.log('[audio-flow] decoded ' + kind + ' duration=' + buf.duration.toFixed(2) + 's ch=' + buf.numberOfChannels + ' sr=' + buf.sampleRate);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[audio-flow] failed to decode ' + kind, err && err.message);
+          this._buffers[kind] = null;
+        }
+      }
+      this._buffersLoading = null;
+    })();
+    return this._buffersLoading;
+  }
+
+  /** audio-flow: restart the background loop after an `ended` or rogue
+   *  `pause`. Capped at 3 attempts per continuous playing session; counter
+   *  resets on every fresh `startBackground()`. */
+  _restartBackground(cause) {
+    if (!this._backgroundEnabled || !this._backgroundPlaying) return;
+    this._bgRestartAttempts += 1;
+    if (this._bgRestartAttempts > 3) {
+      // eslint-disable-next-line no-console
+      console.error('[audio-flow] background restart exceeded retry budget (cause=' + cause + ')');
+      this._backgroundPlaying = false;
+      this._onStateChange({ backgroundPlaying: false, reason: 'restart_failed' });
+      this._checkAllStopped();
+      return;
+    }
+    try { this.backgroundAudio.currentTime = 0; } catch {}
+    try { this.backgroundAudio.loop = true; } catch {}
+    try { this.backgroundAudio.muted = false; } catch {}
+    const p = this.backgroundAudio.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[audio-flow] background restart rejected (cause=' + cause + ')', err && err.message);
+        // Try once more on next tick — sometimes a single rejection is a
+        // transient autoplay-policy hiccup.
+        setTimeout(() => this._restartBackground(cause + '_retry'), 120);
+      });
+    }
+  }
+
+  _buildAudio(kind, { loop, volume }) {
+    const el = new Audio();
+    el.preload = 'auto';
+    el.loop = !!loop;
+    el.volume = volume;
+    const src = pickCallAudioSrc(kind);
+    if (src) el.src = src;
+    // Failed loads must not block the call. Log + swallow.
+    el.addEventListener('error', () => {
+      // eslint-disable-next-line no-console
+      console.warn(`[audio-flow] failed to load ${kind} audio src=${el.src}`);
+    });
+    return el;
+  }
+
+  /** audio-flow: call once from inside the first user-gesture event
+   *  handler. Round-7: only `backgroundAudio` needs the HTMLMediaElement
+   *  unlock dance now — callOpen and callClose are AudioBufferSourceNodes
+   *  which play off the shared AudioContext and are unlocked by
+   *  `AudioPipeline.unlockAudioSync()` → `ctx.resume()`. That removes
+   *  the source of the audible "background blip at call start" that
+   *  users reported: the unlock dance no longer touches openAudio or
+   *  closeAudio (they don't exist as HTMLAudioElements any more). */
+  unlock() {
+    if (this._unlocked) return;
+    this._unlocked = true;
+    try {
+      this.backgroundAudio.muted = true;
+      const p = this.backgroundAudio.play();
+      try { this.backgroundAudio.pause(); } catch {}
+      try { this.backgroundAudio.currentTime = 0; } catch {}
+      this.backgroundAudio.muted = false;
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {}
+  }
+
+  /** Round-7: play a one-shot chime via AudioBufferSourceNode. Internal
+   *  helper shared by `playCallOpen` and `playCallClose`. Takes a
+   *  buffer key + max-wait timeout; resolves `{ok, reason}` exactly
+   *  once — the source's `onended` fires deterministically either when
+   *  the buffer plays to completion OR when `stop()` is called.
+   *
+   *  `activeHolder` is the property name on `this` where we store the
+   *  source + stopped flag so `stopAllCallAudio` can kill it.
+   *  `playingFlag` is the property name we set to true on start and
+   *  false on end, so `_checkAllStopped` tracks lifecycle correctly. */
+  _playBufferSource(bufferKey, activeHolderKey, stoppedFlagKey, playingFlagKey, maxWaitMs) {
+    return new Promise((resolve) => {
+      const ctx = this._pipeline && this._pipeline.ctx;
+      const gain = this._pipeline && this._pipeline.playbackGain;
+      if (!ctx || !gain) {
+        // No AudioContext — pipeline wasn't unlocked. Return fallback
+        // so the caller doesn't deadlock. Log so the regression is
+        // visible.
+        // eslint-disable-next-line no-console
+        console.error('[audio-flow] ' + bufferKey + ' cannot play — no AudioContext');
+        resolve({ ok: false, reason: 'no_context' });
+        return;
+      }
+      const buffer = this._buffers[bufferKey];
+      if (!buffer) {
+        // Buffer not decoded yet. Try to kick a fetch+decode and
+        // resolve when done (bounded by maxWaitMs). Mark playing
+        // flag true so `_checkAllStopped` doesn't fire while we're
+        // still in the middle of the clip's lifecycle.
+        // eslint-disable-next-line no-console
+        console.warn('[audio-flow] ' + bufferKey + ' buffer not ready — awaiting decode');
+        this[playingFlagKey] = true;
+        const timeout = setTimeout(() => {
+          this[playingFlagKey] = false;
+          this._checkAllStopped();
+          resolve({ ok: false, reason: 'decode_timeout' });
+        }, maxWaitMs);
+        this.prepareBuffers(ctx).then(() => {
+          clearTimeout(timeout);
+          if (this._buffers[bufferKey]) {
+            // Flag will be re-asserted inside the recursive call; clear
+            // here so the recursion's own asserts aren't no-ops.
+            this[playingFlagKey] = false;
+            // Recurse once now that the buffer is ready.
+            this._playBufferSource(bufferKey, activeHolderKey, stoppedFlagKey, playingFlagKey, maxWaitMs)
+              .then(resolve);
+          } else {
+            this[playingFlagKey] = false;
+            this._checkAllStopped();
+            resolve({ ok: false, reason: 'decode_failed' });
+          }
+        });
+        return;
+      }
+
+      this[playingFlagKey] = true;
+      this[stoppedFlagKey] = false;
+
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      // Connect to the playbackGain so the `setOutputVolume` control
+      // and phone-compression crossfade apply uniformly.
+      src.connect(gain);
+      this[activeHolderKey] = src;
+
+      let settled = false;
+      const settle = (reason) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(safetyTimer);
+        this[playingFlagKey] = false;
+        if (this[activeHolderKey] === src) this[activeHolderKey] = null;
+        try { src.disconnect(); } catch {}
+        this._checkAllStopped();
+        resolve({ ok: reason === 'ended', reason });
+      };
+
+      src.onended = () => {
+        // Fires exactly once — either buffer played to completion OR
+        // `src.stop()` was called. `_stoppedFlagKey` distinguishes.
+        settle(this[stoppedFlagKey] ? 'stopped' : 'ended');
+      };
+
+      // Safety timer — should never fire in normal flow. Logged at
+      // error level if it does so we know there's a bug.
+      const safetyTimer = setTimeout(() => {
+        // eslint-disable-next-line no-console
+        console.error('[audio-flow] ' + bufferKey + ' safety timeout fired — onended never arrived');
+        try { src.stop(0); } catch {}
+        settle('timeout');
+      }, maxWaitMs);
+
+      try {
+        src.start(0);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[audio-flow] ' + bufferKey + ' start threw', err && err.message);
+        settle('throw');
+      }
+    });
+  }
+
+  /** audio-flow: play the call-open clip (ring + pickup). Round-7:
+   *  uses AudioBufferSourceNode with deterministic `onended`. The
+   *  round-2 `onListenGate` API is retained as a compatibility shim
+   *  (round-6 moved both gates to `onAudioEnded`, so it's a no-op for
+   *  the live code path). `onAudioEnded({reason})` fires exactly once.
+   *
+   *  Reasons:
+   *    'ended'       — buffer played to completion naturally
+   *    'stopped'     — stopAllCallAudio() called stop() mid-playback
+   *    'hard_killed' — _hardKilled latch was set before play even
+   *                    began (second placeCall after endCall)
+   *    'no_context'  — pipeline wasn't unlocked (should never happen)
+   *    'decode_failed' / 'decode_timeout' — fetch+decode bailed
+   *    'timeout'     — safety timer fired; bug if it happens
+   *    'throw'       — source.start() threw
+   */
+  playCallOpen(opts) {
+    const onListenGate = opts && typeof opts.onListenGate === 'function' ? opts.onListenGate : null;
+    const onAudioEnded = opts && typeof opts.onAudioEnded === 'function' ? opts.onAudioEnded : null;
+
+    if (this._hardKilled) {
+      if (onListenGate) { try { onListenGate({ reason: 'hard_killed' }); } catch {} }
+      if (onAudioEnded) { try { onAudioEnded({ reason: 'hard_killed' }); } catch {} }
+      return Promise.resolve({ ok: false, reason: 'hard_killed' });
+    }
+    return this._playBufferSource('callOpen', '_activeOpenSource', '_activeOpenStopped', '_openPlaying', START_AUDIO_MAX_MS)
+      .then((outcome) => {
+        // Round-2/round-6 compat: callers that still wire onListenGate
+        // get a one-shot fire with the same reason so any leftover
+        // gating logic resolves.
+        if (onListenGate) { try { onListenGate({ reason: outcome.reason }); } catch {} }
+        if (onAudioEnded) { try { onAudioEnded({ reason: outcome.reason }); } catch {} }
+        return outcome;
+      });
+  }
+
+  /** audio-flow: play the call-close clip (hangup + 3× end-call beeps).
+   *  Round-7: AudioBufferSourceNode with deterministic `onended`. */
+  playCallClose() {
+    if (this._hardKilled) return Promise.resolve({ ok: false, reason: 'hard_killed' });
+    return this._playBufferSource('callClose', '_activeCloseSource', '_activeCloseStopped', '_closePlaying', END_AUDIO_MAX_MS);
+  }
+
+  /** audio-flow: emit the `all-stopped` event when every managed audio
+   *  element is idle. UI uses it to flip the End Call button back to
+   *  green only after the very last sample has played (requirement 6). */
+  _checkAllStopped() {
+    if (this._openPlaying || this._backgroundPlaying || this._closePlaying) return;
+    try { this._onAllStopped(); } catch { /* never break the chain */ }
+  }
+
+  /** audio-flow: HARD kill — synchronously stops every IN-FLIGHT
+   *  audio source and latches `_hardKilled` so nothing re-starts.
+   *
+   *  Round-7: callOpen + callClose are now AudioBufferSourceNodes.
+   *  `stop()` is synchronous-but-fires-onended-later — we set the
+   *  stopped flag BEFORE calling stop so the source's onended
+   *  callback sees `reason='stopped'`. Then call stop(0).
+   *
+   *  Background is still HTMLAudioElement; pause it synchronously. */
+  stopAllCallAudio() {
+    this._hardKilled = true;
+    this._backgroundPlaying = false;
+    try { this.backgroundAudio.pause(); } catch {}
+    try { this.backgroundAudio.currentTime = 0; } catch {}
+    // Stop the active BufferSource for callOpen (if playing).
+    if (this._activeOpenSource) {
+      this._activeOpenStopped = true;
+      try { this._activeOpenSource.stop(0); } catch {}
+    }
+    // Stop the active BufferSource for callClose (if playing).
+    if (this._activeCloseSource) {
+      this._activeCloseStopped = true;
+      try { this._activeCloseSource.stop(0); } catch {}
+    }
+    this._checkAllStopped();
+  }
+
+  /** audio-flow: called by the agent at the top of placeCall() so a
+   *  previous hard-kill doesn't bar the new call's audio. */
+  armForNextCall() {
+    this._hardKilled = false;
+    this._bgRestartAttempts = 0;
+  }
+
+  /** audio-flow: start looping the background ambience. No-op if the
+   *  toggle is off or background is already playing.
+   *
+   *  HARDENED FIX for "background sound not playing":
+   *   1. `loop=true` re-asserted (some browsers drop it after pause/resume
+   *      or unlock's muted-play cycle).
+   *   2. `muted=false` re-asserted — `stopAllCallAudio()` can leave the
+   *      element muted for a brief window; asserting here is safe.
+   *   3. `volume` re-set — defends against a rogue caller zeroing it.
+   *   4. `preload='auto'` re-asserted so the file is eager-decoded.
+   *   5. `src` re-assigned if empty (destroy() clears it) — the element
+   *      survives the AudioPipeline lifetime so we must be defensive.
+   *   6. `play()` rejection triggers an immediate retry on the next
+   *      macrotask. A second rejection logs at ERROR severity so the
+   *      failure is LOUD in DevTools rather than silent.
+   *   7. If the user toggled Background off mid-play, we respect it and
+   *      no-op. */
+  startBackground() {
+    if (!this._backgroundEnabled) {
+      // eslint-disable-next-line no-console
+      console.warn('[audio-flow] startBackground skipped — toggle off');
+      return;
+    }
+    if (this._hardKilled) {
+      // eslint-disable-next-line no-console
+      console.warn('[audio-flow] startBackground skipped — hard-killed (pending next call)');
+      return;
+    }
+    if (this._backgroundPlaying) return;
+
+    this._backgroundPlaying = true;
+    this._bgRestartAttempts = 0;
+
+    // 1–5: re-assert element state.
+    try { this.backgroundAudio.loop = true; } catch {}
+    try { this.backgroundAudio.volume = BACKGROUND_VOLUME; } catch {}
+    try { this.backgroundAudio.muted = false; } catch {}
+    try { this.backgroundAudio.preload = 'auto'; } catch {}
+    if (!this.backgroundAudio.src || this.backgroundAudio.src === 'about:blank') {
+      const src = pickCallAudioSrc('background');
+      if (src) {
+        try { this.backgroundAudio.src = src; } catch {}
+        try { this.backgroundAudio.load(); } catch {}
+      }
+    }
+    try { this.backgroundAudio.currentTime = 0; } catch {}
+
+    const doPlay = (attempt) => {
+      let p;
+      try {
+        p = this.backgroundAudio.play();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[audio-flow] background play threw (attempt ' + attempt + ')', err && err.message);
+        if (attempt < 2) return setTimeout(() => doPlay(attempt + 1), 120);
+        this._backgroundPlaying = false;
+        this._onStateChange({ backgroundPlaying: false, reason: 'play_threw' });
+        this._checkAllStopped();
+        return;
+      }
+      if (p && typeof p.catch === 'function') {
+        p.catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn('[audio-flow] background play rejected (attempt ' + attempt + ')', err && err.message);
+          if (attempt < 2) return setTimeout(() => doPlay(attempt + 1), 120);
+          // Loud, persistent: surface the failure mode rather than stay silent.
+          // eslint-disable-next-line no-console
+          console.error('[audio-flow] background play REJECTED after retries — ambience will be silent for this call', err && err.message);
+          this._backgroundPlaying = false;
+          this._onStateChange({ backgroundPlaying: false, reason: 'play_rejected' });
+          this._checkAllStopped();
+        });
+      }
+    };
+    doPlay(1);
+
+    this._onStateChange({ backgroundPlaying: true });
+  }
+
+  /** audio-flow: stop the background loop if it's running. Idempotent. */
+  stopBackground() {
+    const wasPlaying = this._backgroundPlaying;
+    this._backgroundPlaying = false;
+    try { this.backgroundAudio.pause(); } catch {}
+    try { this.backgroundAudio.currentTime = 0; } catch {}
+    if (wasPlaying) this._onStateChange({ backgroundPlaying: false });
+    this._checkAllStopped();
+  }
+
+  /** audio-flow: toggle the user's background preference. When called
+   *  mid-call, take effect immediately. */
+  setBackgroundEnabled(on) {
+    const next = !!on;
+    const changed = this._backgroundEnabled !== next;
+    this._backgroundEnabled = next;
+    if (!next && this._backgroundPlaying) {
+      this.stopBackground();
+    }
+    return changed;
+  }
+
+  isBackgroundEnabled() { return this._backgroundEnabled; }
+  isBackgroundPlaying() { return this._backgroundPlaying; }
+
+  /** audio-flow: stop everything and detach listeners. Called on full
+   *  pipeline close. */
+  destroy() {
+    // Background (HTMLAudioElement) — pause + unload.
+    try { this.backgroundAudio.pause(); } catch {}
+    try { this.backgroundAudio.removeAttribute('src'); this.backgroundAudio.load(); } catch {}
+    // callOpen + callClose (AudioBufferSourceNode) — stop if active.
+    if (this._activeOpenSource) {
+      this._activeOpenStopped = true;
+      try { this._activeOpenSource.stop(0); } catch {}
+      try { this._activeOpenSource.disconnect(); } catch {}
+      this._activeOpenSource = null;
+    }
+    if (this._activeCloseSource) {
+      this._activeCloseStopped = true;
+      try { this._activeCloseSource.stop(0); } catch {}
+      try { this._activeCloseSource.disconnect(); } catch {}
+      this._activeCloseSource = null;
+    }
+    this._openPlaying = false;
+    this._backgroundPlaying = false;
+    this._closePlaying = false;
+  }
 }
 
 export class AudioPipeline extends EventTarget {
@@ -207,40 +608,54 @@ export class AudioPipeline extends EventTarget {
     // Playback graph pieces.
     this.nextStartTime = 0;
     this.playbackGain = null;      // agent volume only
-    this.agentGain = null;         // ALWAYS connects through bandPass chain now
-    this.bandPass = null;          // persistent compression/filter graph
-    this.bandPassEnabled = false;  // derived from compressionStrength > 0
-    this.compressionStrength = 50; // 0..100 — default phone sound
-    this._lastShaperBucket = -1;
     this.outputVolume = 1.0;
 
-    // Noise graph (INDEPENDENT — connects directly to ctx.destination):
-    //   noiseSource → noiseBusGain → noiseEnvelopeGain → ctx.destination
-    // noiseBusGain  = user volume (slider).
-    // noiseEnvelopeGain = state-machine fade gain (0 when off, bus-val when on).
-    this.noiseBusGain = null;
-    this.noiseEnvelopeGain = null;
-    this.noiseMode = 'off';
-    this.noiseNode = null;          // the current factory's node bundle
-    this.noiseVolume = 0.5;
-    this.ambientOn = false;
+    // Round-5: the round-4 client-side playback buffer + gate has been
+    // removed. The correct fix is upstream — the Gemini Live session
+    // never generates audio until the client sends a user-turn, and
+    // the `greet_gate_open` frame that triggers the proactive greeting
+    // is itself gated on the callOpen `ended` event
+    // (see VoiceAgent._tryOpenGreetGate + api/live-bridge.js
+    // maybeFireGreeting). So no TTS audio arrives during callOpen, so
+    // there is nothing to buffer. `enqueuePcm24k` schedules every
+    // chunk directly into the AudioContext with no gating. A
+    // safety-belt log in VoiceAgent._onWsMessage catches any
+    // regression where agent PCM arrives before callOpen settles.
 
-    // Human-call layer (Oracle Decision 2). SIBLING branch to destination,
-    // independent of noiseBusGain and playbackGain. Runs continuously while
-    // isInCall(), layered under whichever primary noiseMode is selected.
-    //   [muffle/wind/breath sources] → humanLayerBusGain → humanLayerEnvelopeGain → ctx.destination
-    this.humanLayerBusGain = null;
-    this.humanLayerEnvelopeGain = null;
-    this.humanLayerVolume = 0.6;
-    this.humanLayerOn = false;
-    this.humanLayer = null;         // { muffle, wind, breathBuffer, muffleFilter, windFilter, windGain, windLFO, windLFOGain }
-    this._breathTimer = null;
+    // audio-flow: phone-line compression sub-graph. Optional, crossfaded.
+    // Default OFF (bypass). Owned by pipeline; toggled via
+    // setPhoneCompression(). Graph:
+    //   playbackGain ──┬─ _cleanGain ─────────────────────────────┐
+    //                  │                                           ├─> destination
+    //                  └─ _phoneIn → HP → LP → Comp → Makeup ─────┘
+    // _cleanGain and _phoneIn (which feeds through to _phoneOut at the
+    // end of the chain) have their gains crossfaded so there's no click.
+    this._phoneCompressionOn = false;
+    this._cleanGain = null;
+    this._phoneIn = null;
+    this._phoneHP = null;
+    this._phoneLP1 = null;
+    this._phoneLP2 = null;
+    this._phoneComp = null;
+    this._phoneMakeup = null;
+
+    // audio-flow: call-audio controller owns the three lifecycle clips.
+    // It's independent from the Web Audio graph so it keeps working even
+    // if the ctx is suspended — the browser drives <audio> scheduling.
+    this.callAudio = new CallAudioController({
+      onStateChange: (ev) => this.dispatchEvent(new CustomEvent('call-audio-changed', { detail: ev })),
+      onAllStopped: () => this.dispatchEvent(new CustomEvent('call-audio-all-stopped')),
+      // Round-7: pass self so the controller can construct
+      // AudioBufferSourceNodes off the shared AudioContext +
+      // playbackGain when callOpen/callClose are triggered.
+      pipeline: this
+    });
 
     this._analyser = null;
     this._micAnalyser = null;
 
     // Keep-alive watchdog — periodically resume the context if Chrome
-    // decides to suspend it while idle. Bound in unlockAudioSync().
+    // decides to suspend it while idle.
     this._keepAliveTimer = null;
 
     // Visibility-resume listener so tabs returning from background unlock
@@ -283,6 +698,14 @@ export class AudioPipeline extends EventTarget {
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
+    // audio-flow: unlock the HTMLAudioElement layer (only background
+    // now, since round-7 moved callOpen/callClose to Web Audio).
+    try { this.callAudio.unlock(); } catch {}
+    // Round-7: kick off the AudioBuffer decode for callOpen +
+    // callClose so the first placeCall has them ready. Fire-and-forget:
+    // the decode promise is tracked inside the controller so the play
+    // path can await it if the user clicks before decode finishes.
+    try { this.callAudio.prepareBuffers(this.ctx); } catch {}
     return this.ctx;
   }
 
@@ -304,67 +727,113 @@ export class AudioPipeline extends EventTarget {
   _buildPlaybackGraph() {
     const ctx = this.ctx;
 
-    // Agent-output chain: agentGain → HP → LP → Compressor → WaveShaper → compOut → playbackGain → destination
-    // ALL nodes are persistent. setCompressionStrength(0) interpolates them
-    // to transparent pass-through; setCompressionStrength(100) to heavy
-    // walkie-talkie. No reconnects on strength changes — just param ramps.
+    // Agent-output chain with an opt-in phone-line compression branch.
+    // Base chain (default, compression OFF):
+    //   sources → playbackGain → _cleanGain → destination
+    // Phone chain (when ON, crossfaded in):
+    //   playbackGain → _phoneIn → HP(300Hz) → LP(3400Hz) → LP(3400Hz)
+    //               → DynamicsCompressor → makeupGain → destination
+    // Both gain paths are mixed into destination; we crossfade
+    // _cleanGain.gain vs _phoneIn.gain with a 50ms exponential ramp.
     this.playbackGain = ctx.createGain();
     this.playbackGain.gain.value = this.outputVolume;
-    this.playbackGain.connect(ctx.destination);
 
-    // Analyser on agent audio (for VU meter).
+    // Clean path.
+    this._cleanGain = ctx.createGain();
+    this._cleanGain.gain.value = 1.0; // default: clean ON (bypass phone)
+
+    // Phone path.
+    this._phoneIn = ctx.createGain();
+    this._phoneIn.gain.value = 0.0; // default: phone OFF (bypassed)
+
+    // 300Hz high-pass then 3400Hz low-pass cascaded twice for a steeper
+    // roll-off that better evokes the POTS bandwidth.
+    this._phoneHP = ctx.createBiquadFilter();
+    this._phoneHP.type = 'highpass';
+    this._phoneHP.frequency.value = 300;
+    this._phoneHP.Q.value = 0.707;
+
+    this._phoneLP1 = ctx.createBiquadFilter();
+    this._phoneLP1.type = 'lowpass';
+    this._phoneLP1.frequency.value = 3400;
+    this._phoneLP1.Q.value = 0.707;
+
+    this._phoneLP2 = ctx.createBiquadFilter();
+    this._phoneLP2.type = 'lowpass';
+    this._phoneLP2.frequency.value = 3400;
+    this._phoneLP2.Q.value = 0.707;
+
+    // Soft compressor to simulate a carrier's dynamics processing.
+    this._phoneComp = ctx.createDynamicsCompressor();
+    this._phoneComp.threshold.value = -18;
+    this._phoneComp.ratio.value = 3;
+    this._phoneComp.attack.value = 0.010;
+    this._phoneComp.release.value = 0.200;
+    this._phoneComp.knee.value = 6;
+
+    // +6 dB makeup to restore loudness lost to bandpass + compression.
+    this._phoneMakeup = ctx.createGain();
+    this._phoneMakeup.gain.value = 2.0; // ~+6 dB
+
+    // Wire phone chain.
+    this._phoneIn.connect(this._phoneHP);
+    this._phoneHP.connect(this._phoneLP1);
+    this._phoneLP1.connect(this._phoneLP2);
+    this._phoneLP2.connect(this._phoneComp);
+    this._phoneComp.connect(this._phoneMakeup);
+    this._phoneMakeup.connect(ctx.destination);
+
+    // Wire parallel paths off playbackGain.
+    this.playbackGain.connect(this._cleanGain);
+    this._cleanGain.connect(ctx.destination);
+    this.playbackGain.connect(this._phoneIn);
+
+    // Analyser on agent audio (for VU meter). Tap playbackGain so the
+    // reading is unaffected by the phone/clean crossfade.
     this._analyser = ctx.createAnalyser();
     this._analyser.fftSize = 256;
     this.playbackGain.connect(this._analyser);
-
-    this.agentGain = ctx.createGain();
-    this.agentGain.gain.value = 1;
-
-    const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 0;
-    hp.Q.value = 0.7;
-
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 20000;
-    lp.Q.value = 0.7;
-
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = 0;
-    comp.ratio.value = 1;
-    comp.attack.value = 0.003;
-    comp.release.value = 0.25;
-    comp.knee.value = 24;
-
-    const shaper = ctx.createWaveShaper();
-    shaper.curve = makeSaturationCurve(0); // linear at strength 0
-
-    const compOut = ctx.createGain();
-    compOut.gain.value = 1;
-
-    this.agentGain.connect(hp).connect(lp).connect(comp).connect(shaper).connect(compOut).connect(this.playbackGain);
-    this.bandPass = { hp, lp, comp, shaper, out: compOut };
-    this._lastShaperBucket = 0;
-
-    // NOISE: fully independent branch, direct to ctx.destination.
-    //   noiseSource.node → noiseBusGain (user volume) → noiseEnvelopeGain (fade) → destination
-    this.noiseBusGain = ctx.createGain();
-    this.noiseBusGain.gain.value = this.noiseVolume;
-    this.noiseEnvelopeGain = ctx.createGain();
-    this.noiseEnvelopeGain.gain.value = 0; // starts muted — VoiceAgent fades it in
-    this.noiseBusGain.connect(this.noiseEnvelopeGain).connect(ctx.destination);
-
-    // HUMAN-CALL LAYER: sibling branch. Lazy-built on first setHumanLayerOn(true).
-    this.humanLayerBusGain = ctx.createGain();
-    this.humanLayerBusGain.gain.value = this.humanLayerVolume;
-    this.humanLayerEnvelopeGain = ctx.createGain();
-    this.humanLayerEnvelopeGain.gain.value = 0;
-    this.humanLayerBusGain.connect(this.humanLayerEnvelopeGain).connect(ctx.destination);
-
-    // Apply any persisted compression strength NOW that the graph exists.
-    this.setCompressionStrength(this.compressionStrength);
   }
+
+  /** audio-flow: enable/disable the phone-line compression sub-graph.
+   *  Crossfades the clean vs. phone path with a 50ms exponential ramp
+   *  to avoid clicks. Safe to call before the AudioContext exists (will
+   *  be applied next time the graph is built, but in practice the graph
+   *  is built during placeCall's unlock so this is a no-op edge). */
+  setPhoneCompression(on) {
+    const next = !!on;
+    this._phoneCompressionOn = next;
+    if (!this.ctx || !this._cleanGain || !this._phoneIn) return next;
+    const now = this.ctx.currentTime;
+    const RAMP = 0.050;
+    const EPS = 0.0001; // exponentialRamp can't target 0
+    try {
+      // Cancel any pending schedules so toggling fast doesn't stack.
+      this._cleanGain.gain.cancelScheduledValues(now);
+      this._phoneIn.gain.cancelScheduledValues(now);
+      // Set starting values explicitly (cancel doesn't — it just clears
+      // the automation curve). Read current value before ramping.
+      this._cleanGain.gain.setValueAtTime(Math.max(this._cleanGain.gain.value, EPS), now);
+      this._phoneIn.gain.setValueAtTime(Math.max(this._phoneIn.gain.value, EPS), now);
+      if (next) {
+        // Phone ON: clean fades to EPS, phone fades to 1.
+        this._cleanGain.gain.exponentialRampToValueAtTime(EPS, now + RAMP);
+        this._phoneIn.gain.exponentialRampToValueAtTime(1.0, now + RAMP);
+      } else {
+        this._phoneIn.gain.exponentialRampToValueAtTime(EPS, now + RAMP);
+        this._cleanGain.gain.exponentialRampToValueAtTime(1.0, now + RAMP);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[audio-flow] setPhoneCompression crossfade threw', err && err.message);
+      // Fallback: hard set.
+      this._cleanGain.gain.value = next ? 0.0 : 1.0;
+      this._phoneIn.gain.value = next ? 1.0 : 0.0;
+    }
+    return next;
+  }
+
+  isPhoneCompressionOn() { return !!this._phoneCompressionOn; }
 
   /** Gentle watchdog: resumes the AudioContext if Chrome suspends it while
    *  we think a call is active. Tiny CPU cost. */
@@ -384,15 +853,35 @@ export class AudioPipeline extends EventTarget {
 
   // ----- Playback -----
 
-  enqueuePcm24k(int16) {
+  /** Schedule a PCM16 24 kHz chunk into the AudioContext immediately.
+   *  No buffering, no gating — the upstream (live-bridge.js) is
+   *  responsible for not generating audio until the client is ready
+   *  (server-side pre-greet buffer, see round-6 fix 1).
+   *
+   *  Round-1 req 7 still holds: `flushPlayback()` stops every scheduled
+   *  source synchronously for the immediate-kill UX.
+   *
+   *  Round-6 fix 2: fires the `agent-playback-drained` event when the
+   *  last scheduled source's `onended` runs AND the set becomes
+   *  empty. The deterministic end-call chain listens for this to
+   *  decide when the model has physically finished speaking. */
+  enqueuePcm24k(int16, sampleRate) {
     if (!this.ctx) return;
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
-    const buffer = int16ToAudioBuffer(this.ctx, int16, 24000);
+    // latency-pass: server may be sending narrowband (8 kHz) frames when
+    // the user has phoneLine compression ON. Schedule each buffer at the
+    // rate declared via the last `audio_format` message; fall back to
+    // 24 kHz for backwards compatibility. The playback graph then
+    // natively upsamples via the AudioContext's 48 kHz interactive
+    // latency hint — Web Audio's built-in resampler is transparent for
+    // speech.
+    const rate = Math.max(4000, Math.min(48000, Number(sampleRate) || 24000));
+    const buffer = int16ToAudioBuffer(this.ctx, int16, rate);
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
-    src.connect(this.agentGain);
+    src.connect(this.playbackGain);
     const t = Math.max(this.ctx.currentTime, this.nextStartTime);
     src.start(t);
     this.nextStartTime = t + buffer.duration;
@@ -400,10 +889,23 @@ export class AudioPipeline extends EventTarget {
     src.onended = () => {
       try { src.disconnect(); } catch {}
       this.activePlaybackSources.delete(src);
+      if (this.activePlaybackSources.size === 0) {
+        try { this.dispatchEvent(new CustomEvent('agent-playback-drained')); } catch {}
+      }
     };
   }
 
-  /** Hard flush: stop all in-flight scheduled sources immediately. */
+  /** Round-6 fix 2: `true` while any agent-audio source is still
+   *  scheduled or playing. The deterministic end-call chain uses this
+   *  to decide whether to wait for `agent-playback-drained` or
+   *  proceed immediately. */
+  isAgentAudioPlaying() {
+    return this.activePlaybackSources.size > 0;
+  }
+
+  /** Hard flush: stop all in-flight scheduled sources immediately.
+   *  Called from `flushPlayback` consumers in VoiceAgent to kill any
+   *  still-playing agent voice (round-1 req 7, round-2 teardown). */
   flushPlayback() {
     for (const src of this.activePlaybackSources) {
       try { src.stop(); } catch {}
@@ -413,265 +915,29 @@ export class AudioPipeline extends EventTarget {
     this.nextStartTime = this.ctx ? this.ctx.currentTime : 0;
   }
 
+  /** audio-flow: Total-audio kill-switch. Synchronously stops every
+   *  Gemini playback source AND every HTMLAudioElement so no further
+   *  sound can reach the speakers. Used when the user clicks End Call
+   *  and we need "THEN AND THERE" silence (requirement 7).
+   *
+   *  Emits the `call-audio-all-stopped` event so the UI flips the End
+   *  Call button back to green (requirement 6). */
+  stopAllAudio() {
+    // 1. Kill scheduled PCM sources (Gemini voice).
+    this.flushPlayback();
+    // 2. HARD-kill every lifecycle <audio> element (callOpen, background,
+    //    callClose). Also latches the controller so a late-arriving
+    //    `startBackground()` or `playCallClose()` can't resurrect audio.
+    try { this.callAudio.stopAllCallAudio(); } catch {}
+    // 3. Make sure the "all stopped" event fires even if the controller
+    //    already flipped its internal flags. Idempotent consumers are
+    //    expected.
+    try { this.dispatchEvent(new CustomEvent('call-audio-all-stopped')); } catch {}
+  }
+
   setOutputVolume(v) {
     this.outputVolume = Math.max(0, Math.min(1.5, v));
     if (this.playbackGain) this.playbackGain.gain.value = this.outputVolume;
-  }
-
-  // ----- Noise (ambient) -----
-
-  setNoiseVolume(v) {
-    this.noiseVolume = Math.max(0, Math.min(1, v));
-    if (this.noiseBusGain) this.noiseBusGain.gain.value = this.noiseVolume;
-  }
-
-  /** Backwards-compat shim. Binary callers map to strength 50 (default
-   *  phone sound) or 0 (pass-through). The persistent graph means no
-   *  reconnects happen — we just ramp the nodes' params. */
-  setBandPassEnabled(on) {
-    this.setCompressionStrength(on ? 50 : 0);
-    this.bandPassEnabled = !!on;
-  }
-
-  /** Interpolate compression params for strength 0..100. Applied via
-   *  setTargetAtTime with 50 ms time constant so slider drags produce
-   *  smooth audible changes and zero clicks. */
-  setCompressionStrength(strength) {
-    const s = Math.max(0, Math.min(100, Number(strength) || 0));
-    this.compressionStrength = s;
-    this.bandPassEnabled = s > 0;
-    if (!this.bandPass || !this.ctx) return;
-    const p = interpolateCompressionParams(s);
-    const now = this.ctx.currentTime;
-    const tau = 0.05;
-    try { this.bandPass.hp.frequency.setTargetAtTime(p.hp, now, tau); } catch {}
-    try { this.bandPass.lp.frequency.setTargetAtTime(p.lp, now, tau); } catch {}
-    try { this.bandPass.comp.threshold.setTargetAtTime(p.threshold, now, tau); } catch {}
-    try { this.bandPass.comp.ratio.setTargetAtTime(p.ratio, now, tau); } catch {}
-    try { this.bandPass.comp.attack.setTargetAtTime(p.attack, now, tau); } catch {}
-    try { this.bandPass.comp.release.setTargetAtTime(p.release, now, tau); } catch {}
-    // Regenerate the saturation curve only when crossing a 10% bucket.
-    const bucket = Math.floor(s / 10);
-    if (bucket !== this._lastShaperBucket) {
-      try { this.bandPass.shaper.curve = makeSaturationCurve(p.drive); } catch {}
-      this._lastShaperBucket = bucket;
-    }
-  }
-
-  getCompressionStrength() { return this.compressionStrength; }
-
-  // ----- Human-call layer (muffle + wind + breath) -----
-
-  /** Build the three procedural components once. Lazy — only on first
-   *  setHumanLayerOn(true). If the user never places a call, no
-   *  allocation happens. */
-  _buildHumanLayer() {
-    if (this.humanLayer || !this.ctx || !this.humanLayerBusGain) return;
-    const ctx = this.ctx;
-
-    // 1. Muffle: brown noise loop → lowpass 200 Hz → gain 0.12.
-    const muffleSrc = ctx.createBufferSource();
-    muffleSrc.buffer = makeNoiseBuffer(ctx, 10, 'brown');
-    muffleSrc.loop = true;
-    const muffleLp = ctx.createBiquadFilter();
-    muffleLp.type = 'lowpass';
-    muffleLp.frequency.value = 200;
-    muffleLp.Q.value = 0.5;
-    const muffleGain = ctx.createGain();
-    muffleGain.gain.value = 0.12;
-    muffleSrc.connect(muffleLp).connect(muffleGain).connect(this.humanLayerBusGain);
-
-    // 2. Wind: pink noise loop → bandpass 300 Hz Q 1.2 → gain 0.08.
-    //    LFO 0.08 Hz on gain adds slow breathing.
-    const windSrc = ctx.createBufferSource();
-    windSrc.buffer = makeNoiseBuffer(ctx, 10, 'pink');
-    windSrc.loop = true;
-    const windBp = ctx.createBiquadFilter();
-    windBp.type = 'bandpass';
-    windBp.frequency.value = 300;
-    windBp.Q.value = 1.2;
-    const windGain = ctx.createGain();
-    windGain.gain.value = 0.08;
-    windSrc.connect(windBp).connect(windGain).connect(this.humanLayerBusGain);
-    const windLfo = ctx.createOscillator();
-    windLfo.type = 'sine';
-    windLfo.frequency.value = 0.08;
-    const windLfoGain = ctx.createGain();
-    windLfoGain.gain.value = 0.06;
-    windLfo.connect(windLfoGain).connect(windGain.gain);
-
-    // 3. Breath: pre-render a 0.3s pink-noise burst with baked ADSR.
-    const breathBuffer = this._makeBreathBuffer(ctx);
-
-    try { muffleSrc.start(); } catch {}
-    try { windSrc.start(); } catch {}
-    try { windLfo.start(); } catch {}
-
-    this.humanLayer = {
-      muffleSrc, muffleLp, muffleGain,
-      windSrc, windBp, windGain, windLfo, windLfoGain,
-      breathBuffer
-    };
-  }
-
-  /** 0.3 s pink-noise burst with exp attack (30 ms) + exp decay (270 ms).
-   *  Shape baked into the buffer so runtime playback needs no gain ramps. */
-  _makeBreathBuffer(ctx) {
-    const sr = ctx.sampleRate;
-    const dur = 0.3;
-    const len = Math.round(dur * sr);
-    const buf = ctx.createBuffer(1, len, sr);
-    const data = buf.getChannelData(0);
-    const attackSamples = Math.round(0.03 * sr);
-    const decaySamples = len - attackSamples;
-    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-    for (let i = 0; i < len; i++) {
-      const white = Math.random() * 2 - 1;
-      b0 = 0.99886 * b0 + white * 0.0555179;
-      b1 = 0.99332 * b1 + white * 0.0750759;
-      b2 = 0.96900 * b2 + white * 0.1538520;
-      b3 = 0.86650 * b3 + white * 0.3104856;
-      b4 = 0.55000 * b4 + white * 0.5329522;
-      b5 = -0.7616 * b5 - white * 0.0168980;
-      const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
-      b6 = white * 0.115926;
-      // ADSR envelope: exp attack, exp decay to zero.
-      let env;
-      if (i < attackSamples) {
-        const t = i / attackSamples;
-        env = 1 - Math.exp(-3 * t);
-      } else {
-        const t = (i - attackSamples) / decaySamples;
-        env = Math.exp(-3 * t);
-      }
-      data[i] = pink * 0.11 * env;
-    }
-    return buf;
-  }
-
-  _scheduleBreath() {
-    if (!this.humanLayer || !this.humanLayerOn || !this.ctx) return;
-    // Jittered interval 4000..8000 ms. setTimeout drift at these scales is
-    // inaudible; the layer is garnish, not load-bearing.
-    const nextMs = 4000 + Math.random() * 4000;
-    this._breathTimer = setTimeout(() => {
-      this._breathTimer = null;
-      if (!this.humanLayer || !this.humanLayerOn || !this.ctx) return;
-      try {
-        const src = this.ctx.createBufferSource();
-        src.buffer = this.humanLayer.breathBuffer;
-        const lp = this.ctx.createBiquadFilter();
-        lp.type = 'lowpass';
-        lp.frequency.value = 900;
-        lp.Q.value = 0.4;
-        const g = this.ctx.createGain();
-        g.gain.value = 0.03;
-        src.connect(lp).connect(g).connect(this.humanLayerBusGain);
-        const offset = Math.random() * 0.05;
-        src.start(this.ctx.currentTime + 0.02 + offset);
-        src.onended = () => {
-          try { src.disconnect(); } catch {}
-          try { lp.disconnect(); } catch {}
-          try { g.disconnect(); } catch {}
-        };
-      } catch {}
-      this._scheduleBreath();
-    }, nextMs);
-  }
-
-  /** Toggle the muffle + wind + breath layer with a short fade. Mirrors
-   *  setAmbientOn; a mid-call re-assert is a cheap no-op ramp. */
-  setHumanLayerOn(on, { fadeMs = FADE_MS_DEFAULT } = {}) {
-    if (!this.ctx || !this.humanLayerEnvelopeGain) {
-      this.humanLayerOn = !!on;
-      return;
-    }
-    if (on && !this.humanLayer) {
-      try { this._buildHumanLayer(); } catch {}
-    }
-    this.humanLayerOn = !!on;
-    const gain = this.humanLayerEnvelopeGain.gain;
-    const now = this.ctx.currentTime;
-    try { gain.cancelScheduledValues(now); } catch {}
-    gain.setValueAtTime(gain.value, now);
-    const target = on ? 1 : 0;
-    const timeConst = Math.max(0.01, (fadeMs / 1000) / 3);
-    gain.setTargetAtTime(target, now, timeConst);
-    // Scheduler lifecycle: start when turning on (if not already running);
-    // clear on turn-off.
-    if (on) {
-      if (!this._breathTimer) this._scheduleBreath();
-    } else {
-      if (this._breathTimer) { clearTimeout(this._breathTimer); this._breathTimer = null; }
-    }
-  }
-
-  setHumanLayerVolume(v) {
-    this.humanLayerVolume = Math.max(0, Math.min(1, Number(v) || 0));
-    if (this.humanLayerBusGain) this.humanLayerBusGain.gain.value = this.humanLayerVolume;
-  }
-
-  setNoiseMode(mode) {
-    const next = String(mode || 'off');
-    if (!this.ctx) {
-      this.noiseMode = next;   // remember for when ctx comes up
-      return;
-    }
-    // Idempotent: if mode hasn't changed and a source is already running,
-    // don't stop/rebuild. Re-creation would produce a tiny click when the
-    // envelope happens to be > 0 and the user re-applies their effective
-    // setting (e.g. on first gesture restoring persisted prefs).
-    if (next === this.noiseMode && (this.noiseNode || next === 'off')) {
-      return;
-    }
-    // Stop any currently-playing source cleanly. The ENVELOPE gain
-    // controls whether the user hears it; stopping the source just
-    // releases the oscillators under the hood.
-    if (this.noiseNode) { try { this.noiseNode.stop(); } catch {} this.noiseNode = null; }
-    this.noiseMode = next;
-    const factory = NOISE_FACTORIES[this.noiseMode];
-    if (!factory) return;
-    const node = factory(this.ctx, this.noiseBusGain);
-    if (node) { node.start(); this.noiseNode = node; }
-  }
-
-  /**
-   * Toggle ambient playback with a short fade. Called by VoiceAgent on
-   * session state transitions (LIVE_OPENING → on, IDLE/ERROR → off).
-   *
-   * The source (if present) keeps running under the hood; only the
-   * envelope gain ramps. Fade avoids clicks/pops and matches a real
-   * phone-call background's in/out.
-   */
-  setAmbientOn(on, { fadeMs = FADE_MS_DEFAULT } = {}) {
-    if (!this.ctx || !this.noiseEnvelopeGain) {
-      this.ambientOn = !!on;
-      return;
-    }
-    // Lazy: if the user wants ambient on but we haven't instantiated the
-    // noise source yet, build it now. This covers the "user clicks Place
-    // Call as their first gesture" path — unlockAudioSync created the ctx
-    // and graph, but setNoiseMode was never called.
-    if (on && !this.noiseNode && this.noiseMode && this.noiseMode !== 'off') {
-      const factory = NOISE_FACTORIES[this.noiseMode];
-      if (factory) {
-        const node = factory(this.ctx, this.noiseBusGain);
-        if (node) { node.start(); this.noiseNode = node; }
-      }
-    }
-    // If the user picked 'off', keep envelope at 0.
-    const targetLevel = (!on || this.noiseMode === 'off') ? 0 : 1;
-    this.ambientOn = !!on;
-    const gain = this.noiseEnvelopeGain.gain;
-    const now = this.ctx.currentTime;
-    // Cancel any scheduled ramp and set the "from" value explicitly so
-    // setTargetAtTime starts from the actual current gain.
-    try { gain.cancelScheduledValues(now); } catch {}
-    gain.setValueAtTime(gain.value, now);
-    // Exponential-like approach using setTargetAtTime; time constant ~
-    // fadeMs/3 gives ~95% travel in fadeMs.
-    const timeConst = Math.max(0.01, (fadeMs / 1000) / 3);
-    gain.setTargetAtTime(targetLevel, now, timeConst);
   }
 
   // ----- Capture -----
@@ -805,15 +1071,8 @@ export class AudioPipeline extends EventTarget {
     }
     this._stopKeepAlive();
     this.stopCapture();
-    if (this._breathTimer) { clearTimeout(this._breathTimer); this._breathTimer = null; }
-    this.humanLayerOn = false;
-    if (this.humanLayer) {
-      try { this.humanLayer.muffleSrc.stop(); } catch {}
-      try { this.humanLayer.windSrc.stop(); } catch {}
-      try { this.humanLayer.windLfo.stop(); } catch {}
-      this.humanLayer = null;
-    }
-    if (this.noiseNode) { try { this.noiseNode.stop(); } catch {} this.noiseNode = null; }
+    // audio-flow: stop the call-audio layer before tearing down the ctx.
+    try { this.callAudio.destroy(); } catch {}
     if (this.ctx) { try { await this.ctx.close(); } catch {} this.ctx = null; }
   }
 }

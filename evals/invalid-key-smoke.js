@@ -93,7 +93,8 @@ function waitForErrorFrame(timeoutMs = 15000) {
       PORT: String(PORT),
       GEMINI_API_KEY: 'invalid-key-for-smoke-test',
       // Avoid loading real dotenv in case it overrides.
-      DOTENV_DISABLE: '1'
+      DOTENV_DISABLE: '1',
+      DISABLE_WS_NONCE: '1'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

@@ -366,16 +366,20 @@ const STATIC_TOOL_DECLARATIONS = [
       required: ['layer', 'visible']
     }
   },
+  // audio-flow: `end_call` lets the model hang up when the user has
+  // clearly signalled they're done. Socket-close choreography is
+  // handled server-side (see live-bridge.js → onBrowserText handling
+  // the tool forward) and the client's VoiceAgent._gracefullyEndCall
+  // is idempotent so a user click racing this call is safe.
   {
-    name: 'set_compression_strength',
+    name: 'end_call',
     description:
-      'Adjust how much phone-line compression is applied to your voice. Range 0 (studio-clean) to 100 (heavy walkie-talkie). ~50 is the default phone sound. Use when the user says "sound crustier", "sound clearer", "more compression", "less filtering". Persists across reloads.',
+      'Hang up the current voice call with the user. Call this ONLY when the user has clearly signalled they are done — they said goodbye, "thanks, bye", "that\'s all I need", or otherwise ended the conversation. Do NOT call this preemptively. Do NOT call this after a single user turn. Always be certain before ending — you cannot undo a hang-up.',
     parameters: {
       type: 'object',
       properties: {
-        strength: { type: 'number', description: 'Integer 0–100.' }
-      },
-      required: ['strength']
+        reason: { type: 'string', description: 'Brief reason for ending (optional, for server logs).' }
+      }
     }
   }
 ];
@@ -404,13 +408,17 @@ UI helper tools (appended):
 - Use set_quick_actions to offer 2–5 relevant follow-up taps ("Shortlist it", "Log counter"). Replace them when the context shifts.
 - Use open_palette or run_palette_action when the user wants to jump somewhere quickly; run_palette_action is better when you're confident of the action_id.
 - Use set_captions and set_theme ONLY when the user explicitly asks (e.g. "turn on captions", "dark mode"). Don't volunteer these.
-- Use set_compression_strength when the user asks about how you sound ("crustier", "clearer", "more phone-line", "studio"). 0 is clean, 50 is default phone, 100 is heavy walkie-talkie.
+- Use end_call when — and ONLY when — the user has clearly ended the conversation (said "bye", "thanks, that's all", "I'm done", etc.). Never call it after a single exchange, never call it to "be polite", never call it while a task is in flight. When in doubt, stay on the line and ask a clarifying question instead. The hang-up is irreversible. Say a brief sign-off out loud FIRST and FINISH SPEAKING IT — e.g. "Have a nice day!" or "Take care!" — then call end_call as the very next step. Do not truncate the sign-off or call end_call before the sentence is fully spoken.
 - Use map_focus / map_highlight_load / map_show_layer only on the Map page. map_focus accepts city, state, or load/carrier id; prefer load/carrier id when applicable.
 
 Map-tool usage (v2.1):
 - For spatial questions like "where is X", "show me the route for X", "what carriers cover the Texas lane", prefer the map tools over navigating manually — they auto-navigate to /map.html from any page and open the right view. If you are already on /map.html, don't re-navigate.
 - Load ids are phonetically fragile ("LD-10824" vs "LD-10284"): if you are less than sure, read the id back and get confirmation BEFORE calling map_highlight_load. Never guess digits.
-- Map tools may return {ok:false, error:"..."} with a human-readable message (e.g. "No city, state, or id matched 'Toronto, ON'"). Relay that sentence to the user in your next reply instead of claiming the map moved — and propose a recovery (ask for a different name, or suggest a known city).`;
+- Map tools may return {ok:false, error:"..."} with a human-readable message (e.g. "No city, state, or id matched 'Toronto, ON'"). Relay that sentence to the user in your next reply instead of claiming the map moved — and propose a recovery (ask for a different name, or suggest a known city).
+
+Expressive delivery (v2.2):
+- When emotionally warranted, include ONE inline vocal burst per turn — *sighs*, *laughs*, *hmm*, breath — to sound human. Cap: one per turn, never more. Skip if the user is mid-task or tense.
+- Do NOT narrate emotion in brackets ("[surprised]"); trust the voice and the burst.`;
 
 /** Sanitise strings that will be embedded in the system prompt. We trim to a
  *  short length and drop anything that looks like a prompt-injection marker

@@ -21,7 +21,10 @@
  *      `session_resume_failed` so the UI can un-dim / fall back cleanly.
  *   7. `page_context` messages from the browser (sent after nav) are turned
  *      into a delimited `<page_context>...</page_context>` system update and
- *      injected via session.sendClientContent({ turnComplete: true }). The
+ *      injected via session.sendRealtimeInput({ text }). (Previously used
+ *      sendClientContent — but that's "seed-history only" on Gemini 3.1
+ *      Flash Live, so the model would silently store the text without
+ *      responding. Realtime-input is honoured on both 3.1 and 2.5.) The
  *      model is taught in the system prompt to acknowledge page changes in
  *      one short sentence unless the user is mid-task.
  *   8. Tool calls: forward to browser; round-trip results; 10s timeout.
@@ -62,7 +65,15 @@ function safeSendJson(ws, obj) {
 
 function safeSendBinary(ws, buf) {
   if (!ws || ws.readyState !== 1) return;
-  try { ws.send(buf, { binary: true }); } catch { /* ignore */ }
+  // latency-pass: disable per-message deflate for PCM audio. ws defaults to
+  // `perMessageDeflate: true` on the server — applied to every frame,
+  // including binary. 16-bit PCM at 16 kHz (8–32 kB/frame) is near-random
+  // at the byte level and doesn't compress well (often ~95 %+ of original).
+  // The CPU cost of deflate per frame (allocate, compress, send) stalls the
+  // event loop on every audio chunk and delays both the TTS return path
+  // AND incoming mic audio forwarding. Opting out with `compress:false`
+  // skips the deflate stage entirely for the frame.
+  try { ws.send(buf, { binary: true, compress: false }); } catch { /* ignore */ }
 }
 
 function buildGenaiClient(apiKey) {
@@ -191,6 +202,47 @@ function isErrorEphemeral(err) {
   return { retriable: false, code: 'upstream_error' };
 }
 
+// latency-pass: linear PCM16 decimator. Gemini Live emits 24 kHz PCM16
+// mono. When the browser requests phoneLine=true we downsample 3× to 8 kHz
+// before putting it on the wire — 3x fewer bytes per frame, near-zero
+// encode cost (one Int16 multiply + average per output sample). Takes and
+// returns Buffer instances containing little-endian Int16 samples.
+//
+//   - factor === 1  → return the buffer unchanged.
+//   - factor > 1    → produce 1 sample per `factor` input samples; use a
+//                     2-tap box filter to reduce aliasing above the new
+//                     Nyquist. Cheaper than a proper FIR and still better
+//                     than naive decimation for speech.
+function decimatePcm16(inputBuf, factor) {
+  if (!Buffer.isBuffer(inputBuf) || inputBuf.length < 2) return inputBuf;
+  if (factor <= 1) return inputBuf;
+  const inSamples = inputBuf.length >> 1; // 2 bytes per sample
+  const outSamples = Math.floor(inSamples / factor);
+  if (outSamples <= 0) return Buffer.alloc(0);
+  const out = Buffer.allocUnsafe(outSamples * 2);
+  let srcIdx = 0;
+  for (let i = 0; i < outSamples; i++) {
+    // 2-tap box: average two adjacent samples inside the decimation window.
+    // When factor is 3 this is still a crude low-pass but perceptually
+    // acceptable for narrowband speech — the client's subsequent upsample
+    // through the playback graph smooths the rest.
+    const a = inputBuf.readInt16LE(srcIdx * 2);
+    const b = srcIdx + 1 < inSamples ? inputBuf.readInt16LE((srcIdx + 1) * 2) : a;
+    let v = (a + b) >> 1;
+    if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
+    out.writeInt16LE(v, i * 2);
+    srcIdx += factor;
+  }
+  return out;
+}
+
+// audio-prefs: decimation factor choices by phone-line state.
+//   - phoneLine = true  → factor 3 (24 kHz → 8 kHz narrowband).
+//   - phoneLine = false → factor 1 (pass-through wideband 24 kHz).
+function factorForPrefs(prefs) {
+  return prefs && prefs.phoneLine ? 3 : 1;
+}
+
 function attach(browserWs, req, env) {
   const apiKey = env.GEMINI_API_KEY;
   const sessionId = Math.random().toString(36).slice(2, 10);
@@ -205,6 +257,74 @@ function attach(browserWs, req, env) {
   let helloReceived = false;
   let closed = false;
   let upstreamEverProducedData = false;
+  // end-call audio-fix: set to true when WE initiate the upstream close
+  // (call_end, mode_switch, persona_switch, client_reconnect, idle_timeout,
+  // browser_close). The Gemini Live client's `onclose` callback fires
+  // asynchronously after `upstream.close()` returns, by which point we've
+  // already reset `upstreamEverProducedData = false` below. Without this
+  // latch, the onclose handler would see `!upstreamEverProducedData` and
+  // emit a spurious `Upstream closed before setupComplete` error to the
+  // browser, which then tears down the call and cuts off the callClose
+  // chime. This flag lets onclose know "we meant to close — no error".
+  let intentionalUpstreamClose = false;
+  // audio-prefs: negotiated with the browser via `hello.audioPrefs` or a
+  // subsequent `audio_prefs` control frame. phoneLine defaults to true so
+  // a client that never sends the frame still gets the narrowband path.
+  let audioPrefs = { phoneLine: true, outSampleRate: 8000 };
+  // latency-pass: encode-latency HUD telemetry. Every chunk's encode span
+  // is pushed here; on `turn_complete` we log a summary line. Bounded to
+  // the last 1024 entries so a long call doesn't leak memory.
+  const encodeTimes = [];
+  function recordEncodeTime(us) {
+    encodeTimes.push(us);
+    if (encodeTimes.length > 1024) encodeTimes.shift();
+  }
+  // latency-pass: if the browser supplied `greet:{page,title}` in its hello
+  // frame, we inject the <call_initiated> block as soon as the upstream is
+  // ready — saving one browser ↔ server RTT vs waiting for a subsequent
+  // `call_start` message. Cleared after first-use so subsequent reconnects
+  // within the same browser WS don't re-greet.
+  // greeting-fix: explicit state machine. Two gates must close before the
+  // greeting can fire:
+  //   (a) `upstreamSetupComplete` — the upstream session has sent its first
+  //       message (setupComplete from Gemini).
+  //   (b) A greet intent is pending — either from the hello frame or from
+  //       an explicit `call_start` frame.
+  // We fire deterministically as soon as both gates are closed, in either
+  // order — no dependency on any browser-to-server audio frame. This was
+  // the regression: the prior pass correctly scheduled the inject on the
+  // upstream's first message, but the inject itself used `sendClientContent`
+  // which Gemini 3.1 Flash Live does NOT treat as a trigger for model
+  // response. The fix below switches to `sendRealtimeInput({text})` which
+  // IS honoured by 3.1 and does generate the audio greeting.
+  let pendingGreet = null;
+  let greetInjected = false;
+  let upstreamSetupComplete = false; // greeting-fix: explicit gate (a)
+
+  // Round-6 fix 1: zero-latency greeting via server-side pre-generation
+  // + release. The greeting is triggered INTO Gemini as soon as
+  // upstream setup is complete (no gate on the client). The generated
+  // frames (audio + transcript + turn_complete) are buffered server-side
+  // until the browser sends `audio_prelude_ended` (renamed from
+  // `greet_gate_open`). At that moment we flush the buffer to the
+  // browser as a contiguous stream — typical perceived latency ~1 RTT
+  // (40–200 ms) vs the old 500–2000 ms (RTT + gen-time + first-PCM RTT)
+  // because generation ran in parallel with the callOpen chime.
+  //
+  // `preGreetReleased === true` means all future frames go directly
+  // through to the browser with no buffering. Idempotent; we never
+  // re-close the gate once opened (within a single session).
+  //
+  // `audio_prelude_ended` arriving before any frames have buffered is
+  // fine — the release flips the flag, the empty buffer drains as a
+  // no-op, and the next upstream frame goes straight through.
+  let preGreetBuffer = [];
+  let preGreetReleased = false;
+  // audio-flow: idempotency latch for the agent-initiated end_call tool.
+  // When the model calls end_call we immediately ack the upstream, send
+  // an `end_call_requested` frame to the browser, and mark this flag so
+  // a second invocation in the same call is a no-op.
+  let agentEndCallInFlight = false;
   let resumptionHandle = null;
   // The handle we attempted to resume WITH (distinct from the handle we
   // captured AFTER a successful resume). On the first resumption update the
@@ -240,6 +360,48 @@ function attach(browserWs, req, env) {
 
   function emitError(code, message, retriable) {
     safeSendJson(browserWs, { type: 'error', code, message, retriable: !!retriable });
+  }
+
+  /** Round-6 fix 1: forward any frame destined for the browser. Before
+   *  `preGreetReleased`, stash in `preGreetBuffer`; after release, send
+   *  directly. Preserves strict order — a text transcript queued before
+   *  an audio chunk stays in front of it on drain. Works for both JSON
+   *  (control) and binary (PCM) frames; the buffer stores the already-
+   *  serialised payload so flushing is O(n) copy-less. */
+  function forwardAudioFrame(buf) {
+    if (!preGreetReleased) {
+      // Defensive copy — the Buffer comes from Gemini and we're not
+      // going to modify it, but if upstream ever re-uses the backing
+      // allocation we must not hold a stale reference.
+      preGreetBuffer.push({ kind: 'binary', payload: Buffer.from(buf) });
+      return;
+    }
+    safeSendBinary(browserWs, buf);
+  }
+
+  function forwardJsonFrame(obj) {
+    if (!preGreetReleased) {
+      preGreetBuffer.push({ kind: 'json', payload: obj });
+      return;
+    }
+    safeSendJson(browserWs, obj);
+  }
+
+  function releasePreGreetBuffer(source) {
+    if (preGreetReleased) return;
+    preGreetReleased = true;
+    const n = preGreetBuffer.length;
+    let bytes = 0;
+    for (const frame of preGreetBuffer) {
+      if (frame.kind === 'binary') {
+        bytes += frame.payload.length;
+        safeSendBinary(browserWs, frame.payload);
+      } else {
+        safeSendJson(browserWs, frame.payload);
+      }
+    }
+    preGreetBuffer = [];
+    dlog(sessionId, '[jarvis-phase] pregreet_buffer_released src=' + source + ' frames=' + n + ' bytes=' + bytes);
   }
 
   function snapshotElementsAsToolContext() {
@@ -279,6 +441,31 @@ function attach(browserWs, req, env) {
         );
       }
       sendToolResponse(id, name, { ok: true, result: { count: out.length, elements: out } });
+      return;
+    }
+
+    // audio-flow: agent-initiated hang-up. The model has decided the
+    // conversation is done. We handle this entirely server-side:
+    //   1. Ack the tool call so Gemini doesn't keep speaking.
+    //   2. Forward an `end_call_requested` frame to the browser — the
+    //      VoiceAgent there runs the same sequence as a user click
+    //      (stop background, play endCall chime, close WS). Its
+    //      `_endingCall` latch guards against double-firing.
+    //   3. Mark `agentEndCallInFlight` so a second tool invocation in
+    //      the same turn is a no-op. The upstream close happens when
+    //      the browser closes the WS — we don't slam it here because
+    //      Gemini's own tool-response ack requires the socket alive.
+    if (name === 'end_call') {
+      const reason = typeof args.reason === 'string' ? String(args.reason).slice(0, 200) : undefined;
+      dlog(sessionId, 'agent_end_call reason=' + (reason || '(none)'));
+      const payload = { ok: true, result: { ended: true, reason: reason || null } };
+      sendToolResponse(id, name, payload);
+      if (!agentEndCallInFlight) {
+        agentEndCallInFlight = true;
+        safeSendJson(browserWs, { type: 'end_call_requested', reason: reason || null });
+      } else {
+        dlog(sessionId, 'agent_end_call duplicate — not re-notifying browser');
+      }
       return;
     }
 
@@ -338,6 +525,9 @@ function attach(browserWs, req, env) {
 
   async function openUpstream({ reuseHandle = true, explicitHandle = null } = {}) {
     emitState('connecting');
+    // Safety: clear any stale flag from a previous close so THIS upstream's
+    // onclose isn't masked if it legitimately fails before setupComplete.
+    intentionalUpstreamClose = false;
     if (!genai) {
       try {
         genai = buildGenaiClient(apiKey);
@@ -369,6 +559,20 @@ function attach(browserWs, req, env) {
       resumptionHandle: handle
     });
 
+    // latency-pass: tighten end-of-speech detection for LIVE mode. The upstream
+    // default in gemini-config.js is 500 ms of trailing silence before Gemini
+    // marks end-of-turn and fires the model — felt like a perceptible "wait".
+    // Override to 350 ms here (near the floor of "natural" turn-taking latency
+    // for native English; the human conversation floor is ~200–300 ms). Going
+    // lower starts clipping brief mid-sentence pauses. Wake-word mode keeps
+    // its 700 ms because users trail off after "Hey Jarvis" before the real
+    // request. Done post-build so gemini-config.js stays unchanged.
+    if (mode === 'live'
+        && config.realtimeInputConfig
+        && config.realtimeInputConfig.automaticActivityDetection) {
+      config.realtimeInputConfig.automaticActivityDetection.silenceDurationMs = 350;
+    }
+
     const modelsToTry = [LIVE_MODEL_ID, LIVE_MODEL_FALLBACK];
     let lastErr = null;
 
@@ -395,8 +599,8 @@ function attach(browserWs, req, env) {
             onclose: (evt) => {
               const code = evt && (evt.code || evt.statusCode);
               const reason = (evt && evt.reason && evt.reason.toString()) || '';
-              dlog(sessionId, 'onclose code=' + (code || '?'), 'reason=' + (reason || '?'), 'hadData=' + upstreamEverProducedData);
-              if (!upstreamEverProducedData && !closed) {
+              dlog(sessionId, 'onclose code=' + (code || '?'), 'reason=' + (reason || '?'), 'hadData=' + upstreamEverProducedData, 'intentional=' + intentionalUpstreamClose);
+              if (!upstreamEverProducedData && !closed && !intentionalUpstreamClose) {
                 let errCode = 'ws_closed';
                 if (code === 1008 || code === 1007 || code === 4401 || code === 4003) errCode = 'invalid_key';
                 if (/api.key|unauthor|permission|invalid/i.test(reason)) errCode = 'invalid_key';
@@ -404,11 +608,12 @@ function attach(browserWs, req, env) {
                 if (/not.found|unsupported.model/i.test(reason)) errCode = 'model_unavailable';
                 emitError(errCode, reason || `Upstream closed before setupComplete (code=${code || '?'})`, false);
                 emitState('error', errCode);
-              } else if (!closed) {
+              } else if (!closed && !intentionalUpstreamClose) {
                 emitState('idle');
               }
               upstream = null;
               upstreamEverProducedData = false;
+              intentionalUpstreamClose = false;
             }
           }
         });
@@ -435,15 +640,58 @@ function attach(browserWs, req, env) {
     return false;
   }
 
+  // Round-6 fix 1: two-gate greeting FIRE (into Gemini).
+  //   1. `upstreamSetupComplete` — upstream session is ready.
+  //   2. `pendingGreet` — a greet intent was submitted (from hello.greet
+  //      or call_start).
+  // We deliberately FIRE as soon as both gates are closed — the
+  // generation runs in parallel with the client's callOpen playback.
+  // The produced audio/text frames are BUFFERED server-side via
+  // `forwardAudioFrame`/`forwardJsonFrame` until the client sends
+  // `audio_prelude_ended`, at which point `releasePreGreetBuffer`
+  // flushes in-order. Net effect: by the time callOpen ends,
+  // generation is usually done and the buffer is drained in ~1 RTT.
+  //
+  // (Rounds 2–5 used a third `clientGreetGateOpen` gate here; in
+  // round 6 the gate was moved from "hold the TEXT injection" to
+  // "hold the RELEASE of generated frames" so generation can run in
+  // parallel with the chime instead of waiting behind it.)
+  //
+  // Uses `sendRealtimeInput({text})` which IS honoured by Gemini 3.1
+  // Flash Live as a trigger for immediate model response.
+  // `sendClientContent` is documented as "only supported for seeding
+  // initial context history" on 3.1 — silently stashes and no speak.
+  function maybeFireGreeting(source) {
+    if (greetInjected) return;
+    if (!pendingGreet) return;
+    if (!upstream) return;
+    if (!upstreamSetupComplete) return;
+    try {
+      const text = buildCallInitiatedText(pendingGreet);
+      upstream.sendRealtimeInput({ text });
+      greetInjected = true;
+      dlog(sessionId, '[jarvis-phase] greeting_fired src=' + source + ' page=' + pendingGreet.page + ' textLen=' + text.length);
+      pendingGreet = null;
+    } catch (err) {
+      dlog(sessionId, 'greeting fire error src=' + source, err.message || String(err));
+    }
+  }
+
   function onUpstreamMessage(msg) {
     if (!msg) return;
     touchTraffic();
 
     if (!upstreamEverProducedData) {
       upstreamEverProducedData = true;
+      upstreamSetupComplete = true; // greeting-fix: gate (a) closes here.
       dlog(sessionId, 'first message — handshake OK');
       safeSendJson(browserWs, { type: 'setup_complete', sessionId });
       emitState('listening');
+
+      // greeting-fix: fire greeting deterministically from the gate that
+      // just closed. Previously used sendClientContent which 3.1 does not
+      // honour as a turn trigger.
+      maybeFireGreeting('upstream_setup_complete');
     }
 
     if (DEBUG) {
@@ -508,11 +756,16 @@ function attach(browserWs, req, env) {
       // SHOW_TEXT=false we intentionally drop the deltas on the floor so the
       // server never relays user/agent text to the browser (and the client
       // doesn't render a transcript panel). Length-only logs either way.
+      //
+      // Round-6 fix 1: all browser-bound frames go through
+      // `forwardJsonFrame` / `forwardAudioFrame` which buffer until the
+      // client sends `audio_prelude_ended`. The buffer preserves strict
+      // order across kinds (transcript before audio stays before audio).
       if (sc.inputTranscription && sc.inputTranscription.text) {
         const t = sc.inputTranscription.text;
         dlog(sessionId, 'input_tx delta len=' + t.length, 'finished=' + !!sc.inputTranscription.finished);
         if (SHOW_TEXT) {
-          safeSendJson(browserWs, {
+          forwardJsonFrame({
             type: 'transcript_delta',
             from: 'user',
             delta: t,
@@ -525,7 +778,7 @@ function attach(browserWs, req, env) {
         const t = sc.outputTranscription.text;
         dlog(sessionId, 'output_tx delta len=' + t.length, 'finished=' + !!sc.outputTranscription.finished);
         if (SHOW_TEXT) {
-          safeSendJson(browserWs, {
+          forwardJsonFrame({
             type: 'transcript_delta',
             from: 'agent',
             delta: t,
@@ -538,13 +791,27 @@ function attach(browserWs, req, env) {
       if (sc.modelTurn && Array.isArray(sc.modelTurn.parts)) {
         for (const part of sc.modelTurn.parts) {
           if (part.inlineData && typeof part.inlineData.data === 'string') {
-            const pcm = Buffer.from(part.inlineData.data, 'base64');
-            dlog(sessionId, 'audio chunk bytes=' + pcm.length);
-            safeSendBinary(browserWs, pcm);
-            emitState('speaking');
+            const pcm0 = Buffer.from(part.inlineData.data, 'base64');
+            // latency-pass: decimate to narrowband when phoneLine=true.
+            // The factor is read FRESH per frame so an in-call toggle
+            // takes effect on the very next chunk.
+            const factor = factorForPrefs(audioPrefs);
+            const t0 = process.hrtime.bigint();
+            const pcm = factor > 1 ? decimatePcm16(pcm0, factor) : pcm0;
+            const tUs = Number(process.hrtime.bigint() - t0) / 1000;
+            recordEncodeTime(tUs);
+            dlog(sessionId, 'audio chunk bytes_in=' + pcm0.length + ' bytes_out=' + pcm.length + ' factor=' + factor + ' encUs=' + tUs.toFixed(1) + (preGreetReleased ? '' : ' (buffered pre-prelude)'));
+            forwardAudioFrame(pcm);
+            // `emitState('speaking')` intentionally uses the direct
+            // `safeSendJson` path: state hints are small control frames
+            // that drive UI pills; the client ignores a "speaking" hint
+            // while the audio_prelude is still buffering, and keeping
+            // state out of the ordered buffer avoids spurious pill
+            // flashes for frames that haven't been heard yet.
+            if (preGreetReleased) emitState('speaking');
           }
           if (part.text && part.text.trim() && SHOW_TEXT) {
-            safeSendJson(browserWs, {
+            forwardJsonFrame({
               type: 'transcript_delta',
               from: 'agent',
               delta: part.text,
@@ -557,12 +824,40 @@ function attach(browserWs, req, env) {
 
       if (sc.interrupted) {
         dlog(sessionId, 'interrupted');
-        safeSendJson(browserWs, { type: 'interrupted' });
+        forwardJsonFrame({ type: 'interrupted' });
       }
       if (sc.turnComplete) {
-        dlog(sessionId, 'turn_complete');
-        safeSendJson(browserWs, { type: 'turn_complete' });
-        emitState('listening');
+        dlog(sessionId, 'turn_complete' + (preGreetReleased ? '' : ' (buffered pre-prelude)'));
+        // latency-pass: emit a single compact summary line per turn with
+        // p50 / p95 of this session's decimator encode time. Surfaces
+        // regressions fast — if any value creeps above the 30 ms budget
+        // we'll see it in plain stdout.
+        if (encodeTimes.length > 0) {
+          const sorted = encodeTimes.slice().sort((a, b) => a - b);
+          const p50 = sorted[Math.floor(sorted.length * 0.50)] || 0;
+          const p95 = sorted[Math.floor(sorted.length * 0.95)] || 0;
+          const max = sorted[sorted.length - 1] || 0;
+          process.stdout.write(
+            '[live ' + sessionId + '] encode_summary chunks=' + sorted.length +
+            ' p50_us=' + p50.toFixed(1) +
+            ' p95_us=' + p95.toFixed(1) +
+            ' max_us=' + max.toFixed(1) +
+            ' phoneLine=' + !!audioPrefs.phoneLine + '\n'
+          );
+          // Forward a compact HUD-friendly payload to the browser. The
+          // client renders it only under `?debug=1`; cost when hidden is
+          // a single JSON frame per turn.
+          forwardJsonFrame({
+            type: 'encode_stats',
+            p50_us: Math.round(p50 * 10) / 10,
+            p95_us: Math.round(p95 * 10) / 10,
+            max_us: Math.round(max * 10) / 10,
+            chunks: sorted.length,
+            phoneLine: !!audioPrefs.phoneLine
+          });
+        }
+        forwardJsonFrame({ type: 'turn_complete' });
+        if (preGreetReleased) emitState('listening');
       }
     }
 
@@ -586,6 +881,23 @@ function attach(browserWs, req, env) {
         runtimeElements = Array.isArray(data.elements) ? data.elements.slice(0, 500) : [];
         if (data.mode === 'live' || data.mode === 'wakeword') mode = data.mode;
 
+        // audio-prefs: accept the client's initial preference so the first
+        // audio chunk is delivered at the requested bitrate. Missing field
+        // keeps the default (phoneLine=true) for backwards compatibility.
+        if (data.audioPrefs && typeof data.audioPrefs === 'object') {
+          const phoneLine = data.audioPrefs.phoneLine !== false;
+          audioPrefs = { phoneLine, outSampleRate: phoneLine ? 8000 : 24000 };
+          dlog(sessionId, 'hello audio_prefs phoneLine=' + phoneLine);
+        }
+        // Let the client know the current decoding rate so the playback
+        // graph picks the right sample rate per chunk.
+        safeSendJson(browserWs, {
+          type: 'audio_format',
+          outSampleRate: audioPrefs.outSampleRate,
+          phoneLine: !!audioPrefs.phoneLine,
+          codec: 'pcm16-le'
+        });
+
         // Cross-page handoff: the browser may supply a handle captured in a
         // previous page's sessionStorage. Honour it only when the handle
         // looks like a non-empty string and was issued within the resume
@@ -603,7 +915,28 @@ function attach(browserWs, req, env) {
           }
         }
 
-        dlog(sessionId, 'hello persona=' + persona.id, 'mode=' + mode, 'page=' + pageName, 'elements=' + runtimeElements.length, 'resume=' + (incomingHandle ? 'yes' : 'no'));
+        // latency-pass: accept an optional `greet` field so the server can
+        // inject the <call_initiated> block on the first upstream message
+        // (saves one browser ↔ server RTT vs waiting for `call_start`).
+        // Shape: `{ page: string, title: string }`. Backwards-compatible —
+        // old clients don't set it and the `call_start` path still works.
+        // greeting-fix: the ack flag `eagerGreetAck` must only be set when
+        // BOTH the greet field is present AND the client will send no
+        // follow-up `call_start`. Since the client sets `_greetingSent=true`
+        // on receiving the ack, a truthful ack requires we commit to firing
+        // the greeting. We do so deterministically via `maybeFireGreeting`
+        // below, which is safe to call before the upstream is ready — it
+        // just no-ops until gate (a) closes.
+        let greetAcked = false;
+        if (data.greet && typeof data.greet === 'object') {
+          const gPage = String(data.greet.page || pageName || '/').slice(0, 120);
+          const gTitle = String(data.greet.title || '').slice(0, 120);
+          pendingGreet = { page: gPage, title: gTitle };
+          greetInjected = false;
+          greetAcked = true;
+        }
+
+        dlog(sessionId, 'hello persona=' + persona.id, 'mode=' + mode, 'page=' + pageName, 'elements=' + runtimeElements.length, 'resume=' + (incomingHandle ? 'yes' : 'no'), 'eagerGreet=' + (greetAcked ? 'yes' : 'no'));
         safeSendJson(browserWs, {
           type: 'hello_ack',
           sessionId,
@@ -611,9 +944,17 @@ function attach(browserWs, req, env) {
           personas: publicPersonas(),
           mode,
           resumeRequested: !!incomingHandle,
-          resumeWindowMs: SESSION_RESUME_WINDOW_MS
+          resumeWindowMs: SESSION_RESUME_WINDOW_MS,
+          // latency-pass: tell client we honoured the eager-greet so it can
+          // skip sending an additional `call_start` frame.
+          eagerGreetAck: greetAcked
         });
         openUpstream({ reuseHandle: false, explicitHandle: incomingHandle });
+        // greeting-fix: opportunistic fire. If setupComplete already landed
+        // (unusual: upstream would need to have been kept open), this fires
+        // immediately. Otherwise no-ops until onUpstreamMessage closes the
+        // gate. Either way the greeting lands exactly once.
+        maybeFireGreeting('hello_received');
         return;
       }
       case 'call_start': {
@@ -621,23 +962,20 @@ function attach(browserWs, req, env) {
         // <call_initiated>…</call_initiated> block so the model greets
         // them immediately. Fires once per placeCall on the browser
         // side; on the server side we guard on upstream readiness.
-        if (!upstream || !upstreamEverProducedData) {
-          dlog(sessionId, 'call_start ignored — upstream not ready');
+        // greeting-fix: unified path. Stash a pendingGreet (if not already
+        // stashed via hello.greet) and call maybeFireGreeting. When the
+        // upstream is not yet ready, this is a no-op and the fire will
+        // happen on the subsequent setup_complete. When the eager path
+        // already fired, this is idempotent.
+        if (greetInjected) {
+          dlog(sessionId, 'call_start skipped — greet already fired');
           return;
         }
         const page = String(data.page || pageName || '/').slice(0, 120);
         const title = String(data.title || '').slice(0, 120);
         pageName = page;
-        const text = buildCallInitiatedText({ page, title });
-        try {
-          upstream.sendClientContent({
-            turns: [{ role: 'user', parts: [{ text }] }],
-            turnComplete: true
-          });
-          dlog(sessionId, 'call_initiated_injected page=' + page + ' textLen=' + text.length);
-        } catch (err) {
-          dlog(sessionId, 'call_start inject error', err.message || String(err));
-        }
+        pendingGreet = pendingGreet || { page, title };
+        maybeFireGreeting('call_start');
         return;
       }
       case 'call_end': {
@@ -648,6 +986,29 @@ function attach(browserWs, req, env) {
         dlog(sessionId, 'call_end requested — closing upstream');
         closeUpstream('call_end');
         emitState('idle');
+        return;
+      }
+      case 'audio_prelude_ended':
+      case 'greet_gate_open': {
+        // Round-6 fix 1: the browser has finished playing the callOpen
+        // chime. Release the pre-greet buffer — any frames that Gemini
+        // produced while the chime was playing (typically the entire
+        // greeting turn if the network is fast) are flushed to the
+        // browser NOW. Subsequent frames go direct via `forwardXxx`.
+        //
+        // `greet_gate_open` is accepted as a legacy alias so a browser
+        // built against the round-5 wire still works during a rolling
+        // deploy. The semantic shift (gating RELEASE instead of
+        // INJECTION) is fully server-side — clients don't need to
+        // understand it.
+        if (preGreetReleased) return;
+        dlog(sessionId, 'audio_prelude_ended received — releasing pre-greet buffer');
+        releasePreGreetBuffer(data.type);
+        // A "speaking" state hint may have been skipped while frames
+        // were buffered; emit one now if the buffer contained any
+        // audio (the client's pill needs to reflect that the model is
+        // about to be heard). Cheap — the client de-dupes on state.
+        emitState('speaking');
         return;
       }
       case 'page_context': {
@@ -666,14 +1027,40 @@ function attach(browserWs, req, env) {
         runtimeElements = Array.isArray(data.elements) ? data.elements.slice(0, 500) : runtimeElements;
         const text = buildPageContextText({ page, title, elements });
         try {
-          upstream.sendClientContent({
-            turns: [{ role: 'user', parts: [{ text }] }],
-            turnComplete: true
-          });
+          // greeting-fix: same 3.1 fix as the greeting path — sendClientContent
+          // is "seed-history only" on gemini-3.1-flash-live-preview. Using
+          // sendRealtimeInput({text}) means the model treats this as a user
+          // turn and (per the system prompt) acknowledges the nav in one
+          // short sentence unless mid-task.
+          upstream.sendRealtimeInput({ text });
           dlog(sessionId, 'page_context_injected page=' + page + ' elements=' + elements.length + ' textLen=' + text.length);
         } catch (err) {
           dlog(sessionId, 'page_context inject error', err.message || String(err));
         }
+        return;
+      }
+      case 'audio_prefs': {
+        // audio-prefs: live re-negotiation of the output path. Applies on
+        // the next chunk — no call drop, no WS reconnect. We send a fresh
+        // `audio_format` frame so the client retunes its decoder.
+        const phoneLine = data.phoneLine !== false;
+        if (phoneLine === audioPrefs.phoneLine) {
+          safeSendJson(browserWs, {
+            type: 'audio_format',
+            outSampleRate: audioPrefs.outSampleRate,
+            phoneLine: !!audioPrefs.phoneLine,
+            codec: 'pcm16-le'
+          });
+          return;
+        }
+        audioPrefs = { phoneLine, outSampleRate: phoneLine ? 8000 : 24000 };
+        dlog(sessionId, 'audio_prefs changed phoneLine=' + phoneLine);
+        safeSendJson(browserWs, {
+          type: 'audio_format',
+          outSampleRate: audioPrefs.outSampleRate,
+          phoneLine: !!audioPrefs.phoneLine,
+          codec: 'pcm16-le'
+        });
         return;
       }
       case 'set_mode': {
@@ -774,9 +1161,35 @@ function attach(browserWs, req, env) {
     stopHeartbeat();
     if (!upstream) return;
     dlog(sessionId, 'closeUpstream reason=' + reason);
+    // end-call audio-fix: flag this as intentional so the async `onclose`
+    // below doesn't mistake our own shutdown for an upstream failure and
+    // emit `Upstream closed before setupComplete`.
+    intentionalUpstreamClose = true;
     try { upstream.close(); } catch { /* ignore */ }
     upstream = null;
     upstreamEverProducedData = false;
+    // latency-pass: reset the eager-greet gate so a re-opened upstream
+    // (persona/mode switch, reconnect) can greet again if the browser asks.
+    // `pendingGreet` is only set on hello; subsequent opens don't auto-greet
+    // unless the client sends it again.
+    greetInjected = false;
+    // greeting-fix: reset gate (a) — the new upstream has to reach setup
+    // again before we can fire any pending greet against it.
+    upstreamSetupComplete = false;
+    // Round-6 fix 1: reset the pre-greet buffer + release flag so a
+    // reconnect / mode-switch / persona-switch doesn't reuse stale
+    // buffered audio. The new upstream is a fresh session — any frames
+    // queued from the old one are dropped here.
+    preGreetBuffer = [];
+    preGreetReleased = false;
+    // audio-flow: reset the end-call idempotency latch so a follow-up
+    // call in the same WS can hang up again.
+    agentEndCallInFlight = false;
+    // greeting-fix: also drop any stale pendingGreet that survived a close
+    // without firing. Persona/mode switch paths re-open upstream without
+    // a fresh hello, so we want ZERO chance of a delayed greet sneaking in
+    // after a switch. A fresh placeCall always arrives via a new hello.
+    pendingGreet = null;
   }
 
   function cleanup() {

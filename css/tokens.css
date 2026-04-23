@@ -1,153 +1,415 @@
-/* Design tokens — single source of truth. Values documented in DESIGN.md. */
+/* Expressive Console — M3 Expressive 2025 / lime primary on green-ink / Geist
+ *
+ * Single source of truth for design tokens. This file is consumed by:
+ *  - css/base.css, css/components.css (Dev A)
+ *  - css/voice-dock.css (Dev B)
+ *  - css/pages.css, css/map.css, partials/* (Dev C)
+ *  - js/map-widget.js (inline `var(--color-*)` styles on pin markup)
+ *  - js/ui.js (reads `--color-state-*` via getPropertyValue for canvas strokes)
+ *
+ * Every legacy `--color-*`, `--radius-*`, `--dur-*`, `--ease-*`, `--shadow-*`,
+ * `--font-*`, `--stagger-delay-*` name survives as an alias over the M3 token
+ * so JS and partial code continue to resolve without edits.
+ */
 
+/* ============================================================
+ * DARK — default ("Expressive Console")
+ * ============================================================ */
 :root {
-  /* Color — dark default */
-  --color-bg: #0B0D10;
-  --color-bg-elev-1: #11151A;
-  --color-bg-elev-2: #171C23;
-  --color-bg-elev-3: #1E2530;
-  --color-border: #232933;
-  --color-border-strong: #2E3542;
+  /* --- M3 Expressive key colors (dark) --- */
+  --md-sys-color-primary:              #BEF264;
+  --md-sys-color-on-primary:           #0F1A00;
+  --md-sys-color-primary-container:    #2F4A00;
+  --md-sys-color-on-primary-container: #DCFCA0;
 
-  --color-text: #E7ECF3;
-  --color-text-muted: #9AA3B2;
-  --color-text-dim: #5D6573;
-  --color-text-inverse: #0B0D10;
+  --md-sys-color-secondary:              #C4CCB3;
+  --md-sys-color-on-secondary:           #1C2113;
+  --md-sys-color-secondary-container:    #2B3326;
+  --md-sys-color-on-secondary-container: #DDE7CB;
 
-  --color-accent: #6EE7B7;
-  --color-accent-strong: #34D399;
-  --color-accent-soft: #064E3B;
+  --md-sys-color-tertiary:              #8AD4E0;
+  --md-sys-color-on-tertiary:           #00363F;
+  --md-sys-color-tertiary-container:    #1F4A52;
+  --md-sys-color-on-tertiary-container: #C4ECF3;
 
-  --color-warn: #FBBF24;
-  --color-warn-soft: #3B2F0E;
-  --color-danger: #F87171;
-  --color-danger-soft: #3A1E1E;
-  --color-info: #60A5FA;
-  --color-info-soft: #0F2A4A;
+  --md-sys-color-error:              #FFB4AB;
+  --md-sys-color-on-error:           #690005;
+  --md-sys-color-error-container:    #93000A;
+  --md-sys-color-on-error-container: #FFDAD6;
 
-  --color-state-idle: #5D6573;
-  --color-state-listening: #6EE7B7;
-  --color-state-thinking: #C084FC;
-  --color-state-speaking: #60A5FA;
-  --color-state-tool: #FBBF24;
-  --color-state-error: #F87171;
+  /* --- Surface ladder (M3 tonal containers) --- */
+  --md-sys-color-surface-dim:              #0F1210;
+  --md-sys-color-surface:                  #11151F;
+  --md-sys-color-surface-bright:           #2A2F28;
+  --md-sys-color-surface-container-lowest: #0B0E09;
+  --md-sys-color-surface-container-low:    #151A14;
+  --md-sys-color-surface-container:        #1A2018;
+  --md-sys-color-surface-container-high:   #212A1F;
+  --md-sys-color-surface-container-highest:#2A3327;
 
-  /* Type */
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --md-sys-color-on-surface:         #E3E8DE;
+  --md-sys-color-on-surface-variant: #BFC7B7;
+  --md-sys-color-outline:            #8A9282;
+  --md-sys-color-outline-variant:    #424A3C;
 
-  --fs-xs: 11px;
-  --lh-xs: 16px;
-  --fs-sm: 13px;
-  --lh-sm: 20px;
-  --fs-base: 14px;
-  --lh-base: 22px;
-  --fs-md: 16px;
-  --lh-md: 24px;
-  --fs-lg: 18px;
-  --lh-lg: 26px;
-  --fs-xl: 22px;
-  --lh-xl: 30px;
-  --fs-2xl: 28px;
-  --lh-2xl: 36px;
+  /* Warn slot — M3 doesn't define "warning" so we carry a custom pair. */
+  --md-sys-color-warn:           #FFB787;
+  --md-sys-color-on-warn:        #4A2400;
+  --md-sys-color-warn-container: #663808;
 
-  --fw-regular: 400;
-  --fw-medium: 500;
+  /* --- Legacy color aliases (load-bearing for JS + partial inline styles) --- */
+  --color-bg:            var(--md-sys-color-surface);
+  --color-bg-grain:      var(--md-sys-color-surface-container-low);
+  --color-bg-elev-1:     var(--md-sys-color-surface-container-low);
+  --color-bg-elev-2:     var(--md-sys-color-surface-container);
+  --color-bg-elev-3:     var(--md-sys-color-surface-container-high);
+  --color-bg-elev-4:     var(--md-sys-color-surface-container-highest);
+
+  --color-border:         var(--md-sys-color-outline-variant);
+  --color-border-strong:  var(--md-sys-color-outline);
+  --color-border-accent:  color-mix(in oklab, var(--md-sys-color-primary) 50%, transparent);
+
+  --color-text:         var(--md-sys-color-on-surface);
+  --color-text-muted:   var(--md-sys-color-on-surface-variant);
+  --color-text-dim:     var(--md-sys-color-outline);
+  --color-text-inverse: var(--md-sys-color-on-primary);
+
+  --color-accent:         var(--md-sys-color-primary);
+  --color-accent-strong:  #A3E635;
+  --color-accent-soft:    var(--md-sys-color-primary-container);
+  --color-accent-wash:    color-mix(in oklab, var(--md-sys-color-primary) 10%, transparent);
+  --color-accent-outline: color-mix(in oklab, var(--md-sys-color-primary) 45%, transparent);
+
+  /* Cyan — now mapped to tertiary (kept for voice-dock.css + map-widget aliases). */
+  --color-cyan:        var(--md-sys-color-tertiary);
+  --color-cyan-strong: var(--md-sys-color-tertiary);
+  --color-cyan-soft:   var(--md-sys-color-tertiary-container);
+
+  --color-warn:        var(--md-sys-color-warn);
+  --color-warn-soft:   var(--md-sys-color-warn-container);
+  --color-danger:      var(--md-sys-color-error);
+  --color-danger-soft: var(--md-sys-color-error-container);
+  --color-info:        var(--md-sys-color-tertiary);
+  --color-info-soft:   var(--md-sys-color-tertiary-container);
+  --color-success:     var(--md-sys-color-primary);
+  --color-success-soft:var(--md-sys-color-primary-container);
+
+  /* Voice agent state colors (read by js/ui.js for scope canvas strokes) */
+  --color-state-idle:      var(--md-sys-color-outline);
+  --color-state-listening: var(--md-sys-color-primary);
+  --color-state-thinking:  var(--md-sys-color-tertiary);
+  --color-state-speaking:  var(--md-sys-color-primary);
+  --color-state-tool:      var(--md-sys-color-warn);
+  --color-state-error:     var(--md-sys-color-error);
+
+  /* Atmosphere — DELETED as visuals. Tokens resolve transparent so any legacy
+   * reference compiles but paints nothing. */
+  --color-grain-overlay: transparent;
+  --color-scanline:      transparent;
+  --color-vignette:      transparent;
+
+  /* Overlays / scrims */
+  --color-overlay-bg:     color-mix(in oklab, var(--md-sys-color-surface-container-high) 96%, transparent);
+  --color-overlay-scrim:  rgba(0, 0, 0, 0.56);
+  --color-spotlight-mask: rgba(0, 0, 0, 0.72);
+
+  /* Map surfaces — consumed inline by map-widget.js */
+  --color-map-bg:               var(--md-sys-color-surface-dim);
+  --color-map-polyline:         color-mix(in oklab, var(--md-sys-color-primary) 75%, transparent);
+  --color-map-polyline-pending: color-mix(in oklab, var(--md-sys-color-warn) 65%, transparent);
+  --color-map-pin-ring:         color-mix(in oklab, var(--md-sys-color-surface) 88%, transparent);
+  --color-map-highlight-ring:   color-mix(in oklab, var(--md-sys-color-primary) 80%, transparent);
+
+  /* ============================================================
+   * TYPOGRAPHY — Geist + Geist Mono
+   * `--font-display` is aliased to `--font-sans` so existing rules that
+   * referenced the Fraunces stack keep compiling.
+   * ============================================================ */
+  --font-sans:    "Geist", ui-sans-serif, -apple-system, "Segoe UI Variable", "Helvetica Neue", sans-serif;
+  --font-mono:    "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-display: var(--font-sans);
+
+  /* Fluid type scale — tightened from v1, Geist x-height runs hotter. */
+  --fs-2xs:     clamp(10px, 0.68rem + 0.05vw, 11px);
+  --fs-xs:      clamp(11px, 0.72rem + 0.10vw, 12px);
+  --fs-sm:      clamp(13px, 0.82rem + 0.10vw, 13px);
+  --fs-base:    clamp(14px, 0.90rem + 0.10vw, 14px);
+  --fs-md:      clamp(15px, 0.94rem + 0.20vw, 16px);
+  --fs-lg:      clamp(18px, 1.05rem + 0.40vw, 20px);
+  --fs-xl:      clamp(22px, 1.20rem + 0.70vw, 26px);
+  --fs-2xl:     clamp(28px, 1.40rem + 1.20vw, 36px);
+  --fs-display: clamp(32px, 1.60rem + 2.10vw, 48px);
+
+  /* Line heights */
+  --lh-xs:      1.40;
+  --lh-sm:      1.50;
+  --lh-base:    1.50;
+  --lh-md:      1.45;
+  --lh-lg:      1.30;
+  --lh-xl:      1.20;
+  --lh-2xl:     1.10;
+  --lh-display: 1.05;
+
+  /* Weights */
+  --fw-regular:  400;
+  --fw-medium:   500;
   --fw-semibold: 600;
+  --fw-bold:     700;
 
-  --tracking-tight: -0.01em;
+  /* Tracking */
+  --tracking-tight:  -0.012em;
   --tracking-normal: 0;
-  --tracking-wide: 0.04em;
+  --tracking-open:   0.01em;
+  --tracking-wide:   0.04em;
+  --tracking-caps:   0.06em;
 
-  /* Spacing 4px base */
-  --sp-0: 0;
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 24px;
-  --sp-6: 32px;
-  --sp-7: 48px;
-  --sp-8: 64px;
-  --sp-9: 96px;
+  /* ============================================================
+   * SPACING — 4 px base
+   * ============================================================ */
+  --sp-0:  0;
+  --sp-px: 1px;
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-7:  32px;
+  --sp-8:  40px;
+  --sp-9:  56px;
+  --sp-10: 72px;
+  --sp-11: 96px;
+  --sp-12: 128px;
 
-  /* Radius */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-pill: 9999px;
+  /* ============================================================
+   * SHAPE — M3 consistent corners (no asymmetric rounding)
+   * ============================================================ */
+  --md-sys-shape-corner-none: 0px;
+  --md-sys-shape-corner-xs:    4px;
+  --md-sys-shape-corner-sm:    8px;
+  --md-sys-shape-corner-md:   12px;
+  --md-sys-shape-corner-lg:   16px;
+  --md-sys-shape-corner-xl:   28px;
+  --md-sys-shape-corner-full: 9999px;
 
-  /* Shadow */
-  --shadow-overlay: 0 12px 32px -8px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
-  --shadow-overlay-strong: 0 20px 56px -12px rgba(0, 0, 0, 0.60), 0 4px 10px rgba(0, 0, 0, 0.35);
-  --shadow-focus-ring-accent: 0 0 0 2px rgba(110, 231, 183, 0.35);
-  --shadow-focus-ring-danger: 0 0 0 2px rgba(248, 113, 113, 0.35);
-  --shadow-pin: 0 1px 2px rgba(0, 0, 0, 0.45);
-  --color-accent-outline: rgba(110, 231, 183, 0.35);
+  /* Legacy radius aliases */
+  --radius-xs:   var(--md-sys-shape-corner-xs);
+  --radius-sm:   var(--md-sys-shape-corner-sm);
+  --radius-md:   var(--md-sys-shape-corner-md);
+  --radius-lg:   var(--md-sys-shape-corner-lg);
+  --radius-xl:   var(--md-sys-shape-corner-xl);
+  --radius-pill: var(--md-sys-shape-corner-full);
 
-  /* Overlay surfaces (added 2026-04-22 for upgrade) */
-  --color-overlay-bg: rgba(17, 21, 26, 0.92);
-  --color-overlay-scrim: rgba(0, 0, 0, 0.55);
-  --color-spotlight-mask: rgba(0, 0, 0, 0.70);
+  /* Dock — uniform corners per state (no mixed rounding). */
+  --radius-dock:          var(--md-sys-shape-corner-full);
+  --radius-dock-expanded: var(--md-sys-shape-corner-xl);
 
-  /* Map surfaces (v2 upgrade — Leaflet page) */
-  --color-map-bg: #0E1217;
-  --color-map-polyline: rgba(110, 231, 183, 0.65);
-  --color-map-polyline-pending: rgba(251, 191, 36, 0.55);
-  --color-map-pin-ring: rgba(11, 13, 16, 0.85);
-  --color-map-highlight-ring: rgba(110, 231, 183, 0.75);
-  --dur-map-fly: 900ms;
+  /* ============================================================
+   * ELEVATION — M3 tonal ladder
+   * ============================================================ */
+  --md-sys-elevation-level-0: none;
+  --md-sys-elevation-level-1:
+    0 1px 2px 0 rgba(0, 0, 0, 0.30),
+    0 1px 3px 1px rgba(0, 0, 0, 0.15);
+  --md-sys-elevation-level-2:
+    0 1px 2px 0 rgba(0, 0, 0, 0.30),
+    0 2px 6px 2px rgba(0, 0, 0, 0.15);
+  --md-sys-elevation-level-3:
+    0 4px 8px 3px rgba(0, 0, 0, 0.15),
+    0 1px 3px 0 rgba(0, 0, 0, 0.30);
 
-  /* Z-index scale */
-  --z-header: 100;
-  --z-dock: 200;
-  --z-captions: 250;
-  --z-map-ui: 300;
-  --z-overlay: 500;
+  /* Legacy shadow aliases */
+  --shadow-hairline:        inset 0 0 0 1px var(--color-border);
+  --shadow-inset-lift:      none;
+  --shadow-overlay:         var(--md-sys-elevation-level-2);
+  --shadow-overlay-strong:  var(--md-sys-elevation-level-3);
+  --shadow-dock:            var(--md-sys-elevation-level-2);
+  --shadow-press-dark:      none;
+  --shadow-pin:             var(--md-sys-elevation-level-1);
+
+  --shadow-focus-ring-accent: 0 0 0 3px color-mix(in oklab, var(--md-sys-color-primary) 38%, transparent);
+  --shadow-focus-ring-danger: 0 0 0 3px color-mix(in oklab, var(--md-sys-color-error) 38%, transparent);
+  --shadow-focus-ring-cyan:   0 0 0 3px color-mix(in oklab, var(--md-sys-color-tertiary) 38%, transparent);
+
+  /* ============================================================
+   * MOTION — M3 Expressive spring, fast
+   * ============================================================ */
+  --dur-instant:  80ms;
+  --dur-fast:    120ms;
+  --dur-base:    180ms;
+  --dur-slow:    320ms;
+  --dur-map-fly: 600ms;
+
+  --md-sys-motion-easing-emphasized:            cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-sys-motion-easing-standard:              cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-standard-accelerate:   cubic-bezier(0.3, 0, 1, 1);
+  --md-sys-motion-easing-standard-decelerate:   cubic-bezier(0, 0, 0, 1);
+
+  --md-sys-motion-spring-spatial: linear(
+    0, 0.082 3.5%, 0.322 7.5%, 0.666 12.5%, 1.012 18.5%,
+    1.146 22%, 1.143 25.5%, 1.062 31%, 0.981 37%, 0.955 43%,
+    0.985 52%, 1.007 66%, 1
+  );
+  --md-sys-motion-spring-effects: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Legacy easing aliases */
+  --ease-snap:     var(--md-sys-motion-easing-emphasized);
+  --ease-out-expo: var(--md-sys-motion-easing-emphasized-decelerate);
+  --ease-material: var(--md-sys-motion-easing-standard);
+  --ease-in-out:   var(--md-sys-motion-easing-standard);
+  --ease-spring:   var(--md-sys-motion-spring-spatial);
+
+  /* ============================================================
+   * STAGGER — DELETED as a motion effect. Tokens remain (aliased to 0ms)
+   * so pages.css rules that read `animation-delay: var(--stagger-delay-*)`
+   * continue to compile but fire instantly.
+   * ============================================================ */
+  --dur-stage:       0ms;
+  --stagger-delay-1: 0ms;
+  --stagger-delay-2: 0ms;
+  --stagger-delay-3: 0ms;
+  --stagger-delay-4: 0ms;
+  --stagger-delay-5: 0ms;
+  --stagger-delay-6: 0ms;
+
+  /* ============================================================
+   * Z-INDEX
+   * ============================================================ */
+  --z-header:    100;
+  --z-dock:      200;
+  --z-captions:  250;
+  --z-map-ui:    300;
+  --z-overlay:   500;
   --z-skip-link: 1000;
-
-  /* Motion */
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-  --dur-fast: 120ms;
-  --dur-base: 180ms;
-  --dur-slow: 280ms;
 }
 
-/* Optional light theme — not the default. */
+/* ============================================================
+ * LIGHT — "Expressive Console Light"
+ * ============================================================ */
 [data-theme="light"] {
-  --color-bg: #FAFBFC;
-  --color-bg-elev-1: #FFFFFF;
-  --color-bg-elev-2: #F4F6F8;
-  --color-bg-elev-3: #EDEFF2;
-  --color-border: #E3E6EA;
-  --color-border-strong: #C9CFD6;
-  --color-text: #0B0D10;
-  --color-text-muted: #4A5260;
-  --color-text-dim: #8A93A0;
-  --color-text-inverse: #FAFBFC;
-  --color-accent: #059669;
-  --color-accent-strong: #047857;
-  --color-accent-soft: #D1FAE5;
-  --color-warn: #B45309;
-  --color-warn-soft: #FDE68A;
-  --color-danger: #B91C1C;
-  --color-danger-soft: #FECACA;
-  --color-info: #1D4ED8;
-  --color-info-soft: #DBEAFE;
-  --color-overlay-bg: rgba(255, 255, 255, 0.94);
+  --md-sys-color-primary:              #3E5A0B;
+  --md-sys-color-on-primary:           #FFFFFF;
+  --md-sys-color-primary-container:    #DCFCA0;
+  --md-sys-color-on-primary-container: #111F00;
+
+  --md-sys-color-secondary:              #56624A;
+  --md-sys-color-on-secondary:           #FFFFFF;
+  --md-sys-color-secondary-container:    #DAE7C8;
+  --md-sys-color-on-secondary-container: #141E0C;
+
+  --md-sys-color-tertiary:              #00677A;
+  --md-sys-color-on-tertiary:           #FFFFFF;
+  --md-sys-color-tertiary-container:    #B3EBF5;
+  --md-sys-color-on-tertiary-container: #001F25;
+
+  --md-sys-color-error:              #BA1A1A;
+  --md-sys-color-on-error:           #FFFFFF;
+  --md-sys-color-error-container:    #FFDAD6;
+  --md-sys-color-on-error-container: #410002;
+
+  --md-sys-color-surface:                  #FBFDF4;
+  --md-sys-color-surface-dim:              #DBDED3;
+  --md-sys-color-surface-bright:           #FBFDF4;
+  --md-sys-color-surface-container-lowest: #FFFFFF;
+  --md-sys-color-surface-container-low:    #F5F8EE;
+  --md-sys-color-surface-container:        #EFF2E8;
+  --md-sys-color-surface-container-high:   #E9ECE2;
+  --md-sys-color-surface-container-highest:#E3E6DD;
+
+  --md-sys-color-on-surface:         #1A1D14;
+  --md-sys-color-on-surface-variant: #44483D;
+  --md-sys-color-outline:            #74796C;
+  --md-sys-color-outline-variant:    #C4C8BA;
+
+  --md-sys-color-warn:           #7A4300;
+  --md-sys-color-on-warn:        #FFFFFF;
+  --md-sys-color-warn-container: #FFDCC2;
+
+  /* Legacy alias remapping — light */
+  --color-bg:        var(--md-sys-color-surface);
+  --color-bg-grain:  var(--md-sys-color-surface-container-low);
+  --color-bg-elev-1: var(--md-sys-color-surface-container-low);
+  --color-bg-elev-2: var(--md-sys-color-surface-container);
+  --color-bg-elev-3: var(--md-sys-color-surface-container-high);
+  --color-bg-elev-4: var(--md-sys-color-surface-container-highest);
+
+  --color-border:         var(--md-sys-color-outline-variant);
+  --color-border-strong:  var(--md-sys-color-outline);
+  --color-border-accent:  color-mix(in oklab, var(--md-sys-color-primary) 50%, transparent);
+
+  --color-text:         var(--md-sys-color-on-surface);
+  --color-text-muted:   var(--md-sys-color-on-surface-variant);
+  --color-text-dim:     var(--md-sys-color-outline);
+  --color-text-inverse: var(--md-sys-color-on-primary);
+
+  --color-accent:         var(--md-sys-color-primary);
+  --color-accent-strong:  #2A4000;
+  --color-accent-soft:    var(--md-sys-color-primary-container);
+  --color-accent-wash:    color-mix(in oklab, var(--md-sys-color-primary) 8%, transparent);
+  --color-accent-outline: color-mix(in oklab, var(--md-sys-color-primary) 50%, transparent);
+
+  --color-cyan:        var(--md-sys-color-tertiary);
+  --color-cyan-strong: var(--md-sys-color-tertiary);
+  --color-cyan-soft:   var(--md-sys-color-tertiary-container);
+
+  --color-warn:        var(--md-sys-color-warn);
+  --color-warn-soft:   var(--md-sys-color-warn-container);
+  --color-danger:      var(--md-sys-color-error);
+  --color-danger-soft: var(--md-sys-color-error-container);
+  --color-info:        var(--md-sys-color-tertiary);
+  --color-info-soft:   var(--md-sys-color-tertiary-container);
+  --color-success:     var(--md-sys-color-primary);
+  --color-success-soft:var(--md-sys-color-primary-container);
+
+  --color-state-idle:      var(--md-sys-color-outline);
+  --color-state-listening: var(--md-sys-color-primary);
+  --color-state-thinking:  var(--md-sys-color-tertiary);
+  --color-state-speaking:  var(--md-sys-color-primary);
+  --color-state-tool:      var(--md-sys-color-warn);
+  --color-state-error:     var(--md-sys-color-error);
+
+  --color-grain-overlay: transparent;
+  --color-scanline:      transparent;
+  --color-vignette:      transparent;
+
+  --color-overlay-bg:     color-mix(in oklab, var(--md-sys-color-surface-container) 96%, transparent);
+  --color-overlay-scrim:  rgba(0, 0, 0, 0.32);
+  --color-spotlight-mask: rgba(0, 0, 0, 0.50);
+
+  --color-map-bg:               var(--md-sys-color-surface-dim);
+  --color-map-polyline:         color-mix(in oklab, var(--md-sys-color-primary) 85%, transparent);
+  --color-map-polyline-pending: color-mix(in oklab, var(--md-sys-color-warn) 75%, transparent);
+  --color-map-pin-ring:         color-mix(in oklab, var(--md-sys-color-surface) 92%, transparent);
+  --color-map-highlight-ring:   color-mix(in oklab, var(--md-sys-color-primary) 85%, transparent);
+
+  --shadow-focus-ring-accent: 0 0 0 3px color-mix(in oklab, var(--md-sys-color-primary) 38%, transparent);
+  --shadow-focus-ring-danger: 0 0 0 3px color-mix(in oklab, var(--md-sys-color-error) 38%, transparent);
+  --shadow-focus-ring-cyan:   0 0 0 3px color-mix(in oklab, var(--md-sys-color-tertiary) 38%, transparent);
 }
 
-[data-theme="light"] html,
-html[data-theme="light"] {
+html[data-theme="light"],
+[data-theme="light"] html {
   color-scheme: light;
 }
 
+/* ============================================================
+ * REDUCED MOTION — zero all durations, flatten springs
+ * ============================================================ */
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --dur-fast: 0ms;
-    --dur-base: 0ms;
-    --dur-slow: 0ms;
-    --dur-map-fly: 0ms;
+    --dur-instant:  0ms;
+    --dur-fast:     0ms;
+    --dur-base:     0ms;
+    --dur-slow:     0ms;
+    --dur-stage:    0ms;
+    --dur-map-fly:  0ms;
+    --md-sys-motion-spring-spatial: linear;
+    --ease-spring:   linear;
+    --ease-material: linear;
+    --ease-snap:     linear;
+    --ease-out-expo: linear;
+    --ease-in-out:   linear;
   }
 }

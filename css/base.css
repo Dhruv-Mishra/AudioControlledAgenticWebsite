@@ -1,5 +1,16 @@
-/* Resets, base elements, layout primitives. */
+/* Expressive Console — base reset + shell layout + typography bootstrap.
+ *
+ * v2 scope: the v1 "Harbor Bridge" atmosphere layer (body grain, shell
+ * vignette, radial amber/cyan lamp halos on <body>) is DELETED. Body is
+ * painted as a flat `var(--color-bg)` surface. No gradients, no noise,
+ * no vignette, no scanlines.
+ *
+ * Preserved from v1: skip-link, #route-target wrapper, semantic-HTML
+ * defaults, focus tidy, `prefers-reduced-motion` block, dock right-gutter
+ * reservation on desktop, and the `h1[tabindex="-1"]` focus tidy.
+ */
 
+/* ===== Reset ================================================= */
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -7,14 +18,17 @@
 html, body {
   margin: 0;
   padding: 0;
-  overflow-x: hidden;
 }
 
 html {
   background: var(--color-bg);
   color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
 }
 
+html[data-theme="light"] { color-scheme: light; }
+
+/* ===== Body — flat M3 surface, no atmosphere ================= */
 body {
   font-family: var(--font-sans);
   font-size: var(--fs-base);
@@ -24,19 +38,43 @@ body {
   background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: "cv11" 1, "ss01" 1;
+  font-feature-settings: "ss01" 1, "ss02" 1, "cv11" 1, "zero" 1;
+  font-variant-numeric: tabular-nums slashed-zero;
   min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
 }
 
+/* ===== Typography bootstrap ==================================
+ * Headings use Geist medium, not Fraunces. No font-variation-settings
+ * (Fraunces `opsz` / `SOFT` / `WONK` axes are gone).
+ */
 h1, h2, h3, h4, h5, h6 {
   margin: 0;
-  font-weight: var(--fw-semibold);
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
+  color: var(--color-text);
+  font-feature-settings: "ss01" 1, "ss02" 1, "cv11" 1, "zero" 1;
+  font-variant-numeric: tabular-nums slashed-zero;
 }
 
-h1 { font-size: var(--fs-xl); line-height: var(--lh-xl); }
-h2 { font-size: var(--fs-lg); line-height: var(--lh-lg); }
-h3 { font-size: var(--fs-md); line-height: var(--lh-md); }
+h1 { font-size: var(--fs-2xl); line-height: var(--lh-2xl); }
+h2 { font-size: var(--fs-xl);  line-height: var(--lh-xl); }
+h3 { font-size: var(--fs-lg);  line-height: var(--lh-lg); }
+h4 { font-size: var(--fs-md);  line-height: var(--lh-md); font-weight: var(--fw-semibold); }
+h5 {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--fw-medium);
+  color: var(--color-text-muted);
+}
+h6 {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--fw-medium);
+  color: var(--color-text-muted);
+}
 
 p { margin: 0; }
 
@@ -44,241 +82,165 @@ a {
   color: var(--color-accent);
   text-decoration: none;
   border-radius: var(--radius-xs);
+  transition: color var(--dur-fast) var(--ease-snap);
 }
-
-a:hover { text-decoration: underline; }
-
-a:focus-visible,
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[tabindex]:focus-visible {
+a:hover {
+  color: var(--color-accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+a:focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus-ring-accent);
 }
 
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
 button {
-  font-family: inherit;
   cursor: pointer;
   border: 0;
   background: transparent;
-  color: inherit;
   padding: 0;
 }
 
-input, select, textarea {
-  font-family: inherit;
-  color: inherit;
-}
-
-code, pre, .mono {
+code, pre, .mono, .mono-id {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "calt" 0, "zero" 1;
   font-size: 0.95em;
 }
 
-/* Skip link */
+.muted { color: var(--color-text-muted); }
+.dim   { color: var(--color-text-dim); }
+
+.mono-id {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  letter-spacing: var(--tracking-open);
+}
+
+/* Legacy micro-label class — kept so JS/HTML references don't 404 on style,
+ * but restyled sentence-case M3 medium. No uppercase, no wide tracking. */
+.label-caps {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-normal);
+  text-transform: none;
+  color: var(--color-text-muted);
+}
+
+/* Screen-reader only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ===== Scrollbar styling ===================================== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-accent);
+  background-clip: padding-box;
+}
+
+/* ===== Skip link ============================================= */
 .skip-link {
   position: absolute;
   left: var(--sp-4);
   top: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
   background: var(--color-accent);
   color: var(--color-text-inverse);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-sm);
-  font-weight: var(--fw-semibold);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-sm);
+  letter-spacing: var(--tracking-normal);
   transform: translateY(-200%);
-  transition: transform var(--dur-base) var(--ease-out-expo);
+  transition: transform var(--dur-base) var(--ease-snap);
   z-index: var(--z-skip-link);
+  box-shadow: var(--md-sys-elevation-level-2);
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: none;
+  box-shadow: var(--md-sys-elevation-level-2), var(--shadow-focus-ring-accent);
 }
 
-.skip-link:focus { transform: translateY(0); }
-
-/* Layout: header + main */
+/* ===== App shell ============================================= */
 .app-shell {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  isolation: isolate;
 }
 
+/* Header reservation — full styling lives in components.css. */
 .app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  height: 48px;
-  padding: 0 var(--sp-4);
-  background: var(--color-bg-elev-1);
-  border-bottom: 1px solid var(--color-border);
   position: sticky;
   top: 0;
   z-index: var(--z-header);
 }
 
-.app-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-weight: var(--fw-semibold);
-  font-size: var(--fs-sm);
-  color: var(--color-text);
-}
-
-.app-brand .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  box-shadow: 0 0 0 3px rgba(110, 231, 183, 0.18);
-  animation: brand-pulse 2.2s var(--ease-out-expo) infinite;
-}
-
-@keyframes brand-pulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(110, 231, 183, 0.18); }
-  50%      { box-shadow: 0 0 0 6px rgba(110, 231, 183, 0.08); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .app-brand .dot { animation: none; }
-}
-
-.app-nav {
-  display: flex;
-  gap: var(--sp-1);
-  flex: 1;
-  margin-left: var(--sp-5);
-}
-
-.app-nav a {
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
-}
-
-.app-nav a:hover { color: var(--color-text); background: var(--color-bg-elev-2); text-decoration: none; }
-.app-nav a[aria-current="page"] {
-  color: var(--color-text);
-  background: var(--color-bg-elev-2);
-  box-shadow: inset 0 -2px 0 var(--color-accent);
-}
-
-.app-header-right {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-}
-
 .app-main {
   flex: 1;
-  padding: var(--sp-5) var(--sp-4);
-  max-width: 1400px;
   width: 100%;
+  max-width: 1440px;
   margin: 0 auto;
+  padding: var(--sp-6) var(--sp-6);
 }
 
-.page-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-5);
-  flex-wrap: wrap;
+/* Full-bleed map variant */
+.app-main.app-main--map {
+  max-width: none;
+  padding: 0;
 }
 
-.page-title {
-  font-size: var(--fs-xl);
-  line-height: var(--lh-xl);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-tight);
+@media (max-width: 900px) {
+  .app-main {
+    padding: var(--sp-5) var(--sp-4);
+    padding-bottom: calc(var(--sp-8) + env(safe-area-inset-bottom, 0px));
+  }
 }
 
-.page-subtitle {
-  color: var(--color-text-muted);
-  font-size: var(--fs-sm);
-  margin-top: var(--sp-1);
+@media (max-width: 640px) {
+  .app-main {
+    padding: var(--sp-4) var(--sp-3);
+    padding-bottom: calc(var(--sp-11) + env(safe-area-inset-bottom, 0px));
+  }
+  /* When the dock is a minimised pill on mobile, content only needs room
+   * for the 60 px pill + safe-area inset. */
+  body:has(.voice-dock.is-collapsed) .app-main {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
-.panel {
-  background: var(--color-bg-elev-1);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.panel-title {
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-
-.panel-body {
-  padding: var(--sp-4);
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
-
-.grid-2 {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--sp-4);
-}
-
-@media (min-width: 900px) {
-  .grid-2 { grid-template-columns: 2fr 1fr; }
-}
-
-.stack { display: flex; flex-direction: column; gap: var(--sp-3); }
-.stack-sm { display: flex; flex-direction: column; gap: var(--sp-2); }
-.stack-lg { display: flex; flex-direction: column; gap: var(--sp-5); }
-
-.row { display: flex; align-items: center; gap: var(--sp-3); }
-.row-sm { display: flex; align-items: center; gap: var(--sp-2); }
-
-.spacer { flex: 1; }
-
-.muted { color: var(--color-text-muted); }
-.dim { color: var(--color-text-dim); }
-.mono-id {
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  color: var(--color-text-muted);
-  letter-spacing: var(--tracking-wide);
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px; height: 1px;
-  padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0, 0, 0, 0);
-  white-space: nowrap; border: 0;
-}
-
-/* SPA route target: the <main> region whose contents the router swaps
- * between partials. No layout of its own — purely a mount point. */
+/* ===== SPA route target =====================================
+ * The router swaps #route-target innerHTML between partials. It contributes
+ * no layout (display: contents) — partials own their outer layout. */
 .route-target {
   display: contents;
-}
-.route-target[aria-busy="true"] {
-  opacity: 0.65;
-  transition: opacity 120ms var(--ease-out-expo);
 }
 .route-error {
   padding: var(--sp-6);
@@ -288,85 +250,72 @@ code, pre, .mono {
   color: var(--color-danger);
 }
 
-/* Agent-highlight flash animation */
-[data-agent-id].is-agent-highlighted {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  animation: agent-flash 1200ms var(--ease-out-expo);
+/* Page-entry keyframes are KEPT so pages.css rules that reference them
+ * still compile. Duration is driven by `--dur-base` / stagger delays,
+ * all of which collapse to 0 in v2 (see tokens.css). */
+@keyframes page-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes page-clip-reveal {
+  from { opacity: 0; clip-path: inset(0 100% 0 0); }
+  to   { opacity: 1; clip-path: inset(0 0 0 0); }
 }
 
-@keyframes agent-flash {
-  0%   { box-shadow: 0 0 0 0 rgba(110,231,183,0.6); transform: scale(1); }
-  30%  { box-shadow: 0 0 0 8px rgba(110,231,183,0.25); transform: scale(1.02); }
-  100% { box-shadow: 0 0 0 0 rgba(110,231,183,0);   transform: scale(1); }
+/* ===== Selection ============================================ */
+::selection {
+  background: var(--color-accent-wash);
+  color: var(--color-text);
 }
 
+/* ===== Reduced motion — additional overrides =============== */
 @media (prefers-reduced-motion: reduce) {
-  [data-agent-id].is-agent-highlighted { animation: none; }
+  .skip-link { transition: none; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
-/* ---- Tables: prevent horizontal overflow on small screens ---- */
-.table-wrap {
-  width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-/* ---- Mobile layout ---- */
-@media (max-width: 900px) {
+/* ===== Dock right-gutter reservation ========================
+ * On desktop the voice dock is a 420-px pill anchored bottom-right. We
+ * reserve matching right-side gutter on main content so tables/cards
+ * don't flow underneath. When the dock is minimised (pill 420 px — same
+ * footprint) the reservation holds; the `:has()` release below frees the
+ * space if a future dock state drops the `.is-collapsed` flag while
+ * shrinking further. The reservation is a progressive enhancement —
+ * browsers without `:has()` keep the full reservation always.
+ */
+@media (min-width: 1100px) {
   .app-main {
-    padding: var(--sp-4) var(--sp-3);
-    /* Reserve bottom space so content doesn't hide under the fixed dock.
-     * The dock is ~320px tall on mobile collapsed; use a conservative floor. */
-    padding-bottom: calc(var(--sp-7) + env(safe-area-inset-bottom, 0px));
+    padding-right: calc(420px + var(--sp-6) + var(--sp-4));
+    transition: padding-right var(--dur-base) var(--ease-snap);
+  }
+  .app-shell:has(.voice-dock.is-collapsed) .app-main {
+    padding-right: var(--sp-6);
+  }
+  .app-main.app-main--map {
+    padding-right: 0;
+  }
+}
+@media (min-width: 1100px) and (max-width: 1279px) {
+  .app-main {
+    padding-right: calc(400px + var(--sp-5));
   }
 }
 
-@media (max-width: 640px) {
-  html, body { font-size: 15px; }
-  .app-header {
-    height: auto;
-    padding: var(--sp-2) var(--sp-3);
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-  }
-  .app-nav {
-    margin-left: 0;
-    width: 100%;
-    order: 3;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: var(--sp-1);
-    scrollbar-width: none;
-  }
-  .app-nav::-webkit-scrollbar { display: none; }
-  .app-nav a {
-    white-space: nowrap;
-    padding: var(--sp-1) var(--sp-2);
-    min-height: 32px;
-    display: inline-flex;
-    align-items: center;
-  }
-  .app-header-right { gap: var(--sp-2); }
-  .app-main {
-    padding: var(--sp-3) var(--sp-2);
-    /* Bottom dock on mobile takes ~50-70% of screen when expanded. Leave
-     * generous padding so the user can scroll. */
-    padding-bottom: calc(320px + env(safe-area-inset-bottom, 0px));
-  }
-  /* When dock is collapsed it sits as a pill; still keep some bottom pad. */
-  body:has(.voice-dock.is-collapsed) .app-main {
-    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--sp-2);
-    margin-bottom: var(--sp-3);
-  }
-  .page-title { font-size: var(--fs-lg); }
-
-  .panel-body { padding: var(--sp-3); }
-  .panel-header { padding: var(--sp-2) var(--sp-3); }
+/* ===== h1 focus tidy =========================================
+ * The router focuses the page <h1> on navigation (a11y good). Suppress the
+ * default outline for non-keyboard focus; keep the accent ring for keyboard
+ * users who tab back to the title.
+ */
+#route-target h1[tabindex="-1"]:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+#route-target h1[tabindex="-1"]:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring-accent);
+  border-radius: var(--radius-xs);
 }

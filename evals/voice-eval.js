@@ -230,19 +230,21 @@ const CASES = [
     expect: (tc) => tc.some((c) => c.name === 'map_highlight_load' && /LD-?10824/i.test(String(c.args?.load_id || ''))) ||
                    tc.length === 0 // acceptable: confirm phonetics before calling
   },
+  // audio-flow: end_call lets the agent hang up when the user signals
+  // they're done. Must NOT fire on a polite-but-mid-task message.
   {
-    name: 'set_compression_strength to crustier',
+    name: 'end_call when user says goodbye',
     page: '/',
     elements: DISPATCH_ELEMENTS,
-    text: 'Make yourself sound crustier — way more phone-line feel.',
-    expect: (tc) => tc.some((c) => c.name === 'set_compression_strength' && Number(c.args?.strength) >= 50)
+    text: 'Thanks, that\'s all I needed. Goodbye.',
+    expect: (tc) => tc.some((c) => c.name === 'end_call')
   },
   {
-    name: 'set_compression_strength to clean',
+    name: 'end_call stays silent on a normal question',
     page: '/',
     elements: DISPATCH_ELEMENTS,
-    text: 'Drop the phone filter entirely — studio clean, please.',
-    expect: (tc) => tc.some((c) => c.name === 'set_compression_strength' && Number(c.args?.strength) <= 10)
+    text: 'Which carriers are available for the Dallas lane?',
+    expect: (tc) => !tc.some((c) => c.name === 'end_call')
   }
 ];
 

@@ -1,15 +1,15 @@
 <section class="page-header">
-  <div>
-    <h1 class="page-title">Dispatch Board</h1>
-    <div class="page-subtitle muted">Live view of active loads. Click any row or ask Jarvis to take an action.</div>
+  <div class="page-header-text">
+    <h1 class="page-title">Dispatch board</h1>
+    <p class="page-subtitle muted">Live view of active loads. Click any row or ask Jarvis to take an action.</p>
   </div>
-  <div class="toolbar">
-    <button class="btn" data-agent-id="dispatch.action.new_load">New load</button>
-    <button class="btn btn--primary" data-agent-id="dispatch.action.export">Export CSV</button>
+  <div class="toolbar" role="toolbar" aria-label="Dispatch actions">
+    <button class="btn" type="button" data-agent-id="dispatch.action.new_load">New load</button>
+    <button class="btn btn--primary" type="button" data-agent-id="dispatch.action.export">Export CSV</button>
   </div>
 </section>
 
-<div class="summary-grid" id="summary-grid" aria-label="Key metrics"></div>
+<div class="summary-grid" id="summary-grid" role="region" aria-label="Key metrics"></div>
 
 <div class="filter-bar" role="region" aria-label="Filter loads">
   <div class="field">
@@ -33,45 +33,36 @@
   </div>
 </div>
 
-<div class="grid-2">
-  <section class="panel" aria-label="Loads table">
-    <header class="panel-header">
-      <div class="panel-title">Loads</div>
-      <div class="row-sm">
-        <span class="muted" style="font-size: var(--fs-xs);">Click a row for details</span>
-      </div>
-    </header>
-    <div class="table-wrap" role="region">
-      <table class="table" aria-label="Active loads">
-        <thead>
-          <tr>
-            <th scope="col">Load ID</th>
-            <th scope="col">Route</th>
-            <th scope="col">Carrier</th>
-            <th scope="col">Status</th>
-            <th scope="col">Miles</th>
-            <th scope="col">Rate</th>
-            <th scope="col">ETA</th>
-          </tr>
-        </thead>
-        <tbody id="loads-tbody" data-agent-id="dispatch.loads_tbody"></tbody>
-      </table>
-    </div>
+<div class="table-wrap" role="region" aria-label="Loads table">
+  <table class="table" aria-label="Active loads">
+    <thead>
+      <tr>
+        <th scope="col">Load ID</th>
+        <th scope="col">Route</th>
+        <th scope="col">Carrier</th>
+        <th scope="col">Status</th>
+        <th scope="col">Miles</th>
+        <th scope="col">Rate</th>
+        <th scope="col">ETA</th>
+      </tr>
+    </thead>
+    <tbody id="loads-tbody" data-agent-id="dispatch.loads_tbody"></tbody>
+  </table>
+</div>
+
+<div class="dispatch-detail-drawer">
+  <section class="detail-panel panel" id="detail-panel" aria-label="Load detail">
+    <div class="muted">Select a load to see details.</div>
   </section>
 
-  <aside class="stack">
-    <div class="detail-panel" id="detail-panel" aria-label="Load detail">
-      <div class="muted">Select a load to see details.</div>
-    </div>
-    <aside class="dispatch-map-card" aria-label="Fleet map preview">
-      <header class="dispatch-map-card-header">
-        <div>
-          <div class="dispatch-map-card-title">Fleet map</div>
-          <div class="dispatch-map-card-sub" id="dispatch-map-sub">Active lanes across the network</div>
-        </div>
-        <a class="btn btn--primary btn--sm" href="/map.html" data-agent-id="dispatch.open_map">Open map →</a>
-      </header>
-      <ul class="dispatch-map-lanes" id="dispatch-map-lanes" data-agent-id="dispatch.map_lanes" aria-label="Active lanes"></ul>
-    </aside>
-  </aside>
+  <section class="dispatch-map-card panel" aria-label="Fleet map preview">
+    <header class="panel-header">
+      <div>
+        <div class="panel-title">Fleet map</div>
+        <div class="dispatch-map-card-sub muted" id="dispatch-map-sub">Active lanes across the network</div>
+      </div>
+      <a class="btn btn--primary btn--sm" href="/map.html" data-agent-id="dispatch.open_map">Open map</a>
+    </header>
+    <ul class="dispatch-map-lanes" id="dispatch-map-lanes" data-agent-id="dispatch.map_lanes" aria-label="Active lanes"></ul>
+  </section>
 </div>

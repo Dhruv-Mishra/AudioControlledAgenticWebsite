@@ -55,6 +55,7 @@ const {
   ipFromRequest
 } = require('./api/rate-limit');
 const { SHOW_TEXT } = require('./api/server-flags');
+const { handleWsNonce, verifyNonceFromRequest } = require('./api/ws-nonce');
 
 const PORT = Number(process.env.PORT) || 3011;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -69,7 +70,34 @@ if (IS_PROD && SERVE_ROOT === ROOT) {
 }
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
+  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+
+// Pre-compile exact vs. wildcard origins once at module load so the
+// upgrade path stays O(1)/O(small) per request. Wildcard syntax mirrors
+// TLS-cert semantics: `https://*.example.com` matches exactly one label
+// (no dots) — `foo.example.com` yes, `example.com` no, `a.b.example.com`
+// no. Scheme and port (if present) are matched literally.
+const ALLOWED_ORIGIN_EXACT = new Set();
+const ALLOWED_ORIGIN_WILDCARDS = [];
+for (const entry of ALLOWED_ORIGINS) {
+  if (entry.includes('*')) {
+    const pattern = entry
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // regex-escape literals
+      .replace(/\*/g, '[^.]+');              // each `*` → one DNS label
+    ALLOWED_ORIGIN_WILDCARDS.push(new RegExp('^' + pattern + '$'));
+  } else {
+    ALLOWED_ORIGIN_EXACT.add(entry);
+  }
+}
+
+function matchesAllowedOrigin(origin) {
+  const o = String(origin).toLowerCase();
+  if (ALLOWED_ORIGIN_EXACT.has(o)) return true;
+  for (const re of ALLOWED_ORIGIN_WILDCARDS) {
+    if (re.test(o)) return true;
+  }
+  return false;
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -85,10 +113,14 @@ const MIME = {
   '.woff2':'font/woff2',
   '.wav':  'audio/wav',
   '.mp3':  'audio/mpeg',
+  '.webm': 'audio/webm',
+  '.ogg':  'audio/ogg',
   '.map':  'application/json; charset=utf-8'
 };
 
-const STATIC_DIRS = ['css', 'js', 'public', 'data', 'partials'];
+// audio-flow: 'audio' is served so the browser can fetch the three
+// startCall / background / endCall clips (webm primary, mp3 fallback).
+const STATIC_DIRS = ['css', 'js', 'public', 'data', 'partials', 'audio'];
 
 // Routes that the SPA router handles client-side. The server serves the
 // single-page shell (index.html) for each — the History API then rewrites
@@ -117,7 +149,10 @@ function cacheControlFor(pathname) {
   }
   // Top-level JS/CSS: no content hash today, but safe to cache for a day.
   // Long-tail static assets (favicon, data fixtures, fonts) — 1 day is fine.
-  if (/\.(?:js|css|svg|png|jpg|ico|woff|woff2)$/i.test(pathname)) {
+  // audio-flow: the three call-audio clips (mp3/webm) are included here
+  // so the browser can cache them across reloads — they're small and
+  // don't change per deploy.
+  if (/\.(?:js|css|svg|png|jpg|ico|woff|woff2|mp3|webm|ogg|wav)$/i.test(pathname)) {
     return IS_PROD
       ? 'public, max-age=86400, must-revalidate'
       : 'no-cache';
@@ -198,14 +233,29 @@ function resolveStaticPath(pathname) {
   return null;
 }
 
+// Origin policy.
+//   - In production (NODE_ENV=production) an explicit Origin header is
+//     REQUIRED and must match ALLOWED_ORIGINS exactly. An empty list is a
+//     misconfiguration and we fail closed.
+//   - In development we still accept no-Origin (curl / Node ws clients) and
+//     localhost variants.
 function isOriginAllowed(origin) {
-  if (!origin) return true; // loopback / curl
+  if (IS_PROD) {
+    if (!origin) return false;
+    if (!ALLOWED_ORIGINS.length) return false;
+    return matchesAllowedOrigin(origin);
+  }
+  if (!origin) return true; // loopback / curl / ws client
   if (!ALLOWED_ORIGINS.length) {
-    // Dev defaults
     return /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
   }
-  return ALLOWED_ORIGINS.includes(origin);
+  return matchesAllowedOrigin(origin);
 }
+
+// When this flag is set (tests / smoke stubs), WS-upgrade skips the nonce
+// check. Never set in production. A single env knob keeps a server stubbed
+// from a child process able to answer /api/live without minting tokens.
+const DISABLE_WS_NONCE = String(process.env.DISABLE_WS_NONCE || '') === '1';
 
 async function handleTranscript(req, res) {
   if (req.method !== 'POST') {
@@ -279,6 +329,7 @@ const server = http.createServer(async (req, res) => {
   // API
   if (pathname === '/api/health') return handleHealth(req, res);
   if (pathname === '/api/config') return handleConfig(req, res);
+  if (pathname === '/api/ws-nonce') return handleWsNonce(req, res);
   if (pathname === '/api/eval')   return handleEval(req, res);
   if (pathname === '/api/transcript') return handleTranscript(req, res);
 
@@ -305,6 +356,30 @@ server.on('upgrade', (req, socket, head) => {
     socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
     socket.destroy();
     return;
+  }
+  // Best-effort Sec-Fetch-Site check. Only browsers set this; curl / ws
+  // clients don't. When present it must be same-origin — anything else is a
+  // cross-site attempt we reject. Absence is tolerated (not a regression).
+  const sfs = req.headers['sec-fetch-site'];
+  if (typeof sfs === 'string' && sfs.length > 0 && sfs !== 'same-origin') {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  // Signed single-use nonce. Failures are 401 (not 403) so browser stacks
+  // surface a useful error and the client can fetch a fresh one.
+  if (!DISABLE_WS_NONCE) {
+    const nonceRes = verifyNonceFromRequest(req, process.env);
+    if (!nonceRes.ok) {
+      socket.write(
+        'HTTP/1.1 401 Unauthorized\r\n' +
+        'Content-Type: text/plain\r\n' +
+        'X-WS-Auth-Reason: ' + String(nonceRes.reason || 'unknown') + '\r\n' +
+        '\r\n'
+      );
+      socket.destroy();
+      return;
+    }
   }
   const ip = ipFromRequest(req);
   const rl = acquireSession(ip);
