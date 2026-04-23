@@ -79,7 +79,8 @@ function grepLogs(child, patterns, timeoutMs) {
       ...process.env,
       PORT: String(PORT),
       GEMINI_API_KEY: 'invalid-for-greeting-smoke',
-      DEBUG: '1'
+      DEBUG: '1',
+      DISABLE_WS_NONCE: '1'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

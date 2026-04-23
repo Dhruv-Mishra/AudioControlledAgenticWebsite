@@ -81,11 +81,13 @@ const MAX_PERSISTED_TRANSCRIPT_BYTES = 80 * 1024;
 const BACKGROUND_AUDIO_STORAGE_KEY = 'jarvis.backgroundAudio';
 const DEFAULT_BACKGROUND_ENABLED = true;
 
-// audio-flow: phone-line compression toggle. Default OFF so new visitors
-// hear Jarvis clean. Persists to localStorage; takes effect immediately
-// via a 50ms crossfade.
+// audio-flow: phone-line compression toggle. Default ON so new visitors
+// hear Jarvis with the intended call-center character. Persists to
+// localStorage; takes effect immediately via a 50ms crossfade.
+// latency-pass: when ON, the server also downshifts agent audio to
+// narrowband (8 kHz mono PCM16) to halve network bytes per frame.
 const PHONE_COMPRESSION_STORAGE_KEY = 'jarvis.phoneCompression';
-const DEFAULT_PHONE_COMPRESSION = false;
+const DEFAULT_PHONE_COMPRESSION = true;
 
 // Round-2 req 2: transcript mode defaults to 'full' so first-run users
 // see what Jarvis says. The canonical localStorage key is
@@ -257,6 +259,16 @@ export class VoiceAgent extends EventTarget {
     super();
     this.pipeline = new AudioPipeline();
     this.transcript = transcriptEl ? new TranscriptLog(transcriptEl) : null;
+    // Round-8 test hook: if URL has `?r8hook=1`, stash this instance on
+    // `window.__r8Agent` so the Playwright end-call harness can fire
+    // synthetic server frames into `_onServerMessage`. Gated strictly
+    // to `r8hook=1` so production pages don't expose the agent. Single
+    // line; zero impact on the critical call path.
+    try {
+      if (typeof window !== 'undefined' && /[?&]r8hook=1(&|$)/.test(location.search)) {
+        window.__r8Agent = this;
+      }
+    } catch {}
     this.wake = null;
     this.ws = null;
     this.wsUrl = null;
@@ -331,6 +343,18 @@ export class VoiceAgent extends EventTarget {
     // AudioContext exists (first placeCall), so loading it here is safe.
     this.phoneCompression = this._loadPhoneCompression();
     try { this.pipeline.setPhoneCompression(this.phoneCompression); } catch {}
+
+    // audio-prefs: the server may negotiate a narrowband output (8 kHz)
+    // when phoneLine=true. Default 24 kHz tracks the Gemini Live native
+    // output rate and is the safe fallback when the server hasn't sent
+    // an `audio_format` message yet.
+    this._agentAudioRate = 24000;
+    this._agentAudioPhoneLine = !!this.phoneCompression;
+
+    // latency-pass: rolling decode-latency buffer for the debug HUD. Keep
+    // only the most recent 256 chunks so it can't leak memory on a long
+    // call. p50 / p95 are computed on demand when the HUD renders.
+    this._decodeLatencyBuf = [];
 
     this.setupComplete = false;
     this.preSetupBuffer = [];
@@ -823,60 +847,82 @@ export class VoiceAgent extends EventTarget {
       try { this._sttController.stop(); } catch {}
     }
 
-    // Round-6 fix 2: branch on teardown source.
+    // Round-8: two strictly-distinct end-call paths.
     //
-    // AGENT path (`agent_end_call` — the deterministic chain already
-    //   waited for the sign-off to fully drain):
-    //     • mic OFF
-    //     • callOpen / background HARD-stopped (callClose is about to
-    //       play and needs its element free)
-    //     • agent playback NOT flushed — it's already drained
-    //     • playCallClose() runs next
+    // AGENT path (`agent_end_call` / `agent_end_call_timeout`):
+    //   • The deterministic chain already waited for turn_complete +
+    //     agent-playback-drained. Agent audio has physically left the
+    //     speakers; agent's last sample is silent.
+    //   • Stop background (so the chime plays against silence).
+    //   • Play callClose in full, await its onended.
+    //   • Round-8 A.4: background off → brief silence → chime → teardown.
     //
     // USER path (`user_end` / `user_cancel`):
-    //     • mic OFF
-    //     • EVERYTHING hard-stopped including in-flight Gemini PCM
-    //       (round-1 req 7: instant silence on click)
-    //     • playCallClose() still runs — the hang-up chime is part of
-    //       the call UX even on a hard kill (round-1 spec).
-    //
-    // Both paths end with playCallClose → WS close → UI reset.
+    //   • User clicked End Call. Round-8 Path B: ZERO audio, ZERO wait.
+    //   • The UI click handler has ALREADY synchronously called
+    //     `pipeline.stopAllAudio()` which latched `_hardKilled=true`
+    //     and stopped every source. The `_agentEndingArmed` wait (if
+    //     armed) was already cancelled by `endCall()`.
+    //   • We DO NOT call `armForNextCall()` here — that would clear
+    //     the hard-kill latch right before we try to play callClose.
+    //     We DO NOT call `playCallClose()` at all. The latch is cleared
+    //     naturally at the top of the NEXT `placeCall()`.
+    //   • Skip straight to WS close + state reset. Same-frame teardown.
     const isAgentPath = reason === 'agent_end_call' || reason === 'agent_end_call_timeout';
 
     this.pipeline.setCapturePaused(true);
     this.preSetupBuffer = [];
     this.preSetupBytes = 0;
-    // Hard-kill open + background regardless of path — neither is
-    // relevant at this point. Round-6 fix 2 restructured
-    // stopAllCallAudio to LEAVE closeAudio alone so the upcoming
-    // playCallClose() works — that was the silent-chime root cause.
-    try { this.pipeline.callAudio.stopAllCallAudio(); } catch {}
-    if (!isAgentPath) {
-      // User path: kill any in-flight Gemini PCM (round-1 req 7).
-      try { this.pipeline.flushPlayback(); } catch {}
-    }
-    // Clear the hard-kill latch JUST for the end-call chime. The
-    // controller is idempotent — the latch is re-armed on the next
-    // placeCall().
-    try { this.pipeline.callAudio.armForNextCall(); } catch {}
-    if (this.transcript) this.transcript.turnBreak();
-
-    // Tell the server we're done — they'll close upstream cleanly.
-    try { this._sendJson({ type: 'call_end' }); } catch {}
 
     // Round-6 fix 2: phase-logged end-call trace. Always-on so a
-    // regression of "callClose didn't play" is obvious in the console
-    // without a debug flag. Times are ms-from-teardown-start.
+    // regression is obvious in the console without a debug flag.
     const teardownAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     // eslint-disable-next-line no-console
     console.log('[jarvis phase] end_call_teardown_start reason=' + reason + ' path=' + (isAgentPath ? 'agent' : 'user'));
 
-    // audio-flow: play the end-call chime (phoneCut + 3× end-call beeps).
-    // The controller caps wait at END_AUDIO_MAX_MS so a missing clip
-    // never stalls shutdown. Awaited so the user hears the full hang-up
-    // sequence before we flip the UI back to "Place Call".
-    let closeOutcome = { ok: false, reason: 'not_attempted' };
-    try { closeOutcome = await this.pipeline.callAudio.playCallClose(); } catch {}
+    let closeOutcome = { ok: true, reason: 'skipped_user_path' };
+
+    if (isAgentPath) {
+      // Agent path only: stop background cleanly, then play callClose.
+      // `stopAllCallAudio` latches `_hardKilled=true` + stops background
+      // + stops any in-flight callOpen source (no-op by this point since
+      // callOpen ended ~conversation-ago). It does NOT touch callClose
+      // (round-6 fix 2 kept callClose untouched there so play works).
+      try { this.pipeline.callAudio.stopAllCallAudio(); } catch {}
+      // Clear the hard-kill latch JUST for the end-call chime. Safe on
+      // the agent path because the user hasn't asked for silence.
+      try { this.pipeline.callAudio.armForNextCall(); } catch {}
+      if (this.transcript) this.transcript.turnBreak();
+
+      // Tell the server we're done — they'll close upstream cleanly.
+      try { this._sendJson({ type: 'call_end' }); } catch {}
+
+      // Play the end-call chime. `playCallClose` is an
+      // AudioBufferSourceNode (round 7) — deterministic `onended`
+      // fires exactly once. Awaited so the UI doesn't flip to green
+      // until the chime is physically done.
+      try { closeOutcome = await this.pipeline.callAudio.playCallClose(); } catch {}
+    } else {
+      // User path: ZERO audio. The UI click handler already called
+      // `pipeline.stopAllAudio()` — `_hardKilled` is true, every
+      // source is stopped, background is paused. We do NOT re-arm
+      // (`armForNextCall` is deliberately skipped — it would unlatch
+      // the hard-kill and allow a stray late `playCallClose` call to
+      // succeed). The latch is cleared naturally at the top of the
+      // next `placeCall()`.
+      //
+      // Defensive belt: call stopAllAudio again here in case the
+      // current _gracefullyEndCall entrypoint wasn't preceded by the
+      // UI's explicit call (e.g. programmatic `agent.endCall()` from
+      // a test or a future code path).
+      try { this.pipeline.stopAllAudio(); } catch {}
+      if (this.transcript) this.transcript.turnBreak();
+
+      // Tell the server we're done. No callClose — user wanted instant.
+      try { this._sendJson({ type: 'call_end' }); } catch {}
+      closeOutcome = { ok: true, reason: 'skipped_user_path' };
+    }
+
     const closeEndedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     // eslint-disable-next-line no-console
     console.log('[jarvis phase] end_call_chime_done ms=' + Math.round(closeEndedAt - teardownAt) + ' outcome=' + (closeOutcome && closeOutcome.reason));
@@ -1083,9 +1129,39 @@ export class VoiceAgent extends EventTarget {
     this.phoneCompression = next;
     try { localStorage.setItem(PHONE_COMPRESSION_STORAGE_KEY, next ? 'on' : 'off'); } catch {}
     try { this.pipeline.setPhoneCompression(next); } catch {}
+    // audio-prefs: tell the server so it can re-negotiate the output
+    // bitrate. No-op pre-call (WS is closed) — the hello frame will
+    // include the fresh preference on the next placeCall.
+    this._sendJson({ type: 'audio_prefs', phoneLine: next });
     this._publishEvent('phone-compression-changed', { enabled: next });
     return next;
   }
+
+  /** latency-pass: record a client-side decode span (ms). Bounded buffer;
+   *  read by the debug HUD. */
+  _recordDecodeLatency(ms) {
+    if (!this._decodeLatencyBuf) this._decodeLatencyBuf = [];
+    this._decodeLatencyBuf.push(Number(ms) || 0);
+    if (this._decodeLatencyBuf.length > 256) this._decodeLatencyBuf.shift();
+  }
+
+  /** latency-pass: percentiles for the HUD. Returns `{p50, p95, max, n}` in
+   *  milliseconds. */
+  getDecodeLatencyStats() {
+    const arr = (this._decodeLatencyBuf || []).slice().sort((a, b) => a - b);
+    if (arr.length === 0) return { p50: 0, p95: 0, max: 0, n: 0 };
+    return {
+      p50: arr[Math.floor(arr.length * 0.50)] || 0,
+      p95: arr[Math.floor(arr.length * 0.95)] || 0,
+      max: arr[arr.length - 1] || 0,
+      n: arr.length
+    };
+  }
+
+  /** latency-pass: current agent-audio rate the playback graph is
+   *  decoding at. Exposed for the HUD. */
+  getAgentAudioRate() { return this._agentAudioRate || 24000; }
+  getAgentAudioPhoneLine() { return !!this._agentAudioPhoneLine; }
 
   _loadPhoneCompression() {
     try {
@@ -1242,18 +1318,53 @@ export class VoiceAgent extends EventTarget {
   }
 
   // ---------- WebSocket lifecycle (only used while a call is active) ----------
+  //
+  // Nonce flow: before every WS open we fetch a fresh single-use token from
+  // /api/ws-nonce and pass it via `?token=`. The request is small (~60 B
+  // JSON response) and resolves in ~1 RTT — we pipeline it alongside mic +
+  // audio in placeCall so there's zero net increase in perceived latency.
+  // A fetched nonce older than its exp is rejected by the server; stale
+  // tokens from a previous attempt are never reused.
+  async _fetchWsNonce() {
+    try {
+      const r = await fetch('/api/ws-nonce', { cache: 'no-store' });
+      if (!r.ok) return null;
+      const j = await r.json();
+      if (!j || typeof j.nonce !== 'string' || !j.nonce) return null;
+      return j.nonce;
+    } catch {
+      return null;
+    }
+  }
+
   _connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    this.wsUrl = `${proto}://${location.host}/api/live`;
     this._setState(STATES.LIVE_OPENING);
-    try {
-      this.ws = new WebSocket(this.wsUrl);
-      this.ws.binaryType = 'arraybuffer';
-    } catch (err) {
-      this._setState(STATES.ERROR, 'ws_failed');
-      this._tearDownCall();
-      return;
-    }
+    // Fetch a fresh nonce first. The WS open is the inner callback so we
+    // never open without a token when the server requires one.
+    this._fetchWsNonce().then((token) => {
+      if (!this._callActive && !this.isInCall()) return; // user cancelled
+      const qs = token ? ('?token=' + encodeURIComponent(token)) : '';
+      this.wsUrl = `${proto}://${location.host}/api/live${qs}`;
+      try {
+        this.ws = new WebSocket(this.wsUrl);
+        this.ws.binaryType = 'arraybuffer';
+        // latency-pass: confirm in the console that the handshake uses a
+        // nonce. Only when debug=1 — do not spam prod logs.
+        if (DEBUG) {
+          // eslint-disable-next-line no-console
+          console.log('[jarvis] ws nonce handshake', token ? 'ok' : 'skipped');
+        }
+      } catch (err) {
+        this._setState(STATES.ERROR, 'ws_failed');
+        this._tearDownCall();
+        return;
+      }
+      this._attachWsListeners();
+    });
+  }
+
+  _attachWsListeners() {
     this.ws.onopen = () => {
       this.reconnectIdx = 0;
       this.metrics.connectedAt = Date.now();
@@ -1277,6 +1388,10 @@ export class VoiceAgent extends EventTarget {
         hello.resumeHandle = this.resumeHandle;
         hello.resumeHandleIssuedAt = this.resumeHandleIssuedAt || Date.now();
       }
+      // audio-prefs: piggyback the current phone-line compression state on
+      // hello so the very first agent-audio chunk lands at the right rate
+      // — no first-chunk resample cost and no extra round-trip.
+      hello.audioPrefs = { phoneLine: !!this.phoneCompression };
       // latency-pass: piggyback the greeting inject on `hello` when this WS
       // open is for a fresh placeCall (not a reconnect / persona-switch /
       // mode-switch). Server honours `greet.{page,title}` by injecting the
@@ -1359,7 +1474,12 @@ export class VoiceAgent extends EventTarget {
         }
         this._logPhase('setup_complete_to_first_token', this._phaseTimestamps.setupCompleteAt || this._phaseTimestamps.placeCallAt, this._phaseTimestamps.firstTokenAt);
       }
-      this.pipeline.enqueuePcm24k(pcm);
+      // latency-pass: measure client-side decode (just the int16→buffer
+      // copy and schedule). Useful HUD signal when debug=1.
+      const _tDec0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this.pipeline.enqueuePcm24k(pcm, this._agentAudioRate || 24000);
+      const _tDec1 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this._recordDecodeLatency(_tDec1 - _tDec0);
       this._setState(STATES.MODEL_SPEAKING);
     }
   }
@@ -1367,6 +1487,30 @@ export class VoiceAgent extends EventTarget {
   _onServerMessage(msg) {
     dlog('server msg', msg.type, msg.state || msg.from || msg.code || '');
     switch (msg.type) {
+      case 'audio_format': {
+        // audio-prefs: server authoritative frame declaring the current
+        // sample rate for incoming agent PCM. We store it so
+        // `enqueuePcm` schedules buffers at the right rate.
+        const rate = Math.max(4000, Math.min(48000, Number(msg.outSampleRate) || 24000));
+        this._agentAudioRate = rate;
+        this._agentAudioPhoneLine = !!msg.phoneLine;
+        if (DEBUG) {
+          // eslint-disable-next-line no-console
+          console.log('[jarvis] audio_format codec=' + (msg.codec || '?') + ' rate=' + rate + ' phoneLine=' + !!msg.phoneLine);
+        }
+        this._publishEvent('audio-format-changed', {
+          outSampleRate: rate,
+          phoneLine: !!msg.phoneLine
+        });
+        return;
+      }
+      case 'encode_stats': {
+        // latency-pass: HUD-only telemetry from the server. Re-dispatch
+        // as a generic `server-frame` so the ui.js HUD can consume it
+        // without adding a bespoke listener on every new frame type.
+        this._publishEvent('server-frame', msg);
+        return;
+      }
       case 'hello_ack':
         if (Array.isArray(msg.personas) && msg.personas.length) this.personas = msg.personas;
         if (msg.mode && msg.mode !== this.mode) this.mode = msg.mode;

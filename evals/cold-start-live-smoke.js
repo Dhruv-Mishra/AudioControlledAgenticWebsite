@@ -86,7 +86,8 @@ function silencePcm16(ms, sampleRate = 16000) {
       ...process.env,
       PORT: String(PORT),
       GEMINI_API_KEY: 'invalid-for-cold-start-smoke',
-      DEBUG: '1'
+      DEBUG: '1',
+      DISABLE_WS_NONCE: '1'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

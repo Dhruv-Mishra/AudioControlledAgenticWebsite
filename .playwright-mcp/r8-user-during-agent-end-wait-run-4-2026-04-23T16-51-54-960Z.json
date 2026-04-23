@@ -1,0 +1,1308 @@
+[
+  {
+    "t": 11,
+    "kind": "goto.start",
+    "detail": "http://localhost:3001/?r8hook=1"
+  },
+  {
+    "t": 278,
+    "kind": "btn.ready"
+  },
+  {
+    "t": 436,
+    "kind": "media.play.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 437,
+    "kind": "media.pause.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 442,
+    "kind": "console.warn",
+    "detail": "[audio-flow] callOpen buffer not ready — awaiting decode"
+  },
+  {
+    "t": 453,
+    "kind": "media.play.rejected",
+    "detail": {
+      "src": "background.webm",
+      "msg": "The play() request was interrupted by a call to pause(). https://goo.gl/LdLk22"
+    }
+  },
+  {
+    "t": 457,
+    "kind": "ws.open",
+    "detail": "ws://localhost:3001/api/live"
+  },
+  {
+    "t": 461,
+    "kind": "ws.send",
+    "detail": {
+      "type": "hello",
+      "len": 4798
+    }
+  },
+  {
+    "t": 463,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 464,
+    "kind": "btn.clicked_place"
+  },
+  {
+    "t": 466,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "hello_ack"
+    }
+  },
+  {
+    "t": 467,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 509,
+    "kind": "console.log",
+    "detail": "[audio-flow] decoded callOpen duration=15.71s ch=1 sr=48000"
+  },
+  {
+    "t": 526,
+    "kind": "console.log",
+    "detail": "[audio-flow] decoded callClose duration=4.10s ch=1 sr=48000"
+  },
+  {
+    "t": 526,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 15.711479166666667
+    }
+  },
+  {
+    "t": 594,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 716,
+    "kind": "ws.send",
+    "detail": {
+      "type": "elements",
+      "len": 4562
+    }
+  },
+  {
+    "t": 954,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "setup_complete"
+    }
+  },
+  {
+    "t": 955,
+    "kind": "console.log",
+    "detail": "[jarvis phase] setup_complete_vs_audio_start 513ms"
+  },
+  {
+    "t": 956,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 2483,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2483,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2483,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2484,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2500,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2506,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2510,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2510,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2513,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2518,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2522,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2524,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2526,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2529,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2532,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2532,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2536,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2564,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2610,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2654,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2993,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 3078,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 3150,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 3151,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "session_resumption"
+    }
+  },
+  {
+    "t": 5108,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 6559,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "session_resumption"
+    }
+  },
+  {
+    "t": 16597,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 15.711479166666667
+    }
+  },
+  {
+    "t": 16598,
+    "kind": "ws.send",
+    "detail": {
+      "type": "audio_prelude_ended",
+      "len": 30
+    }
+  },
+  {
+    "t": 16599,
+    "kind": "media.play.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 16614,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16615,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 2
+    }
+  },
+  {
+    "t": 16615,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.000041666666666666665
+    }
+  },
+  {
+    "t": 16616,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 4320
+    }
+  },
+  {
+    "t": 16621,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.09
+    }
+  },
+  {
+    "t": 16621,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16622,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16622,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16622,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16623,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16623,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16624,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16625,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16625,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 1920
+    }
+  },
+  {
+    "t": 16626,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.04
+    }
+  },
+  {
+    "t": 16626,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16626,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 3840
+    }
+  },
+  {
+    "t": 16626,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.08
+    }
+  },
+  {
+    "t": 16627,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 5760
+    }
+  },
+  {
+    "t": 16627,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.12
+    }
+  },
+  {
+    "t": 16627,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16627,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16628,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16628,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 1920
+    }
+  },
+  {
+    "t": 16628,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.04
+    }
+  },
+  {
+    "t": 16628,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16644,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16645,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16646,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16646,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16646,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 1920
+    }
+  },
+  {
+    "t": 16647,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.04
+    }
+  },
+  {
+    "t": 16647,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16647,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 9600
+    }
+  },
+  {
+    "t": 16647,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.2
+    }
+  },
+  {
+    "t": 16648,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 9600
+    }
+  },
+  {
+    "t": 16648,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.2
+    }
+  },
+  {
+    "t": 16648,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 9600
+    }
+  },
+  {
+    "t": 16648,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.2
+    }
+  },
+  {
+    "t": 16648,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16649,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16649,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16649,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16660,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16660,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16661,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16661,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 5760
+    }
+  },
+  {
+    "t": 16661,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.12
+    }
+  },
+  {
+    "t": 16661,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 15360
+    }
+  },
+  {
+    "t": 16661,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.32
+    }
+  },
+  {
+    "t": 16661,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 13440
+    }
+  },
+  {
+    "t": 16661,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 0.28
+    }
+  },
+  {
+    "t": 16661,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "turn_complete"
+    }
+  },
+  {
+    "t": 16662,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 16662,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.000041666666666666665
+    }
+  },
+  {
+    "t": 16665,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16667,
+    "kind": "media.play.resolved",
+    "detail": "background.webm"
+  },
+  {
+    "t": 16677,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16696,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.09
+    }
+  },
+  {
+    "t": 16717,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16756,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16796,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16837,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16856,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 16878,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16917,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16956,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16996,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17016,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 17036,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17076,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17116,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17158,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17176,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 17196,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17238,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17277,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17317,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17336,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 17356,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17376,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.04
+    }
+  },
+  {
+    "t": 17396,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17436,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17456,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.08
+    }
+  },
+  {
+    "t": 17476,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17516,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17556,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17576,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.12
+    }
+  },
+  {
+    "t": 17597,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17636,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17676,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17716,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17736,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 17756,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17776,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.04
+    }
+  },
+  {
+    "t": 17796,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17836,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17876,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17917,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17937,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 17958,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17977,
+    "kind": "simulate.agent_end",
+    "detail": "ok"
+  },
+  {
+    "t": 17998,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18037,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18041,
+    "kind": "console.log",
+    "detail": "[jarvis phase] end_call_teardown_start reason=agent_end_call path=agent"
+  },
+  {
+    "t": 18043,
+    "kind": "media.pause.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 18044,
+    "kind": "ws.send",
+    "detail": {
+      "type": "call_end",
+      "len": 19
+    }
+  },
+  {
+    "t": 18045,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 4.097958333333334
+    }
+  },
+  {
+    "t": 18047,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 18093,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "error"
+    }
+  },
+  {
+    "t": 18096,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18096,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18096,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18096,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18098,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18098,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18098,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18098,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18099,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18099,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18099,
+    "kind": "media.pause.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 18099,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 18101,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.04
+    }
+  },
+  {
+    "t": 18101,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.2
+    }
+  },
+  {
+    "t": 18101,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 18101,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.2
+    }
+  },
+  {
+    "t": 18102,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 18104,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.2
+    }
+  },
+  {
+    "t": 18104,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.16
+    }
+  },
+  {
+    "t": 18104,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.12
+    }
+  },
+  {
+    "t": 18104,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.32
+    }
+  },
+  {
+    "t": 18104,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 0.28
+    }
+  },
+  {
+    "t": 18104,
+    "kind": "ws.close",
+    "detail": {
+      "code": 1005
+    }
+  },
+  {
+    "t": 18106,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 4.097958333333334
+    }
+  },
+  {
+    "t": 18106,
+    "kind": "console.log",
+    "detail": "[jarvis phase] end_call_chime_done ms=66 outcome=stopped"
+  },
+  {
+    "t": 18236,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 15.711479166666667
+    }
+  },
+  {
+    "t": 18240,
+    "kind": "btn.clicked_end"
+  },
+  {
+    "t": 18244,
+    "kind": "ws.open",
+    "detail": "ws://localhost:3001/api/live"
+  },
+  {
+    "t": 18246,
+    "kind": "ws.send",
+    "detail": {
+      "type": "hello",
+      "len": 4980
+    }
+  },
+  {
+    "t": 18247,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 18248,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "hello_ack"
+    }
+  },
+  {
+    "t": 18248,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 18529,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 19037,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "setup_complete"
+    }
+  },
+  {
+    "t": 19039,
+    "kind": "console.log",
+    "detail": "[jarvis phase] setup_complete_vs_audio_start 801ms"
+  },
+  {
+    "t": 19040,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  }
+]

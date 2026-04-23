@@ -55,6 +55,7 @@ const {
   ipFromRequest
 } = require('./api/rate-limit');
 const { SHOW_TEXT } = require('./api/server-flags');
+const { handleWsNonce, verifyNonceFromRequest } = require('./api/ws-nonce');
 
 const PORT = Number(process.env.PORT) || 3011;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -205,14 +206,29 @@ function resolveStaticPath(pathname) {
   return null;
 }
 
+// Origin policy.
+//   - In production (NODE_ENV=production) an explicit Origin header is
+//     REQUIRED and must match ALLOWED_ORIGINS exactly. An empty list is a
+//     misconfiguration and we fail closed.
+//   - In development we still accept no-Origin (curl / Node ws clients) and
+//     localhost variants.
 function isOriginAllowed(origin) {
-  if (!origin) return true; // loopback / curl
+  if (IS_PROD) {
+    if (!origin) return false;
+    if (!ALLOWED_ORIGINS.length) return false;
+    return ALLOWED_ORIGINS.includes(origin);
+  }
+  if (!origin) return true; // loopback / curl / ws client
   if (!ALLOWED_ORIGINS.length) {
-    // Dev defaults
     return /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
   }
   return ALLOWED_ORIGINS.includes(origin);
 }
+
+// When this flag is set (tests / smoke stubs), WS-upgrade skips the nonce
+// check. Never set in production. A single env knob keeps a server stubbed
+// from a child process able to answer /api/live without minting tokens.
+const DISABLE_WS_NONCE = String(process.env.DISABLE_WS_NONCE || '') === '1';
 
 async function handleTranscript(req, res) {
   if (req.method !== 'POST') {
@@ -286,6 +302,7 @@ const server = http.createServer(async (req, res) => {
   // API
   if (pathname === '/api/health') return handleHealth(req, res);
   if (pathname === '/api/config') return handleConfig(req, res);
+  if (pathname === '/api/ws-nonce') return handleWsNonce(req, res);
   if (pathname === '/api/eval')   return handleEval(req, res);
   if (pathname === '/api/transcript') return handleTranscript(req, res);
 
@@ -312,6 +329,30 @@ server.on('upgrade', (req, socket, head) => {
     socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
     socket.destroy();
     return;
+  }
+  // Best-effort Sec-Fetch-Site check. Only browsers set this; curl / ws
+  // clients don't. When present it must be same-origin — anything else is a
+  // cross-site attempt we reject. Absence is tolerated (not a regression).
+  const sfs = req.headers['sec-fetch-site'];
+  if (typeof sfs === 'string' && sfs.length > 0 && sfs !== 'same-origin') {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  // Signed single-use nonce. Failures are 401 (not 403) so browser stacks
+  // surface a useful error and the client can fetch a fresh one.
+  if (!DISABLE_WS_NONCE) {
+    const nonceRes = verifyNonceFromRequest(req, process.env);
+    if (!nonceRes.ok) {
+      socket.write(
+        'HTTP/1.1 401 Unauthorized\r\n' +
+        'Content-Type: text/plain\r\n' +
+        'X-WS-Auth-Reason: ' + String(nonceRes.reason || 'unknown') + '\r\n' +
+        '\r\n'
+      );
+      socket.destroy();
+      return;
+    }
   }
   const ip = ipFromRequest(req);
   const rl = acquireSession(ip);

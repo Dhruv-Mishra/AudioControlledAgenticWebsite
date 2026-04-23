@@ -1,0 +1,290 @@
+[
+  {
+    "t": 14,
+    "kind": "goto.start",
+    "detail": "http://localhost:3001/?r8hook=1"
+  },
+  {
+    "t": 251,
+    "kind": "btn.ready"
+  },
+  {
+    "t": 963,
+    "kind": "media.play.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 966,
+    "kind": "media.pause.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 970,
+    "kind": "console.warn",
+    "detail": "[audio-flow] callOpen buffer not ready — awaiting decode"
+  },
+  {
+    "t": 980,
+    "kind": "media.play.rejected",
+    "detail": {
+      "src": "background.webm",
+      "msg": "The play() request was interrupted by a call to pause(). https://goo.gl/LdLk22"
+    }
+  },
+  {
+    "t": 986,
+    "kind": "ws.open",
+    "detail": "ws://localhost:3001/api/live"
+  },
+  {
+    "t": 989,
+    "kind": "ws.send",
+    "detail": {
+      "type": "hello",
+      "len": 4798
+    }
+  },
+  {
+    "t": 992,
+    "kind": "btn.clicked_place"
+  },
+  {
+    "t": 1019,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 1021,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "hello_ack"
+    }
+  },
+  {
+    "t": 1022,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 1066,
+    "kind": "console.log",
+    "detail": "[audio-flow] decoded callOpen duration=15.71s ch=1 sr=48000"
+  },
+  {
+    "t": 1081,
+    "kind": "console.log",
+    "detail": "[audio-flow] decoded callClose duration=4.10s ch=1 sr=48000"
+  },
+  {
+    "t": 1082,
+    "kind": "bufsrc.start",
+    "detail": {
+      "duration": 15.711479166666667
+    }
+  },
+  {
+    "t": 1114,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 1467,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "setup_complete"
+    }
+  },
+  {
+    "t": 1467,
+    "kind": "console.log",
+    "detail": "[jarvis phase] setup_complete_vs_audio_start 500ms"
+  },
+  {
+    "t": 1469,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 1983,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2230,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2294,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2299,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2348,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2365,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2385,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2437,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2484,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2551,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2552,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2602,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2652,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2683,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2741,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 2768,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 3662,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "session_resumption"
+    }
+  },
+  {
+    "t": 4045,
+    "kind": "media.pause.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 4046,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 4050,
+    "kind": "console.log",
+    "detail": "[jarvis phase] end_call_teardown_start reason=user_end path=user"
+  },
+  {
+    "t": 4051,
+    "kind": "media.pause.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 4051,
+    "kind": "bufsrc.stop",
+    "detail": {}
+  },
+  {
+    "t": 4052,
+    "kind": "ws.send",
+    "detail": {
+      "type": "call_end",
+      "len": 19
+    }
+  },
+  {
+    "t": 4052,
+    "kind": "console.log",
+    "detail": "[jarvis phase] end_call_chime_done ms=1 outcome=skipped_user_path"
+  },
+  {
+    "t": 4060,
+    "kind": "ws.close",
+    "detail": {
+      "code": 1000
+    }
+  },
+  {
+    "t": 4060,
+    "kind": "bufsrc.onended",
+    "detail": {
+      "duration": 15.711479166666667
+    }
+  },
+  {
+    "t": 4062,
+    "kind": "btn.clicked_end"
+  }
+]

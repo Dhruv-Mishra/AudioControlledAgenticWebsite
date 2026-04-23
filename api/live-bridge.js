@@ -202,6 +202,47 @@ function isErrorEphemeral(err) {
   return { retriable: false, code: 'upstream_error' };
 }
 
+// latency-pass: linear PCM16 decimator. Gemini Live emits 24 kHz PCM16
+// mono. When the browser requests phoneLine=true we downsample 3× to 8 kHz
+// before putting it on the wire — 3x fewer bytes per frame, near-zero
+// encode cost (one Int16 multiply + average per output sample). Takes and
+// returns Buffer instances containing little-endian Int16 samples.
+//
+//   - factor === 1  → return the buffer unchanged.
+//   - factor > 1    → produce 1 sample per `factor` input samples; use a
+//                     2-tap box filter to reduce aliasing above the new
+//                     Nyquist. Cheaper than a proper FIR and still better
+//                     than naive decimation for speech.
+function decimatePcm16(inputBuf, factor) {
+  if (!Buffer.isBuffer(inputBuf) || inputBuf.length < 2) return inputBuf;
+  if (factor <= 1) return inputBuf;
+  const inSamples = inputBuf.length >> 1; // 2 bytes per sample
+  const outSamples = Math.floor(inSamples / factor);
+  if (outSamples <= 0) return Buffer.alloc(0);
+  const out = Buffer.allocUnsafe(outSamples * 2);
+  let srcIdx = 0;
+  for (let i = 0; i < outSamples; i++) {
+    // 2-tap box: average two adjacent samples inside the decimation window.
+    // When factor is 3 this is still a crude low-pass but perceptually
+    // acceptable for narrowband speech — the client's subsequent upsample
+    // through the playback graph smooths the rest.
+    const a = inputBuf.readInt16LE(srcIdx * 2);
+    const b = srcIdx + 1 < inSamples ? inputBuf.readInt16LE((srcIdx + 1) * 2) : a;
+    let v = (a + b) >> 1;
+    if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
+    out.writeInt16LE(v, i * 2);
+    srcIdx += factor;
+  }
+  return out;
+}
+
+// audio-prefs: decimation factor choices by phone-line state.
+//   - phoneLine = true  → factor 3 (24 kHz → 8 kHz narrowband).
+//   - phoneLine = false → factor 1 (pass-through wideband 24 kHz).
+function factorForPrefs(prefs) {
+  return prefs && prefs.phoneLine ? 3 : 1;
+}
+
 function attach(browserWs, req, env) {
   const apiKey = env.GEMINI_API_KEY;
   const sessionId = Math.random().toString(36).slice(2, 10);
@@ -216,6 +257,18 @@ function attach(browserWs, req, env) {
   let helloReceived = false;
   let closed = false;
   let upstreamEverProducedData = false;
+  // audio-prefs: negotiated with the browser via `hello.audioPrefs` or a
+  // subsequent `audio_prefs` control frame. phoneLine defaults to true so
+  // a client that never sends the frame still gets the narrowband path.
+  let audioPrefs = { phoneLine: true, outSampleRate: 8000 };
+  // latency-pass: encode-latency HUD telemetry. Every chunk's encode span
+  // is pushed here; on `turn_complete` we log a summary line. Bounded to
+  // the last 1024 entries so a long call doesn't leak memory.
+  const encodeTimes = [];
+  function recordEncodeTime(us) {
+    encodeTimes.push(us);
+    if (encodeTimes.length > 1024) encodeTimes.shift();
+  }
   // latency-pass: if the browser supplied `greet:{page,title}` in its hello
   // frame, we inject the <call_initiated> block as soon as the upstream is
   // ready — saving one browser ↔ server RTT vs waiting for a subsequent
@@ -724,8 +777,16 @@ function attach(browserWs, req, env) {
       if (sc.modelTurn && Array.isArray(sc.modelTurn.parts)) {
         for (const part of sc.modelTurn.parts) {
           if (part.inlineData && typeof part.inlineData.data === 'string') {
-            const pcm = Buffer.from(part.inlineData.data, 'base64');
-            dlog(sessionId, 'audio chunk bytes=' + pcm.length + (preGreetReleased ? '' : ' (buffered pre-prelude)'));
+            const pcm0 = Buffer.from(part.inlineData.data, 'base64');
+            // latency-pass: decimate to narrowband when phoneLine=true.
+            // The factor is read FRESH per frame so an in-call toggle
+            // takes effect on the very next chunk.
+            const factor = factorForPrefs(audioPrefs);
+            const t0 = process.hrtime.bigint();
+            const pcm = factor > 1 ? decimatePcm16(pcm0, factor) : pcm0;
+            const tUs = Number(process.hrtime.bigint() - t0) / 1000;
+            recordEncodeTime(tUs);
+            dlog(sessionId, 'audio chunk bytes_in=' + pcm0.length + ' bytes_out=' + pcm.length + ' factor=' + factor + ' encUs=' + tUs.toFixed(1) + (preGreetReleased ? '' : ' (buffered pre-prelude)'));
             forwardAudioFrame(pcm);
             // `emitState('speaking')` intentionally uses the direct
             // `safeSendJson` path: state hints are small control frames
@@ -753,6 +814,34 @@ function attach(browserWs, req, env) {
       }
       if (sc.turnComplete) {
         dlog(sessionId, 'turn_complete' + (preGreetReleased ? '' : ' (buffered pre-prelude)'));
+        // latency-pass: emit a single compact summary line per turn with
+        // p50 / p95 of this session's decimator encode time. Surfaces
+        // regressions fast — if any value creeps above the 30 ms budget
+        // we'll see it in plain stdout.
+        if (encodeTimes.length > 0) {
+          const sorted = encodeTimes.slice().sort((a, b) => a - b);
+          const p50 = sorted[Math.floor(sorted.length * 0.50)] || 0;
+          const p95 = sorted[Math.floor(sorted.length * 0.95)] || 0;
+          const max = sorted[sorted.length - 1] || 0;
+          process.stdout.write(
+            '[live ' + sessionId + '] encode_summary chunks=' + sorted.length +
+            ' p50_us=' + p50.toFixed(1) +
+            ' p95_us=' + p95.toFixed(1) +
+            ' max_us=' + max.toFixed(1) +
+            ' phoneLine=' + !!audioPrefs.phoneLine + '\n'
+          );
+          // Forward a compact HUD-friendly payload to the browser. The
+          // client renders it only under `?debug=1`; cost when hidden is
+          // a single JSON frame per turn.
+          forwardJsonFrame({
+            type: 'encode_stats',
+            p50_us: Math.round(p50 * 10) / 10,
+            p95_us: Math.round(p95 * 10) / 10,
+            max_us: Math.round(max * 10) / 10,
+            chunks: sorted.length,
+            phoneLine: !!audioPrefs.phoneLine
+          });
+        }
         forwardJsonFrame({ type: 'turn_complete' });
         if (preGreetReleased) emitState('listening');
       }
@@ -777,6 +866,23 @@ function attach(browserWs, req, env) {
         pageName = String(data.page || '/').slice(0, 120);
         runtimeElements = Array.isArray(data.elements) ? data.elements.slice(0, 500) : [];
         if (data.mode === 'live' || data.mode === 'wakeword') mode = data.mode;
+
+        // audio-prefs: accept the client's initial preference so the first
+        // audio chunk is delivered at the requested bitrate. Missing field
+        // keeps the default (phoneLine=true) for backwards compatibility.
+        if (data.audioPrefs && typeof data.audioPrefs === 'object') {
+          const phoneLine = data.audioPrefs.phoneLine !== false;
+          audioPrefs = { phoneLine, outSampleRate: phoneLine ? 8000 : 24000 };
+          dlog(sessionId, 'hello audio_prefs phoneLine=' + phoneLine);
+        }
+        // Let the client know the current decoding rate so the playback
+        // graph picks the right sample rate per chunk.
+        safeSendJson(browserWs, {
+          type: 'audio_format',
+          outSampleRate: audioPrefs.outSampleRate,
+          phoneLine: !!audioPrefs.phoneLine,
+          codec: 'pcm16-le'
+        });
 
         // Cross-page handoff: the browser may supply a handle captured in a
         // previous page's sessionStorage. Honour it only when the handle
@@ -917,6 +1023,30 @@ function attach(browserWs, req, env) {
         } catch (err) {
           dlog(sessionId, 'page_context inject error', err.message || String(err));
         }
+        return;
+      }
+      case 'audio_prefs': {
+        // audio-prefs: live re-negotiation of the output path. Applies on
+        // the next chunk — no call drop, no WS reconnect. We send a fresh
+        // `audio_format` frame so the client retunes its decoder.
+        const phoneLine = data.phoneLine !== false;
+        if (phoneLine === audioPrefs.phoneLine) {
+          safeSendJson(browserWs, {
+            type: 'audio_format',
+            outSampleRate: audioPrefs.outSampleRate,
+            phoneLine: !!audioPrefs.phoneLine,
+            codec: 'pcm16-le'
+          });
+          return;
+        }
+        audioPrefs = { phoneLine, outSampleRate: phoneLine ? 8000 : 24000 };
+        dlog(sessionId, 'audio_prefs changed phoneLine=' + phoneLine);
+        safeSendJson(browserWs, {
+          type: 'audio_format',
+          outSampleRate: audioPrefs.outSampleRate,
+          phoneLine: !!audioPrefs.phoneLine,
+          codec: 'pcm16-le'
+        });
         return;
       }
       case 'set_mode': {

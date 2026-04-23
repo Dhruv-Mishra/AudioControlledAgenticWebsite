@@ -216,10 +216,10 @@ function buildDockMarkup() {
           <div class="voice-settings-row voice-settings-row--toggle">
             <div class="voice-settings-row-text">
               <span class="voice-settings-row-label">Phone-line compression</span>
-              <span class="voice-settings-row-helper">Adds a call-center warmth to Jarvis's voice.</span>
+              <span class="voice-settings-row-helper">Adds call-center warmth and uses narrowband audio for lower latency.</span>
             </div>
-            <label class="toggle" for="voice-phone-compression-toggle" title="Apply telephone-style compression to the agent's voice.">
-              <input type="checkbox" id="voice-phone-compression-toggle" data-agent-id="voice.phone_compression_toggle" />
+            <label class="toggle" for="voice-phone-compression-toggle" title="Apply telephone-style compression to the agent's voice. Uses narrowband audio for faster delivery.">
+              <input type="checkbox" id="voice-phone-compression-toggle" data-agent-id="voice.phone_compression_toggle" checked />
               <span class="track"></span>
               <span class="sr-only">Phone-line compression</span>
             </label>
@@ -921,6 +921,64 @@ export async function bootstrapVoiceShell() {
       if (!agent.isInCall()) reflectAmbient(false);
     });
     agent.addEventListener('call-audio-all-stopped', () => reflectAmbient(false));
+  }
+
+  // --- latency-pass: Debug HUD under ?debug=1. Hidden in prod; 2-line
+  // fixed panel bottom-left showing agent rate + decode p50/p95 + encode
+  // p50/p95 from the server. Purely informational; never on the critical
+  // path. Built lazily so the cost on non-debug loads is a single class
+  // check inside DOMContentLoaded.
+  if (DEBUG) {
+    const hud = document.createElement('aside');
+    hud.className = 'voice-latency-hud';
+    hud.id = 'voice-latency-hud';
+    hud.setAttribute('role', 'status');
+    hud.setAttribute('aria-label', 'Voice-agent latency metrics');
+    hud.innerHTML = `
+      <div class="voice-latency-hud-row">
+        <span class="voice-latency-hud-label">rate</span>
+        <span class="voice-latency-hud-value mono" id="voice-hud-rate">—</span>
+      </div>
+      <div class="voice-latency-hud-row">
+        <span class="voice-latency-hud-label">decode</span>
+        <span class="voice-latency-hud-value mono" id="voice-hud-decode">—</span>
+      </div>
+      <div class="voice-latency-hud-row">
+        <span class="voice-latency-hud-label">encode</span>
+        <span class="voice-latency-hud-value mono" id="voice-hud-encode">—</span>
+      </div>
+    `;
+    document.body.appendChild(hud);
+    const rateEl   = $('#voice-hud-rate');
+    const decodeEl = $('#voice-hud-decode');
+    const encodeEl = $('#voice-hud-encode');
+    const reflectRate = () => {
+      if (!rateEl) return;
+      const r = agent.getAgentAudioRate();
+      const pl = agent.getAgentAudioPhoneLine();
+      rateEl.textContent = r + ' Hz ' + (pl ? '(narrowband)' : '(wideband)');
+    };
+    const reflectDecode = () => {
+      if (!decodeEl) return;
+      const s = agent.getDecodeLatencyStats();
+      decodeEl.textContent = 'p50 ' + s.p50.toFixed(2) + ' ms · p95 ' + s.p95.toFixed(2) + ' ms · n=' + s.n;
+    };
+    reflectRate();
+    reflectDecode();
+    agent.addEventListener('audio-format-changed', reflectRate);
+    agent.addEventListener('phone-compression-changed', reflectRate);
+    // Poll decode stats 4 Hz while a call is live (it'd be event-storm
+    // to update per-chunk; 250 ms is plenty).
+    setInterval(() => {
+      if (agent.isInCall()) reflectDecode();
+    }, 250);
+    // Pluck the encode_stats frame from the WS and display it.
+    agent.addEventListener('server-frame', (e) => {
+      const f = e && e.detail;
+      if (!f || f.type !== 'encode_stats') return;
+      if (!encodeEl) return;
+      encodeEl.textContent = 'p50 ' + f.p50_us + ' µs · p95 ' + f.p95_us + ' µs · n=' + f.chunks;
+    });
   }
 
   // --- Dock collapse + clear

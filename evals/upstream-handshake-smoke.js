@@ -71,7 +71,8 @@ function runAndGrep(child, patterns, timeoutMs = 8000) {
       ...process.env,
       PORT: String(PORT),
       GEMINI_API_KEY: 'invalid-key-for-handshake-smoke',
-      DEBUG: '1'
+      DEBUG: '1',
+      DISABLE_WS_NONCE: '1'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

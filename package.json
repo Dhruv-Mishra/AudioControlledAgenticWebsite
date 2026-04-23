@@ -21,10 +21,14 @@
     "smoke:greet-gating-invariant": "node evals/greet-gating-invariant-smoke.js",
     "smoke:end-call-deterministic": "node evals/end-call-deterministic-smoke.js",
     "smoke:callopen-onended-invariant": "node evals/callopen-onended-invariant-smoke.js",
+    "smoke:endcall-paths-invariant": "node evals/endcall-paths-invariant-smoke.js",
     "smoke:fill-datetime": "node evals/fill-datetime-smoke.mjs",
     "smoke:transcription-toggle": "node evals/transcription-toggle-smoke.js",
     "smoke:stt-accuracy": "node evals/stt-accuracy-smoke.js",
-    "smoke:bundle-budget": "node evals/bundle-budget-smoke.js"
+    "smoke:bundle-budget": "node evals/bundle-budget-smoke.js",
+    "smoke:ws-nonce": "node evals/ws-nonce-smoke.js",
+    "smoke:audio-prefs": "node evals/audio-prefs-smoke.js",
+    "smoke:expressive-prompt": "node evals/expressive-prompt-smoke.js"
   },
   "engines": {
     "node": ">=20"

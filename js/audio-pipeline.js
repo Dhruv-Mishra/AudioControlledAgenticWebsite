@@ -865,12 +865,20 @@ export class AudioPipeline extends EventTarget {
    *  last scheduled source's `onended` runs AND the set becomes
    *  empty. The deterministic end-call chain listens for this to
    *  decide when the model has physically finished speaking. */
-  enqueuePcm24k(int16) {
+  enqueuePcm24k(int16, sampleRate) {
     if (!this.ctx) return;
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
-    const buffer = int16ToAudioBuffer(this.ctx, int16, 24000);
+    // latency-pass: server may be sending narrowband (8 kHz) frames when
+    // the user has phoneLine compression ON. Schedule each buffer at the
+    // rate declared via the last `audio_format` message; fall back to
+    // 24 kHz for backwards compatibility. The playback graph then
+    // natively upsamples via the AudioContext's 48 kHz interactive
+    // latency hint — Web Audio's built-in resampler is transparent for
+    // speech.
+    const rate = Math.max(4000, Math.min(48000, Number(sampleRate) || 24000));
+    const buffer = int16ToAudioBuffer(this.ctx, int16, rate);
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.connect(this.playbackGain);
