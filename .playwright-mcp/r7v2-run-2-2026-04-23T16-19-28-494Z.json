@@ -1,0 +1,2643 @@
+[
+  {
+    "t": 11,
+    "kind": "goto.start",
+    "detail": "http://localhost:3001/"
+  },
+  {
+    "t": 265,
+    "kind": "new.Audio",
+    "detail": {
+      "args": ""
+    }
+  },
+  {
+    "t": 267,
+    "kind": "new.Audio",
+    "detail": {
+      "args": ""
+    }
+  },
+  {
+    "t": 268,
+    "kind": "media.listener.attach",
+    "detail": {
+      "src": "background.webm",
+      "ev": "error"
+    }
+  },
+  {
+    "t": 268,
+    "kind": "media.listener.attach",
+    "detail": {
+      "src": "background.webm",
+      "ev": "ended"
+    }
+  },
+  {
+    "t": 269,
+    "kind": "media.listener.attach",
+    "detail": {
+      "src": "background.webm",
+      "ev": "pause"
+    }
+  },
+  {
+    "t": 346,
+    "kind": "btn.ready"
+  },
+  {
+    "t": 512,
+    "kind": "media.play.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 512,
+    "kind": "media.pause.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 517,
+    "kind": "ws.new",
+    "detail": "ws://localhost:3001/api/live"
+  },
+  {
+    "t": 519,
+    "kind": "console.warn",
+    "detail": "[audio-flow] callOpen buffer not ready — awaiting decode"
+  },
+  {
+    "t": 530,
+    "kind": "media.event",
+    "detail": {
+      "src": "background.webm",
+      "ev": "pause",
+      "ct": 0,
+      "dur": 55.952
+    }
+  },
+  {
+    "t": 530,
+    "kind": "media.play.rejected",
+    "detail": {
+      "src": "background.webm",
+      "msg": "The play() request was interrupted by a call to pause(). https://goo.gl/LdLk22"
+    }
+  },
+  {
+    "t": 532,
+    "kind": "ws.open",
+    "detail": "ws://localhost:3001/api/live"
+  },
+  {
+    "t": 536,
+    "kind": "ws.send",
+    "detail": {
+      "type": "hello",
+      "len": 4798
+    }
+  },
+  {
+    "t": 539,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 540,
+    "kind": "btn.clicked"
+  },
+  {
+    "t": 543,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "hello_ack"
+    }
+  },
+  {
+    "t": 543,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 592,
+    "kind": "console.log",
+    "detail": "[audio-flow] decoded callOpen duration=15.71s ch=1 sr=48000"
+  },
+  {
+    "t": 608,
+    "kind": "console.log",
+    "detail": "[audio-flow] decoded callClose duration=4.10s ch=1 sr=48000"
+  },
+  {
+    "t": 686,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 783,
+    "kind": "ws.send",
+    "detail": {
+      "type": "elements",
+      "len": 4562
+    }
+  },
+  {
+    "t": 811,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 811,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 1091,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "setup_complete"
+    }
+  },
+  {
+    "t": 1091,
+    "kind": "console.log",
+    "detail": "[jarvis phase] setup_complete_vs_audio_start 574ms"
+  },
+  {
+    "t": 1093,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 1315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 1315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 1813,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 1813,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 2313,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 2313,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 2816,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 2816,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 3308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 3309,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 3808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 3809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 4160,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 4310,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 4376,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4415,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4463,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4502,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4522,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4530,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4590,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4611,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4641,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4670,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4704,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4745,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4799,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 4809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 4811,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4857,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4867,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 4895,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 5314,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 5315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 5535,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "session_resumption"
+    }
+  },
+  {
+    "t": 5808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 5808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 6019,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 6107,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 6107,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 6316,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 6316,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 6815,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 6815,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 6931,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "usage"
+    }
+  },
+  {
+    "t": 7309,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 7309,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 7815,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 7815,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 8305,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "session_resumption"
+    }
+  },
+  {
+    "t": 8308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 8308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 8812,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 8813,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 9309,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 9309,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 9808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 9808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 10308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 10308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 10808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 10809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 11308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 11308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 11808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 11809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 12315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 12315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 12809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 12809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 13309,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 13310,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 13810,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 13810,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 14309,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 14309,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 14815,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 14815,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 15308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 15308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 15808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 15809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 16315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 16316,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 16768,
+    "kind": "ws.send",
+    "detail": {
+      "type": "audio_prelude_ended",
+      "len": 30
+    }
+  },
+  {
+    "t": 16769,
+    "kind": "media.play.call",
+    "detail": "background.webm"
+  },
+  {
+    "t": 16784,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16789,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 5790
+    }
+  },
+  {
+    "t": 16790,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16790,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16790,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 5760
+    }
+  },
+  {
+    "t": 16790,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16790,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 3840
+    }
+  },
+  {
+    "t": 16791,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 3840
+    }
+  },
+  {
+    "t": 16791,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16791,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 5760
+    }
+  },
+  {
+    "t": 16791,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16791,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 3840
+    }
+  },
+  {
+    "t": 16791,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16792,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 3840
+    }
+  },
+  {
+    "t": 16792,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16792,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16793,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16793,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16794,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 1920
+    }
+  },
+  {
+    "t": 16794,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16801,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16801,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 1920
+    }
+  },
+  {
+    "t": 16802,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16802,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "transcript_delta"
+    }
+  },
+  {
+    "t": 16802,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 7680
+    }
+  },
+  {
+    "t": 16803,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 15360
+    }
+  },
+  {
+    "t": 16803,
+    "kind": "ws.recv.binary",
+    "detail": {
+      "bytes": 1920
+    }
+  },
+  {
+    "t": 16803,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "turn_complete"
+    }
+  },
+  {
+    "t": 16803,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "state"
+    }
+  },
+  {
+    "t": 16809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 0,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 16809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 16810,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16817,
+    "kind": "media.play.resolved",
+    "detail": "background.webm"
+  },
+  {
+    "t": 16849,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16888,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16928,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 16968,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17008,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17048,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17087,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17128,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17168,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17207,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17248,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17288,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 0.46,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 17308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 17327,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17369,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17407,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17447,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17487,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17527,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17567,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17607,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17648,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17687,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17727,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17767,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17809,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17810,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 0.96,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 17810,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 17847,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17887,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17928,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 17967,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18007,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18048,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18087,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18127,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18168,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18209,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18248,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18287,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18314,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 1.47,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 18315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 18328,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18367,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18407,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18448,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18488,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18527,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18567,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18608,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18648,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18687,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18727,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18767,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18808,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 1.96,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 18809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 18848,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18887,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18927,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 18967,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19008,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19047,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19062,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "session_resumption"
+    }
+  },
+  {
+    "t": 19087,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19127,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19167,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19207,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19247,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19287,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 2.47,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 19315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 19328,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19367,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19408,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19448,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19487,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19527,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19568,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19607,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19647,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19687,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19728,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19767,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19807,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 2.96,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 19808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 19847,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19887,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19927,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 19967,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20007,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20047,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20087,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20128,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20167,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20208,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20248,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20287,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20314,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 3.47,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 20315,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 20328,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20367,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20407,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20448,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20487,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20527,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20568,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20607,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20648,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20688,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20728,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20767,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20808,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 3.96,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 20808,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 20848,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20887,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20906,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "session_resumption"
+    }
+  },
+  {
+    "t": 20928,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 20967,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21008,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21048,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21088,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21128,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21168,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21207,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21248,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21288,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21314,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 4.47,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 21314,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 21327,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21367,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21407,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21447,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21487,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21528,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21568,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21607,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21648,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21689,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21728,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21768,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21808,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 4.96,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 21809,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 21849,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21887,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21927,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 21967,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22008,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22047,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22087,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22127,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22167,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22207,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22247,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22287,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "background.webm",
+      "tag": "new",
+      "paused": false,
+      "ended": false,
+      "t": 5.46,
+      "dur": 55.95
+    }
+  },
+  {
+    "t": 22308,
+    "kind": "media.probe",
+    "detail": {
+      "src": "",
+      "tag": "new",
+      "paused": true,
+      "ended": false,
+      "t": 0,
+      "dur": 0
+    }
+  },
+  {
+    "t": 22326,
+    "kind": "ws.recv.json",
+    "detail": {
+      "type": "session_resumption"
+    }
+  },
+  {
+    "t": 22327,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22367,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22407,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22448,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22487,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  },
+  {
+    "t": 22528,
+    "kind": "ws.send",
+    "detail": {
+      "binary": 1280
+    }
+  }
+]

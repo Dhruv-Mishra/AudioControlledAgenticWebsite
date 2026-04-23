@@ -1,0 +1,35 @@
+[
+  {
+    "run": 1,
+    "callOpenPlay_ms": null,
+    "callOpenEndedEvent_ms": null,
+    "callOpenEndedByProbe_ms": null,
+    "background_dance_ms": 1043,
+    "background_real_ms": 17378,
+    "audioPreludeSent_ms": 17377,
+    "firstAgentBinary_ms": 17395,
+    "dumpFile": "C:\\Users\\dhruvmishra\\Desktop\\LiveAgentNavigationWebsite\\.playwright-mcp\\r7v2-run-1-2026-04-23T16-19-05-465Z.json"
+  },
+  {
+    "run": 2,
+    "callOpenPlay_ms": null,
+    "callOpenEndedEvent_ms": null,
+    "callOpenEndedByProbe_ms": null,
+    "background_dance_ms": 512,
+    "background_real_ms": 16769,
+    "audioPreludeSent_ms": 16768,
+    "firstAgentBinary_ms": 16789,
+    "dumpFile": "C:\\Users\\dhruvmishra\\Desktop\\LiveAgentNavigationWebsite\\.playwright-mcp\\r7v2-run-2-2026-04-23T16-19-28-494Z.json"
+  },
+  {
+    "run": 3,
+    "callOpenPlay_ms": null,
+    "callOpenEndedEvent_ms": null,
+    "callOpenEndedByProbe_ms": null,
+    "background_dance_ms": 469,
+    "background_real_ms": 16638,
+    "audioPreludeSent_ms": 16637,
+    "firstAgentBinary_ms": 16653,
+    "dumpFile": "C:\\Users\\dhruvmishra\\Desktop\\LiveAgentNavigationWebsite\\.playwright-mcp\\r7v2-run-3-2026-04-23T16-19-51-491Z.json"
+  }
+]

@@ -237,11 +237,26 @@ function attach(browserWs, req, env) {
   let pendingGreet = null;
   let greetInjected = false;
   let upstreamSetupComplete = false; // greeting-fix: explicit gate (a)
-  // audio-flow: gate (c). The browser plays a start-call chime while the
-  // upstream handshake happens. Gemini's greeting must NOT speak over
-  // that clip, so we hold the greet here until the browser sends
-  // `greet_gate_open` (after the chime ends or its safety cap fires).
-  let clientGreetGateOpen = false;
+
+  // Round-6 fix 1: zero-latency greeting via server-side pre-generation
+  // + release. The greeting is triggered INTO Gemini as soon as
+  // upstream setup is complete (no gate on the client). The generated
+  // frames (audio + transcript + turn_complete) are buffered server-side
+  // until the browser sends `audio_prelude_ended` (renamed from
+  // `greet_gate_open`). At that moment we flush the buffer to the
+  // browser as a contiguous stream — typical perceived latency ~1 RTT
+  // (40–200 ms) vs the old 500–2000 ms (RTT + gen-time + first-PCM RTT)
+  // because generation ran in parallel with the callOpen chime.
+  //
+  // `preGreetReleased === true` means all future frames go directly
+  // through to the browser with no buffering. Idempotent; we never
+  // re-close the gate once opened (within a single session).
+  //
+  // `audio_prelude_ended` arriving before any frames have buffered is
+  // fine — the release flips the flag, the empty buffer drains as a
+  // no-op, and the next upstream frame goes straight through.
+  let preGreetBuffer = [];
+  let preGreetReleased = false;
   // audio-flow: idempotency latch for the agent-initiated end_call tool.
   // When the model calls end_call we immediately ack the upstream, send
   // an `end_call_requested` frame to the browser, and mark this flag so
@@ -282,6 +297,48 @@ function attach(browserWs, req, env) {
 
   function emitError(code, message, retriable) {
     safeSendJson(browserWs, { type: 'error', code, message, retriable: !!retriable });
+  }
+
+  /** Round-6 fix 1: forward any frame destined for the browser. Before
+   *  `preGreetReleased`, stash in `preGreetBuffer`; after release, send
+   *  directly. Preserves strict order — a text transcript queued before
+   *  an audio chunk stays in front of it on drain. Works for both JSON
+   *  (control) and binary (PCM) frames; the buffer stores the already-
+   *  serialised payload so flushing is O(n) copy-less. */
+  function forwardAudioFrame(buf) {
+    if (!preGreetReleased) {
+      // Defensive copy — the Buffer comes from Gemini and we're not
+      // going to modify it, but if upstream ever re-uses the backing
+      // allocation we must not hold a stale reference.
+      preGreetBuffer.push({ kind: 'binary', payload: Buffer.from(buf) });
+      return;
+    }
+    safeSendBinary(browserWs, buf);
+  }
+
+  function forwardJsonFrame(obj) {
+    if (!preGreetReleased) {
+      preGreetBuffer.push({ kind: 'json', payload: obj });
+      return;
+    }
+    safeSendJson(browserWs, obj);
+  }
+
+  function releasePreGreetBuffer(source) {
+    if (preGreetReleased) return;
+    preGreetReleased = true;
+    const n = preGreetBuffer.length;
+    let bytes = 0;
+    for (const frame of preGreetBuffer) {
+      if (frame.kind === 'binary') {
+        bytes += frame.payload.length;
+        safeSendBinary(browserWs, frame.payload);
+      } else {
+        safeSendJson(browserWs, frame.payload);
+      }
+    }
+    preGreetBuffer = [];
+    dlog(sessionId, '[jarvis-phase] pregreet_buffer_released src=' + source + ' frames=' + n + ' bytes=' + bytes);
   }
 
   function snapshotElementsAsToolContext() {
@@ -516,28 +573,34 @@ function attach(browserWs, req, env) {
     return false;
   }
 
-  // greeting-fix + audio-flow: three-gate deterministic greeting fire.
-  // Called from every site where any of the three gates could be closed:
-  //   1. onUpstreamMessage, first message → upstreamSetupComplete (gate a).
-  //   2. onBrowserText 'hello'            → pendingGreet           (gate b).
-  //   3. onBrowserText 'greet_gate_open'  → clientGreetGateOpen   (gate c).
-  // Guarded on (upstream && upstreamSetupComplete && pendingGreet &&
-  // clientGreetGateOpen && !greetInjected). Uses `sendRealtimeInput({text})`
-  // which IS honoured by Gemini 3.1 Flash Live as a trigger for immediate
-  // model response. `sendClientContent` is documented as "only supported
-  // for seeding initial context history" on 3.1 — it silently stashes
-  // the turn and the model never speaks.
+  // Round-6 fix 1: two-gate greeting FIRE (into Gemini).
+  //   1. `upstreamSetupComplete` — upstream session is ready.
+  //   2. `pendingGreet` — a greet intent was submitted (from hello.greet
+  //      or call_start).
+  // We deliberately FIRE as soon as both gates are closed — the
+  // generation runs in parallel with the client's callOpen playback.
+  // The produced audio/text frames are BUFFERED server-side via
+  // `forwardAudioFrame`/`forwardJsonFrame` until the client sends
+  // `audio_prelude_ended`, at which point `releasePreGreetBuffer`
+  // flushes in-order. Net effect: by the time callOpen ends,
+  // generation is usually done and the buffer is drained in ~1 RTT.
+  //
+  // (Rounds 2–5 used a third `clientGreetGateOpen` gate here; in
+  // round 6 the gate was moved from "hold the TEXT injection" to
+  // "hold the RELEASE of generated frames" so generation can run in
+  // parallel with the chime instead of waiting behind it.)
+  //
+  // Uses `sendRealtimeInput({text})` which IS honoured by Gemini 3.1
+  // Flash Live as a trigger for immediate model response.
+  // `sendClientContent` is documented as "only supported for seeding
+  // initial context history" on 3.1 — silently stashes and no speak.
   function maybeFireGreeting(source) {
     if (greetInjected) return;
     if (!pendingGreet) return;
     if (!upstream) return;
     if (!upstreamSetupComplete) return;
-    if (!clientGreetGateOpen) return; // audio-flow: gate (c) — wait for startCall chime
     try {
       const text = buildCallInitiatedText(pendingGreet);
-      // greeting-fix: sendRealtimeInput({text}) is the 3.1-compatible
-      // trigger. Model responds with audio immediately; turn boundary is
-      // inferred from the text arriving without concurrent user audio.
       upstream.sendRealtimeInput({ text });
       greetInjected = true;
       dlog(sessionId, '[jarvis-phase] greeting_fired src=' + source + ' page=' + pendingGreet.page + ' textLen=' + text.length);
@@ -626,11 +689,16 @@ function attach(browserWs, req, env) {
       // SHOW_TEXT=false we intentionally drop the deltas on the floor so the
       // server never relays user/agent text to the browser (and the client
       // doesn't render a transcript panel). Length-only logs either way.
+      //
+      // Round-6 fix 1: all browser-bound frames go through
+      // `forwardJsonFrame` / `forwardAudioFrame` which buffer until the
+      // client sends `audio_prelude_ended`. The buffer preserves strict
+      // order across kinds (transcript before audio stays before audio).
       if (sc.inputTranscription && sc.inputTranscription.text) {
         const t = sc.inputTranscription.text;
         dlog(sessionId, 'input_tx delta len=' + t.length, 'finished=' + !!sc.inputTranscription.finished);
         if (SHOW_TEXT) {
-          safeSendJson(browserWs, {
+          forwardJsonFrame({
             type: 'transcript_delta',
             from: 'user',
             delta: t,
@@ -643,7 +711,7 @@ function attach(browserWs, req, env) {
         const t = sc.outputTranscription.text;
         dlog(sessionId, 'output_tx delta len=' + t.length, 'finished=' + !!sc.outputTranscription.finished);
         if (SHOW_TEXT) {
-          safeSendJson(browserWs, {
+          forwardJsonFrame({
             type: 'transcript_delta',
             from: 'agent',
             delta: t,
@@ -657,12 +725,18 @@ function attach(browserWs, req, env) {
         for (const part of sc.modelTurn.parts) {
           if (part.inlineData && typeof part.inlineData.data === 'string') {
             const pcm = Buffer.from(part.inlineData.data, 'base64');
-            dlog(sessionId, 'audio chunk bytes=' + pcm.length);
-            safeSendBinary(browserWs, pcm);
-            emitState('speaking');
+            dlog(sessionId, 'audio chunk bytes=' + pcm.length + (preGreetReleased ? '' : ' (buffered pre-prelude)'));
+            forwardAudioFrame(pcm);
+            // `emitState('speaking')` intentionally uses the direct
+            // `safeSendJson` path: state hints are small control frames
+            // that drive UI pills; the client ignores a "speaking" hint
+            // while the audio_prelude is still buffering, and keeping
+            // state out of the ordered buffer avoids spurious pill
+            // flashes for frames that haven't been heard yet.
+            if (preGreetReleased) emitState('speaking');
           }
           if (part.text && part.text.trim() && SHOW_TEXT) {
-            safeSendJson(browserWs, {
+            forwardJsonFrame({
               type: 'transcript_delta',
               from: 'agent',
               delta: part.text,
@@ -675,12 +749,12 @@ function attach(browserWs, req, env) {
 
       if (sc.interrupted) {
         dlog(sessionId, 'interrupted');
-        safeSendJson(browserWs, { type: 'interrupted' });
+        forwardJsonFrame({ type: 'interrupted' });
       }
       if (sc.turnComplete) {
-        dlog(sessionId, 'turn_complete');
-        safeSendJson(browserWs, { type: 'turn_complete' });
-        emitState('listening');
+        dlog(sessionId, 'turn_complete' + (preGreetReleased ? '' : ' (buffered pre-prelude)'));
+        forwardJsonFrame({ type: 'turn_complete' });
+        if (preGreetReleased) emitState('listening');
       }
     }
 
@@ -794,15 +868,27 @@ function attach(browserWs, req, env) {
         emitState('idle');
         return;
       }
+      case 'audio_prelude_ended':
       case 'greet_gate_open': {
-        // audio-flow: gate (c) closes. The browser has finished playing
-        // the startCall chime (or timed out); Gemini can now speak
-        // without talking over it. If the other two gates are already
-        // closed, the greeting fires immediately.
-        if (clientGreetGateOpen) return;
-        clientGreetGateOpen = true;
-        dlog(sessionId, 'greet_gate_open received — client ready for greeting');
-        maybeFireGreeting('client_greet_gate_open');
+        // Round-6 fix 1: the browser has finished playing the callOpen
+        // chime. Release the pre-greet buffer — any frames that Gemini
+        // produced while the chime was playing (typically the entire
+        // greeting turn if the network is fast) are flushed to the
+        // browser NOW. Subsequent frames go direct via `forwardXxx`.
+        //
+        // `greet_gate_open` is accepted as a legacy alias so a browser
+        // built against the round-5 wire still works during a rolling
+        // deploy. The semantic shift (gating RELEASE instead of
+        // INJECTION) is fully server-side — clients don't need to
+        // understand it.
+        if (preGreetReleased) return;
+        dlog(sessionId, 'audio_prelude_ended received — releasing pre-greet buffer');
+        releasePreGreetBuffer(data.type);
+        // A "speaking" state hint may have been skipped while frames
+        // were buffered; emit one now if the buffer contained any
+        // audio (the client's pill needs to reflect that the model is
+        // about to be heard). Cheap — the client de-dupes on state.
+        emitState('speaking');
         return;
       }
       case 'page_context': {
@@ -942,10 +1028,12 @@ function attach(browserWs, req, env) {
     // greeting-fix: reset gate (a) — the new upstream has to reach setup
     // again before we can fire any pending greet against it.
     upstreamSetupComplete = false;
-    // audio-flow: reset gate (c). The new upstream is a new call (from
-    // the browser's POV, a fresh hello on reopen) so the client will
-    // send `greet_gate_open` again after its chime finishes.
-    clientGreetGateOpen = false;
+    // Round-6 fix 1: reset the pre-greet buffer + release flag so a
+    // reconnect / mode-switch / persona-switch doesn't reuse stale
+    // buffered audio. The new upstream is a fresh session — any frames
+    // queued from the old one are dropped here.
+    preGreetBuffer = [];
+    preGreetReleased = false;
     // audio-flow: reset the end-call idempotency latch so a follow-up
     // call in the same WS can hang up again.
     agentEndCallInFlight = false;

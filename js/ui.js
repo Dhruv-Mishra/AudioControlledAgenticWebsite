@@ -262,10 +262,14 @@ function buildDockMarkup() {
               <span class="voice-settings-row-label">Mode</span>
             </div>
             <div class="voice-settings-row-control">
+              <!-- Round-2 req 2: ship-time default is "Full" (mirrors
+                   VoiceAgent's DEFAULT_TRANSCRIPT_MODE). applyTranscriptMode
+                   still re-syncs aria-checked from the agent on boot, so a
+                   legacy localStorage pick wins if present. -->
               <div class="segmented transcript-seg" id="voice-transcript-seg" data-agent-id="transcript.mode_seg">
-                <button role="radio" type="button" data-mode="off" data-agent-id="transcript.mode.off" aria-checked="true">Off</button>
+                <button role="radio" type="button" data-mode="off" data-agent-id="transcript.mode.off" aria-checked="false">Off</button>
                 <button role="radio" type="button" data-mode="captions" data-agent-id="transcript.mode.captions" aria-checked="false">Captions</button>
-                <button role="radio" type="button" data-mode="full" data-agent-id="transcript.mode.full" aria-checked="false">Full</button>
+                <button role="radio" type="button" data-mode="full" data-agent-id="transcript.mode.full" aria-checked="true">Full</button>
               </div>
             </div>
           </div>

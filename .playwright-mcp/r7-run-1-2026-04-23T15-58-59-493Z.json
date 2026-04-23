@@ -1,0 +1,178 @@
+{
+  "events": [
+    {
+      "t": 3966,
+      "kind": "audio.play.call",
+      "detail": "callOpen.webm"
+    },
+    {
+      "t": 3966.600000023842,
+      "kind": "audio.pause.call",
+      "detail": "callOpen.webm"
+    },
+    {
+      "t": 3967.199999988079,
+      "kind": "audio.play.call",
+      "detail": "background.webm"
+    },
+    {
+      "t": 3968.199999988079,
+      "kind": "audio.pause.call",
+      "detail": "background.webm"
+    },
+    {
+      "t": 3968.600000023842,
+      "kind": "audio.play.call",
+      "detail": "callClose.webm"
+    },
+    {
+      "t": 3969,
+      "kind": "audio.pause.call",
+      "detail": "callClose.webm"
+    },
+    {
+      "t": 3972.199999988079,
+      "kind": "audio.play.call",
+      "detail": "callOpen.webm"
+    },
+    {
+      "t": 3984.800000011921,
+      "kind": "audio.play.rejected",
+      "detail": {
+        "src": "callOpen.webm",
+        "msg": "The play() request was interrupted by a call to pause(). https://goo.gl/LdLk22"
+      }
+    },
+    {
+      "t": 3985.199999988079,
+      "kind": "audio.play.rejected",
+      "detail": {
+        "src": "background.webm",
+        "msg": "The play() request was interrupted by a call to pause(). https://goo.gl/LdLk22"
+      }
+    },
+    {
+      "t": 3985.399999976158,
+      "kind": "audio.play.rejected",
+      "detail": {
+        "src": "callClose.webm",
+        "msg": "The play() request was interrupted by a call to pause(). https://goo.gl/LdLk22"
+      }
+    },
+    {
+      "t": 3996.600000023842,
+      "kind": "audio.play.resolved",
+      "detail": "callOpen.webm"
+    },
+    {
+      "t": 20294.30000001192,
+      "kind": "audio.play.call",
+      "detail": "background.webm"
+    },
+    {
+      "t": 20339.5,
+      "kind": "audio.play.resolved",
+      "detail": "background.webm"
+    }
+  ],
+  "meta": {
+    "outerEvents": [
+      {
+        "t": 3,
+        "kind": "goto.start",
+        "detail": "http://localhost:3001/"
+      },
+      {
+        "t": 35,
+        "kind": "pageerror",
+        "detail": "Failed to execute 'observe' on 'MutationObserver': parameter 1 is not of type 'Node'."
+      },
+      {
+        "t": 3029,
+        "kind": "goto.done",
+        "detail": "http://localhost:3001/"
+      },
+      {
+        "t": 3144,
+        "kind": "btn.visible",
+        "detail": null
+      },
+      {
+        "t": 3976,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.call callOpen.webm"
+      },
+      {
+        "t": 3976,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.pause.call callOpen.webm"
+      },
+      {
+        "t": 3977,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.call background.webm"
+      },
+      {
+        "t": 3977,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.pause.call background.webm"
+      },
+      {
+        "t": 3977,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.call callClose.webm"
+      },
+      {
+        "t": 3977,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.pause.call callClose.webm"
+      },
+      {
+        "t": 3979,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.call callOpen.webm"
+      },
+      {
+        "t": 3995,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.rejected {\"src\":\"callOpen.webm\",\"msg\":\"The play() request was interrupted by a call to pause(). https://goo.gl/LdLk22\"}"
+      },
+      {
+        "t": 3995,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.rejected {\"src\":\"background.webm\",\"msg\":\"The play() request was interrupted by a call to pause(). https://goo.gl/LdLk22\"}"
+      },
+      {
+        "t": 3995,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.rejected {\"src\":\"callClose.webm\",\"msg\":\"The play() request was interrupted by a call to pause(). https://goo.gl/LdLk22\"}"
+      },
+      {
+        "t": 4008,
+        "kind": "btn.clicked",
+        "detail": null
+      },
+      {
+        "t": 4023,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.resolved callOpen.webm"
+      },
+      {
+        "t": 4784,
+        "kind": "console.log",
+        "detail": "[jarvis phase] setup_complete_vs_audio_start 805ms"
+      },
+      {
+        "t": 20302,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.call background.webm"
+      },
+      {
+        "t": 20346,
+        "kind": "console.log",
+        "detail": "[REPRO] audio.play.resolved background.webm"
+      }
+    ],
+    "url": "http://localhost:3001/"
+  }
+}

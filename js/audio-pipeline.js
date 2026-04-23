@@ -84,29 +84,64 @@ function pickCallAudioSrc(kind) {
   return canPlayWebmOpus() ? pair.webm : pair.mp3;
 }
 
-/** audio-flow: call-audio choreography. Owns three HTMLAudioElement
- *  instances (callOpen / background / callClose) and exposes a small
- *  imperative API the VoiceAgent drives off call-lifecycle transitions.
+/** audio-flow: call-audio choreography.
  *
- *  background-loop watchdog: HTMLAudioElement's `loop=true` occasionally
- *  no-ops on Chrome when the media element is paused-then-resumed across
- *  tabs or when a short/corrupt file triggers `ended` before `loop` is
- *  evaluated. We defensively listen for `ended` and, if we still believe
- *  the ambience should be running, rewind + play again. A warn is logged
- *  so the root cause surfaces in DevTools. */
+ *  Round-7: callOpen and callClose migrated from HTMLAudioElement to
+ *  Web-Audio `AudioBufferSourceNode`. HTMLAudioElement's `ended` event
+ *  was unreliable in browser reproductions (sometimes never firing,
+ *  sometimes firing after stale timing), which cascaded into the
+ *  user-visible flakiness of "background starts with callOpen" and
+ *  "agent speaks during callOpen". AudioBufferSourceNode has a
+ *  deterministic single-fire `onended` that triggers exactly once —
+ *  either on natural completion or on `stop()`. It also removes the
+ *  muted-play-then-pause unlock-dance for these two clips (the
+ *  AudioContext itself is the unlock target, and `unlockAudioSync`
+ *  has already resumed it synchronously inside the click handler).
+ *
+ *  Background audio stays HTMLAudioElement: it's a long-running loop,
+ *  its start/stop timing is non-critical, and HTMLMediaElement's
+ *  streaming + range-request support is what it's designed for.
+ *
+ *  Contract:
+ *   • `prepareBuffers(ctx)` — eagerly fetch + decode callOpen + callClose
+ *     into an AudioBuffer cache. Called at AudioContext creation, not
+ *     at click-time, so the first placeCall is instant.
+ *   • `playCallOpen({onAudioEnded})` — schedule a new BufferSource,
+ *     fire the callback exactly once from `onended`. Stale event-order
+ *     bugs impossible — no timeupdate, no pause, no loadedmetadata.
+ *   • `stopAllCallAudio()` — sets `_hardKilled` + calls `.stop(0)` on
+ *     any active open/close source. The source's `onended` still fires
+ *     but the callback checks the stopped flag and reports
+ *     `reason='stopped'`.
+ *
+ *  Background-loop watchdog for the HTMLAudioElement that DOES remain:
+ *  `loop=true` occasionally no-ops on Chrome after tab blur. We
+ *  defensively listen for `ended` and, if we still believe the
+ *  ambience should be running, rewind + play again. */
 class CallAudioController {
-  constructor({ onStateChange, onAllStopped } = {}) {
+  constructor({ onStateChange, onAllStopped, pipeline } = {}) {
     this._onStateChange = typeof onStateChange === 'function' ? onStateChange : () => {};
     // audio-flow: `onAllStopped` fires when the call-audio layer goes
     // quiet (no open/background/close playing). UI listens to this so
     // the End Call button reverts to green ONLY when every audio element
     // has stopped (requirement 6).
     this._onAllStopped = typeof onAllStopped === 'function' ? onAllStopped : () => {};
+    this._pipeline = pipeline;  // round-7: shared AudioContext + playbackGain accessor
     this._backgroundEnabled = true; // default ON; VoiceAgent overrides from localStorage
 
-    this.openAudio = this._buildAudio('callOpen', { loop: false, volume: START_END_VOLUME });
+    // Round-7: callOpen + callClose are now AudioBufferSourceNodes.
+    // `_buffers` caches the decoded AudioBuffer per kind; populated by
+    // `prepareBuffers`. `_activeOpenSource` / `_activeCloseSource` hold
+    // the live source handle so `stopAllCallAudio` can kill them.
+    this._buffers = { callOpen: null, callClose: null };
+    this._buffersLoading = null;   // Promise<void> while decoding
+    this._activeOpenSource = null;
+    this._activeCloseSource = null;
+    this._activeOpenStopped = false;
+    this._activeCloseStopped = false;
+
+    // Background stays HTMLAudioElement (long-lived loop).
     this.backgroundAudio = this._buildAudio('background', { loop: true, volume: BACKGROUND_VOLUME });
-    this.closeAudio = this._buildAudio('callClose', { loop: false, volume: START_END_VOLUME });
 
     this._unlocked = false;
     this._openPlaying = false;
@@ -118,19 +153,6 @@ class CallAudioController {
     // after the user has smashed End Call.
     this._hardKilled = false;
 
-    // audio-flow: watchdog for the background loop. Historically
-    // `loop=true` occasionally no-ops on Chrome after tab blur, and the
-    // user reported the background "still not playing" — the fix lives
-    // in a tighter restart-and-log path:
-    //   • Log every `ended` so the cause is visible in DevTools.
-    //   • Rewind + retry play() up to 3 times on the same fire-and-forget
-    //     axis. After the 3rd failure, emit an event so the agent can
-    //     surface it rather than silently staying quiet.
-    //   • Covers: (a) Chrome bug where loop=true drops after pause/resume,
-    //     (b) corrupt file that terminates before metadata resolves,
-    //     (c) media element recycling across tab blurs,
-    //     (d) autoplay-policy race where the first play() was rejected
-    //         before unlock() landed.
     this._bgRestartAttempts = 0;
     this.backgroundAudio.addEventListener('ended', () => {
       if (!this._backgroundEnabled || !this._backgroundPlaying) return;
@@ -138,14 +160,55 @@ class CallAudioController {
       console.warn('[audio-flow] background ended while loop expected; restarting');
       this._restartBackground('ended');
     });
-    // Log pauses so we can see whether a rogue caller is silencing the
-    // background mid-call. Only warn when the pause wasn't caused by us.
     this.backgroundAudio.addEventListener('pause', () => {
       if (!this._backgroundPlaying) return;
       // eslint-disable-next-line no-console
       console.warn('[audio-flow] background paused unexpectedly; restarting');
       this._restartBackground('pause');
     });
+  }
+
+  /** Round-7: fetch + decode callOpen and callClose into AudioBuffer
+   *  instances. Idempotent — safe to call multiple times; re-uses the
+   *  first decode. Called from `AudioPipeline.unlockAudioSync` right
+   *  after the context is created so the first placeCall is instant
+   *  (the 15.7 s callOpen fetch finishes by then even on slow links).
+   *  Returns a Promise that resolves once both buffers are ready OR
+   *  a fatal decode failure has been logged (never rejects). */
+  prepareBuffers(ctx) {
+    if (!ctx) return Promise.resolve();
+    if (this._buffersLoading) return this._buffersLoading;
+    if (this._buffers.callOpen && this._buffers.callClose) return Promise.resolve();
+    this._buffersLoading = (async () => {
+      const kinds = ['callOpen', 'callClose'];
+      for (const kind of kinds) {
+        if (this._buffers[kind]) continue;
+        const url = pickCallAudioSrc(kind);
+        if (!url) continue;
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const bytes = await res.arrayBuffer();
+          // decodeAudioData accepts both promise and callback forms
+          // across browsers; wrap defensively.
+          const buf = await new Promise((resolve, reject) => {
+            try {
+              const ret = ctx.decodeAudioData(bytes, resolve, reject);
+              if (ret && typeof ret.then === 'function') ret.then(resolve).catch(reject);
+            } catch (err) { reject(err); }
+          });
+          this._buffers[kind] = buf;
+          // eslint-disable-next-line no-console
+          console.log('[audio-flow] decoded ' + kind + ' duration=' + buf.duration.toFixed(2) + 's ch=' + buf.numberOfChannels + ' sr=' + buf.sampleRate);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[audio-flow] failed to decode ' + kind, err && err.message);
+          this._buffers[kind] = null;
+        }
+      }
+      this._buffersLoading = null;
+    })();
+    return this._buffersLoading;
   }
 
   /** audio-flow: restart the background loop after an `ended` or rogue
@@ -193,63 +256,169 @@ class CallAudioController {
   }
 
   /** audio-flow: call once from inside the first user-gesture event
-   *  handler. Silently nudges each element so Safari/iOS marks them as
-   *  user-activated. Idempotent. */
+   *  handler. Round-7: only `backgroundAudio` needs the HTMLMediaElement
+   *  unlock dance now — callOpen and callClose are AudioBufferSourceNodes
+   *  which play off the shared AudioContext and are unlocked by
+   *  `AudioPipeline.unlockAudioSync()` → `ctx.resume()`. That removes
+   *  the source of the audible "background blip at call start" that
+   *  users reported: the unlock dance no longer touches openAudio or
+   *  closeAudio (they don't exist as HTMLAudioElements any more). */
   unlock() {
     if (this._unlocked) return;
     this._unlocked = true;
-    // audio-flow: synchronous unlock. A muted play() followed by an
-    // immediate pause() inside the same gesture tick counts as
-    // user-activated playback on Safari/iOS without stealing the
-    // element from a subsequent playCallOpen() in the same gesture.
-    // Doing the pause inside p.then() caused a race: the promise
-    // resolved AFTER playCallOpen() had already called play(), and the
-    // late pause() cancelled the real playback. See audio-pipeline
-    // warning "The play() request was interrupted by a call to pause()".
-    //
-    // NOTE: `backgroundAudio` gets the same treatment so every element
-    // is user-activated up-front. The new `pause` watchdog on the
-    // background element only fires when `_backgroundPlaying` is true,
-    // so this unlock dance doesn't trigger it.
-    for (const el of [this.openAudio, this.backgroundAudio, this.closeAudio]) {
-      try {
-        el.muted = true;
-        const p = el.play();
-        try { el.pause(); } catch {}
-        try { el.currentTime = 0; } catch {}
-        el.muted = false;
-        // Swallow the rejection from the interrupted muted play —
-        // pausing before the promise settles is expected here.
-        if (p && typeof p.catch === 'function') p.catch(() => {});
-      } catch {}
-    }
+    try {
+      this.backgroundAudio.muted = true;
+      const p = this.backgroundAudio.play();
+      try { this.backgroundAudio.pause(); } catch {}
+      try { this.backgroundAudio.currentTime = 0; } catch {}
+      this.backgroundAudio.muted = false;
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {}
   }
 
-  /** audio-flow: play the call-open clip (ring + pickup). Resolves when
-   *  playback ends or after START_AUDIO_MAX_MS as a safety cap. Never
-   *  rejects. Returns `{ ok, reason }` so callers can log timeouts. */
-  playCallOpen() {
-    if (this._hardKilled) return Promise.resolve({ ok: false, reason: 'hard_killed' });
-    this._openPlaying = true;
-    return this._playOneShot(this.openAudio, 'callOpen', START_AUDIO_MAX_MS).then((outcome) => {
-      this._openPlaying = false;
-      this._checkAllStopped();
-      return outcome;
+  /** Round-7: play a one-shot chime via AudioBufferSourceNode. Internal
+   *  helper shared by `playCallOpen` and `playCallClose`. Takes a
+   *  buffer key + max-wait timeout; resolves `{ok, reason}` exactly
+   *  once — the source's `onended` fires deterministically either when
+   *  the buffer plays to completion OR when `stop()` is called.
+   *
+   *  `activeHolder` is the property name on `this` where we store the
+   *  source + stopped flag so `stopAllCallAudio` can kill it.
+   *  `playingFlag` is the property name we set to true on start and
+   *  false on end, so `_checkAllStopped` tracks lifecycle correctly. */
+  _playBufferSource(bufferKey, activeHolderKey, stoppedFlagKey, playingFlagKey, maxWaitMs) {
+    return new Promise((resolve) => {
+      const ctx = this._pipeline && this._pipeline.ctx;
+      const gain = this._pipeline && this._pipeline.playbackGain;
+      if (!ctx || !gain) {
+        // No AudioContext — pipeline wasn't unlocked. Return fallback
+        // so the caller doesn't deadlock. Log so the regression is
+        // visible.
+        // eslint-disable-next-line no-console
+        console.error('[audio-flow] ' + bufferKey + ' cannot play — no AudioContext');
+        resolve({ ok: false, reason: 'no_context' });
+        return;
+      }
+      const buffer = this._buffers[bufferKey];
+      if (!buffer) {
+        // Buffer not decoded yet. Try to kick a fetch+decode and
+        // resolve when done (bounded by maxWaitMs). Mark playing
+        // flag true so `_checkAllStopped` doesn't fire while we're
+        // still in the middle of the clip's lifecycle.
+        // eslint-disable-next-line no-console
+        console.warn('[audio-flow] ' + bufferKey + ' buffer not ready — awaiting decode');
+        this[playingFlagKey] = true;
+        const timeout = setTimeout(() => {
+          this[playingFlagKey] = false;
+          this._checkAllStopped();
+          resolve({ ok: false, reason: 'decode_timeout' });
+        }, maxWaitMs);
+        this.prepareBuffers(ctx).then(() => {
+          clearTimeout(timeout);
+          if (this._buffers[bufferKey]) {
+            // Flag will be re-asserted inside the recursive call; clear
+            // here so the recursion's own asserts aren't no-ops.
+            this[playingFlagKey] = false;
+            // Recurse once now that the buffer is ready.
+            this._playBufferSource(bufferKey, activeHolderKey, stoppedFlagKey, playingFlagKey, maxWaitMs)
+              .then(resolve);
+          } else {
+            this[playingFlagKey] = false;
+            this._checkAllStopped();
+            resolve({ ok: false, reason: 'decode_failed' });
+          }
+        });
+        return;
+      }
+
+      this[playingFlagKey] = true;
+      this[stoppedFlagKey] = false;
+
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      // Connect to the playbackGain so the `setOutputVolume` control
+      // and phone-compression crossfade apply uniformly.
+      src.connect(gain);
+      this[activeHolderKey] = src;
+
+      let settled = false;
+      const settle = (reason) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(safetyTimer);
+        this[playingFlagKey] = false;
+        if (this[activeHolderKey] === src) this[activeHolderKey] = null;
+        try { src.disconnect(); } catch {}
+        this._checkAllStopped();
+        resolve({ ok: reason === 'ended', reason });
+      };
+
+      src.onended = () => {
+        // Fires exactly once — either buffer played to completion OR
+        // `src.stop()` was called. `_stoppedFlagKey` distinguishes.
+        settle(this[stoppedFlagKey] ? 'stopped' : 'ended');
+      };
+
+      // Safety timer — should never fire in normal flow. Logged at
+      // error level if it does so we know there's a bug.
+      const safetyTimer = setTimeout(() => {
+        // eslint-disable-next-line no-console
+        console.error('[audio-flow] ' + bufferKey + ' safety timeout fired — onended never arrived');
+        try { src.stop(0); } catch {}
+        settle('timeout');
+      }, maxWaitMs);
+
+      try {
+        src.start(0);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[audio-flow] ' + bufferKey + ' start threw', err && err.message);
+        settle('throw');
+      }
     });
+  }
+
+  /** audio-flow: play the call-open clip (ring + pickup). Round-7:
+   *  uses AudioBufferSourceNode with deterministic `onended`. The
+   *  round-2 `onListenGate` API is retained as a compatibility shim
+   *  (round-6 moved both gates to `onAudioEnded`, so it's a no-op for
+   *  the live code path). `onAudioEnded({reason})` fires exactly once.
+   *
+   *  Reasons:
+   *    'ended'       — buffer played to completion naturally
+   *    'stopped'     — stopAllCallAudio() called stop() mid-playback
+   *    'hard_killed' — _hardKilled latch was set before play even
+   *                    began (second placeCall after endCall)
+   *    'no_context'  — pipeline wasn't unlocked (should never happen)
+   *    'decode_failed' / 'decode_timeout' — fetch+decode bailed
+   *    'timeout'     — safety timer fired; bug if it happens
+   *    'throw'       — source.start() threw
+   */
+  playCallOpen(opts) {
+    const onListenGate = opts && typeof opts.onListenGate === 'function' ? opts.onListenGate : null;
+    const onAudioEnded = opts && typeof opts.onAudioEnded === 'function' ? opts.onAudioEnded : null;
+
+    if (this._hardKilled) {
+      if (onListenGate) { try { onListenGate({ reason: 'hard_killed' }); } catch {} }
+      if (onAudioEnded) { try { onAudioEnded({ reason: 'hard_killed' }); } catch {} }
+      return Promise.resolve({ ok: false, reason: 'hard_killed' });
+    }
+    return this._playBufferSource('callOpen', '_activeOpenSource', '_activeOpenStopped', '_openPlaying', START_AUDIO_MAX_MS)
+      .then((outcome) => {
+        // Round-2/round-6 compat: callers that still wire onListenGate
+        // get a one-shot fire with the same reason so any leftover
+        // gating logic resolves.
+        if (onListenGate) { try { onListenGate({ reason: outcome.reason }); } catch {} }
+        if (onAudioEnded) { try { onAudioEnded({ reason: outcome.reason }); } catch {} }
+        return outcome;
+      });
   }
 
   /** audio-flow: play the call-close clip (hangup + 3× end-call beeps).
-   *  Resolves when playback ends or after END_AUDIO_MAX_MS. Never rejects.
-   *  The `call-audio-all-stopped` event fires after this resolves AND all
-   *  other elements are idle. */
+   *  Round-7: AudioBufferSourceNode with deterministic `onended`. */
   playCallClose() {
     if (this._hardKilled) return Promise.resolve({ ok: false, reason: 'hard_killed' });
-    this._closePlaying = true;
-    return this._playOneShot(this.closeAudio, 'callClose', END_AUDIO_MAX_MS).then((outcome) => {
-      this._closePlaying = false;
-      this._checkAllStopped();
-      return outcome;
-    });
+    return this._playBufferSource('callClose', '_activeCloseSource', '_activeCloseStopped', '_closePlaying', END_AUDIO_MAX_MS);
   }
 
   /** audio-flow: emit the `all-stopped` event when every managed audio
@@ -260,26 +429,30 @@ class CallAudioController {
     try { this._onAllStopped(); } catch { /* never break the chain */ }
   }
 
-  /** audio-flow: HARD kill — synchronously stops every managed element
-   *  and latches `_hardKilled` so nothing re-starts. Used when the user
-   *  smashes End Call (requirement 7). A subsequent placeCall() clears
-   *  the latch via `armForNextCall()`. */
+  /** audio-flow: HARD kill — synchronously stops every IN-FLIGHT
+   *  audio source and latches `_hardKilled` so nothing re-starts.
+   *
+   *  Round-7: callOpen + callClose are now AudioBufferSourceNodes.
+   *  `stop()` is synchronous-but-fires-onended-later — we set the
+   *  stopped flag BEFORE calling stop so the source's onended
+   *  callback sees `reason='stopped'`. Then call stop(0).
+   *
+   *  Background is still HTMLAudioElement; pause it synchronously. */
   stopAllCallAudio() {
     this._hardKilled = true;
     this._backgroundPlaying = false;
-    this._openPlaying = false;
-    this._closePlaying = false;
-    for (const el of [this.openAudio, this.backgroundAudio, this.closeAudio]) {
-      try { el.pause(); } catch {}
-      try { el.currentTime = 0; } catch {}
-      try { el.muted = true; } catch {}
+    try { this.backgroundAudio.pause(); } catch {}
+    try { this.backgroundAudio.currentTime = 0; } catch {}
+    // Stop the active BufferSource for callOpen (if playing).
+    if (this._activeOpenSource) {
+      this._activeOpenStopped = true;
+      try { this._activeOpenSource.stop(0); } catch {}
     }
-    // Un-mute for next call — pause already prevents playback.
-    setTimeout(() => {
-      try { this.openAudio.muted = false; } catch {}
-      try { this.backgroundAudio.muted = false; } catch {}
-      try { this.closeAudio.muted = false; } catch {}
-    }, 50);
+    // Stop the active BufferSource for callClose (if playing).
+    if (this._activeCloseSource) {
+      this._activeCloseStopped = true;
+      try { this._activeCloseSource.stop(0); } catch {}
+    }
     this._checkAllStopped();
   }
 
@@ -288,55 +461,6 @@ class CallAudioController {
   armForNextCall() {
     this._hardKilled = false;
     this._bgRestartAttempts = 0;
-  }
-
-  _playOneShot(el, label, maxMs) {
-    return new Promise((resolve) => {
-      let done = false;
-      const finish = (why) => {
-        if (done) return;
-        done = true;
-        try { el.removeEventListener('ended', onEnded); } catch {}
-        try { el.removeEventListener('error', onError); } catch {}
-        try { el.removeEventListener('pause', onPause); } catch {}
-        clearTimeout(t);
-        resolve({ ok: why === 'ended', reason: why });
-      };
-      const onEnded = () => finish('ended');
-      const onError = () => finish('error');
-      // audio-flow: if the element is paused mid-play (e.g. from
-      // stopAllCallAudio during End Call), resolve the shot immediately
-      // so the _openPlaying / _closePlaying flag flips and
-      // `call-audio-all-stopped` can eventually fire. Without this, a
-      // mid-chime kill would leave the flag set until the 20s safety
-      // timeout, delaying the green-button reset (requirement 6).
-      const onPause = () => {
-        // Ignore the pause that naturally follows `ended` — some
-        // browsers fire pause right after ended; the `done` latch
-        // already covers that case but we bail here for clarity.
-        if (el.ended) return;
-        finish('paused');
-      };
-      const t = setTimeout(() => finish('timeout'), maxMs);
-      try {
-        el.addEventListener('ended', onEnded, { once: true });
-        el.addEventListener('error', onError, { once: true });
-        el.addEventListener('pause', onPause);
-        try { el.currentTime = 0; } catch {}
-        const p = el.play();
-        if (p && typeof p.catch === 'function') {
-          p.catch((err) => {
-            // eslint-disable-next-line no-console
-            console.warn(`[audio-flow] ${label} play rejected`, err && err.message);
-            finish('reject');
-          });
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn(`[audio-flow] ${label} play threw`, err && err.message);
-        finish('throw');
-      }
-    });
   }
 
   /** audio-flow: start looping the background ambience. No-op if the
@@ -446,9 +570,21 @@ class CallAudioController {
   /** audio-flow: stop everything and detach listeners. Called on full
    *  pipeline close. */
   destroy() {
-    for (const el of [this.openAudio, this.backgroundAudio, this.closeAudio]) {
-      try { el.pause(); } catch {}
-      try { el.removeAttribute('src'); el.load(); } catch {}
+    // Background (HTMLAudioElement) — pause + unload.
+    try { this.backgroundAudio.pause(); } catch {}
+    try { this.backgroundAudio.removeAttribute('src'); this.backgroundAudio.load(); } catch {}
+    // callOpen + callClose (AudioBufferSourceNode) — stop if active.
+    if (this._activeOpenSource) {
+      this._activeOpenStopped = true;
+      try { this._activeOpenSource.stop(0); } catch {}
+      try { this._activeOpenSource.disconnect(); } catch {}
+      this._activeOpenSource = null;
+    }
+    if (this._activeCloseSource) {
+      this._activeCloseStopped = true;
+      try { this._activeCloseSource.stop(0); } catch {}
+      try { this._activeCloseSource.disconnect(); } catch {}
+      this._activeCloseSource = null;
     }
     this._openPlaying = false;
     this._backgroundPlaying = false;
@@ -474,6 +610,18 @@ export class AudioPipeline extends EventTarget {
     this.playbackGain = null;      // agent volume only
     this.outputVolume = 1.0;
 
+    // Round-5: the round-4 client-side playback buffer + gate has been
+    // removed. The correct fix is upstream — the Gemini Live session
+    // never generates audio until the client sends a user-turn, and
+    // the `greet_gate_open` frame that triggers the proactive greeting
+    // is itself gated on the callOpen `ended` event
+    // (see VoiceAgent._tryOpenGreetGate + api/live-bridge.js
+    // maybeFireGreeting). So no TTS audio arrives during callOpen, so
+    // there is nothing to buffer. `enqueuePcm24k` schedules every
+    // chunk directly into the AudioContext with no gating. A
+    // safety-belt log in VoiceAgent._onWsMessage catches any
+    // regression where agent PCM arrives before callOpen settles.
+
     // audio-flow: phone-line compression sub-graph. Optional, crossfaded.
     // Default OFF (bypass). Owned by pipeline; toggled via
     // setPhoneCompression(). Graph:
@@ -496,7 +644,11 @@ export class AudioPipeline extends EventTarget {
     // if the ctx is suspended — the browser drives <audio> scheduling.
     this.callAudio = new CallAudioController({
       onStateChange: (ev) => this.dispatchEvent(new CustomEvent('call-audio-changed', { detail: ev })),
-      onAllStopped: () => this.dispatchEvent(new CustomEvent('call-audio-all-stopped'))
+      onAllStopped: () => this.dispatchEvent(new CustomEvent('call-audio-all-stopped')),
+      // Round-7: pass self so the controller can construct
+      // AudioBufferSourceNodes off the shared AudioContext +
+      // playbackGain when callOpen/callClose are triggered.
+      pipeline: this
     });
 
     this._analyser = null;
@@ -546,10 +698,14 @@ export class AudioPipeline extends EventTarget {
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
-    // audio-flow: mirror the unlock onto the HTMLAudioElement layer so
-    // the first playCallOpen() doesn't get blocked by Safari's autoplay
-    // policy.
+    // audio-flow: unlock the HTMLAudioElement layer (only background
+    // now, since round-7 moved callOpen/callClose to Web Audio).
     try { this.callAudio.unlock(); } catch {}
+    // Round-7: kick off the AudioBuffer decode for callOpen +
+    // callClose so the first placeCall has them ready. Fire-and-forget:
+    // the decode promise is tracked inside the controller so the play
+    // path can await it if the user clicks before decode finishes.
+    try { this.callAudio.prepareBuffers(this.ctx); } catch {}
     return this.ctx;
   }
 
@@ -697,6 +853,18 @@ export class AudioPipeline extends EventTarget {
 
   // ----- Playback -----
 
+  /** Schedule a PCM16 24 kHz chunk into the AudioContext immediately.
+   *  No buffering, no gating — the upstream (live-bridge.js) is
+   *  responsible for not generating audio until the client is ready
+   *  (server-side pre-greet buffer, see round-6 fix 1).
+   *
+   *  Round-1 req 7 still holds: `flushPlayback()` stops every scheduled
+   *  source synchronously for the immediate-kill UX.
+   *
+   *  Round-6 fix 2: fires the `agent-playback-drained` event when the
+   *  last scheduled source's `onended` runs AND the set becomes
+   *  empty. The deterministic end-call chain listens for this to
+   *  decide when the model has physically finished speaking. */
   enqueuePcm24k(int16) {
     if (!this.ctx) return;
     if (this.ctx.state === 'suspended') {
@@ -713,10 +881,23 @@ export class AudioPipeline extends EventTarget {
     src.onended = () => {
       try { src.disconnect(); } catch {}
       this.activePlaybackSources.delete(src);
+      if (this.activePlaybackSources.size === 0) {
+        try { this.dispatchEvent(new CustomEvent('agent-playback-drained')); } catch {}
+      }
     };
   }
 
-  /** Hard flush: stop all in-flight scheduled sources immediately. */
+  /** Round-6 fix 2: `true` while any agent-audio source is still
+   *  scheduled or playing. The deterministic end-call chain uses this
+   *  to decide whether to wait for `agent-playback-drained` or
+   *  proceed immediately. */
+  isAgentAudioPlaying() {
+    return this.activePlaybackSources.size > 0;
+  }
+
+  /** Hard flush: stop all in-flight scheduled sources immediately.
+   *  Called from `flushPlayback` consumers in VoiceAgent to kill any
+   *  still-playing agent voice (round-1 req 7, round-2 teardown). */
   flushPlayback() {
     for (const src of this.activePlaybackSources) {
       try { src.stop(); } catch {}
