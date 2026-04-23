@@ -287,8 +287,13 @@ export class VoiceAgent extends EventTarget {
     this.personas = DEFAULT_PERSONAS.slice();
     this.personaId = DEFAULT_PERSONA_ID;
 
-    const restored = readSessionBlob();
-    this._restored = restored;
+    // Drop any prior-call state (resume handle, transcript) so a page
+    // refresh starts fresh — reduces upstream token cost and avoids the
+    // agent "remembering" a previous conversation. Persona/mode survive
+    // because they live in localStorage, read just below.
+    clearSessionBlob();
+    const restored = null;
+    this._restored = null;
 
     // Round-2 req 2: persona now persists across browser restarts via
     // localStorage. Precedence: in-tab session blob (live call restore)
@@ -2063,8 +2068,10 @@ export class VoiceAgent extends EventTarget {
     try {
       const cfg = await fetch('/api/config', { cache: 'no-store' }).then((r) => r.json());
       if (Array.isArray(cfg.personas) && cfg.personas.length) this.personas = cfg.personas;
-      if (cfg.defaultPersona && !(this._restored && this._restored.persona)) {
-        this.personaId = cfg.defaultPersona;
+      if (cfg.defaultPersona) {
+        let hasUserPersona = false;
+        try { hasUserPersona = !!localStorage.getItem(PERSONA_STORAGE_KEY); } catch {}
+        if (!hasUserPersona) this.personaId = cfg.defaultPersona;
       }
       if (cfg.flags && typeof cfg.flags === 'object') {
         this.flags.geminiTranscription = !!cfg.flags.geminiTranscription;

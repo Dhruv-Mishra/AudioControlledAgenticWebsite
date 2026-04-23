@@ -257,6 +257,16 @@ function attach(browserWs, req, env) {
   let helloReceived = false;
   let closed = false;
   let upstreamEverProducedData = false;
+  // end-call audio-fix: set to true when WE initiate the upstream close
+  // (call_end, mode_switch, persona_switch, client_reconnect, idle_timeout,
+  // browser_close). The Gemini Live client's `onclose` callback fires
+  // asynchronously after `upstream.close()` returns, by which point we've
+  // already reset `upstreamEverProducedData = false` below. Without this
+  // latch, the onclose handler would see `!upstreamEverProducedData` and
+  // emit a spurious `Upstream closed before setupComplete` error to the
+  // browser, which then tears down the call and cuts off the callClose
+  // chime. This flag lets onclose know "we meant to close — no error".
+  let intentionalUpstreamClose = false;
   // audio-prefs: negotiated with the browser via `hello.audioPrefs` or a
   // subsequent `audio_prefs` control frame. phoneLine defaults to true so
   // a client that never sends the frame still gets the narrowband path.
@@ -515,6 +525,9 @@ function attach(browserWs, req, env) {
 
   async function openUpstream({ reuseHandle = true, explicitHandle = null } = {}) {
     emitState('connecting');
+    // Safety: clear any stale flag from a previous close so THIS upstream's
+    // onclose isn't masked if it legitimately fails before setupComplete.
+    intentionalUpstreamClose = false;
     if (!genai) {
       try {
         genai = buildGenaiClient(apiKey);
@@ -586,8 +599,8 @@ function attach(browserWs, req, env) {
             onclose: (evt) => {
               const code = evt && (evt.code || evt.statusCode);
               const reason = (evt && evt.reason && evt.reason.toString()) || '';
-              dlog(sessionId, 'onclose code=' + (code || '?'), 'reason=' + (reason || '?'), 'hadData=' + upstreamEverProducedData);
-              if (!upstreamEverProducedData && !closed) {
+              dlog(sessionId, 'onclose code=' + (code || '?'), 'reason=' + (reason || '?'), 'hadData=' + upstreamEverProducedData, 'intentional=' + intentionalUpstreamClose);
+              if (!upstreamEverProducedData && !closed && !intentionalUpstreamClose) {
                 let errCode = 'ws_closed';
                 if (code === 1008 || code === 1007 || code === 4401 || code === 4003) errCode = 'invalid_key';
                 if (/api.key|unauthor|permission|invalid/i.test(reason)) errCode = 'invalid_key';
@@ -595,11 +608,12 @@ function attach(browserWs, req, env) {
                 if (/not.found|unsupported.model/i.test(reason)) errCode = 'model_unavailable';
                 emitError(errCode, reason || `Upstream closed before setupComplete (code=${code || '?'})`, false);
                 emitState('error', errCode);
-              } else if (!closed) {
+              } else if (!closed && !intentionalUpstreamClose) {
                 emitState('idle');
               }
               upstream = null;
               upstreamEverProducedData = false;
+              intentionalUpstreamClose = false;
             }
           }
         });
@@ -1147,6 +1161,10 @@ function attach(browserWs, req, env) {
     stopHeartbeat();
     if (!upstream) return;
     dlog(sessionId, 'closeUpstream reason=' + reason);
+    // end-call audio-fix: flag this as intentional so the async `onclose`
+    // below doesn't mistake our own shutdown for an upstream failure and
+    // emit `Upstream closed before setupComplete`.
+    intentionalUpstreamClose = true;
     try { upstream.close(); } catch { /* ignore */ }
     upstream = null;
     upstreamEverProducedData = false;

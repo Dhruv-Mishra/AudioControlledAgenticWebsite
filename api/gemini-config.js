@@ -62,7 +62,7 @@ function buildLiveConfig({ systemInstruction, voiceName, functionDeclarations, m
     thinkingConfig: { thinkingLevel: 'MINIMAL' },
     contextWindowCompression: {
       slidingWindow: {},
-      triggerTokens: '80000'
+      triggerTokens: '16000'
     },
     realtimeInputConfig: {
       automaticActivityDetection: {

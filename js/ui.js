@@ -154,13 +154,6 @@ function buildDockMarkup() {
     <div class="voice-dock-action">
       <div class="voice-dock-action-footer">
         <p class="voice-call-hint call-hint" id="voice-call-hint">Click Place Call to talk to Jarvis.</p>
-        <ul class="voice-kbd-hints" aria-label="Keyboard shortcuts">
-          <li><kbd class="voice-kbd">Space</kbd><span>call</span></li>
-          <li><kbd class="voice-kbd">M</kbd><span>mute</span></li>
-          <li><kbd class="voice-kbd">Esc</kbd><span>close</span></li>
-          <li><kbd class="voice-kbd">⌘K</kbd><span>cmd</span></li>
-          <li><kbd class="voice-kbd">/</kbd><span>focus</span></li>
-        </ul>
       </div>
     </div>
 

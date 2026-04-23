@@ -281,7 +281,7 @@
   row-gap: var(--sp-1, 4px);
   column-gap: var(--sp-1, 4px);
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   flex: 1 1 auto;
 }
 
@@ -553,22 +553,17 @@
 }
 
 /* FIX (round-2 requirement 1): in the minimised (collapsed) dock, the
- * call button becomes icon-only whenever the call is live so the chip
- * row has enough horizontal room to show "Listening · 0:02" without
- * overflow or wrapping. Expanded dock keeps the full label. */
-.voice-dock.is-collapsed .voice-call-btn[data-call-state="end"],
-.voice-dock.is-collapsed .voice-call-btn[data-call-state="cancel"],
-.voice-dock.is-collapsed .voice-call-btn[data-call-state="reconnect"],
-.voice-dock.is-collapsed .voice-call-btn[data-call-state="closing"] {
+ * call button is icon-only in every state. Reclaims ~90 px so the
+ * status pill ("Stand by", "Connecting", "Reconnecting") is never
+ * cropped by the tight 420 px minimised dock. Expanded dock keeps
+ * the full label. */
+.voice-dock.is-collapsed .voice-call-btn {
   padding: 0;
   width: 40px;
   height: 40px;
   justify-content: center;
 }
-.voice-dock.is-collapsed .voice-call-btn[data-call-state="end"] .voice-call-btn-label,
-.voice-dock.is-collapsed .voice-call-btn[data-call-state="cancel"] .voice-call-btn-label,
-.voice-dock.is-collapsed .voice-call-btn[data-call-state="reconnect"] .voice-call-btn-label,
-.voice-dock.is-collapsed .voice-call-btn[data-call-state="closing"] .voice-call-btn-label {
+.voice-dock.is-collapsed .voice-call-btn .voice-call-btn-label {
   display: none;
 }
 
@@ -888,39 +883,6 @@
   min-width: 0;
 }
 
-.voice-kbd-hints {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-}
-.voice-kbd-hints li {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--md-sys-color-outline, var(--voice-outline));
-}
-.voice-kbd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 22px;
-  padding: 0 6px;
-  font-family: var(--voice-font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  text-align: center;
-  color: var(--md-sys-color-on-surface, var(--voice-on-surface));
-  background: var(--md-sys-color-surface-container-highest, var(--voice-surface-expanded));
-  border: 1px solid var(--voice-outline-variant);
-  border-radius: var(--voice-radius-sm);
-}
 
 /* Activity indicator (mounted by activity-indicator.js as first child of
  * .voice-dock-action). */
@@ -1526,8 +1488,6 @@
   /* Drag handle visible at mobile widths only. */
   .voice-settings-handle { display: block; }
 
-  /* Hide the extra kbd pips on mobile — leaves Space / M / Esc. */
-  .voice-kbd-hints > li:nth-child(n+4) { display: none; }
 }
 
 /* Desktop: explicitly hide the handle in case a JSDOM feature-query
