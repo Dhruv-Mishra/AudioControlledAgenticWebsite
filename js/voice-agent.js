@@ -404,6 +404,16 @@ export class VoiceAgent extends EventTarget {
         this._announce({ from: 'system', text: 'Mic was muted by the system.' });
       }
     });
+    // audio-flow: forward the "all audio stopped" signal so UI can flip
+    // the End Call button back to green only after every last sample has
+    // played out (requirement 6). Also forward state changes so the dock
+    // can reflect background-playing status.
+    this.pipeline.addEventListener('call-audio-all-stopped', () => {
+      this._publishEvent('call-audio-all-stopped', {});
+    });
+    this.pipeline.addEventListener('call-audio-changed', (e) => {
+      this._publishEvent('call-audio-changed', e && e.detail ? e.detail : {});
+    });
   }
 
   // ---------- public getters ----------
@@ -494,6 +504,9 @@ export class VoiceAgent extends EventTarget {
 
     // Synchronously unlock audio BEFORE any await so Chrome honours the gesture.
     try { this.pipeline.unlockAudioSync(); } catch {}
+    // audio-flow: clear any hard-kill latch left over from the previous
+    // endCall so the new call's audio can play.
+    try { this.pipeline.callAudio.armForNextCall(); } catch {}
 
     // Force this call to be Live (continuous) unless the user explicitly
     // chose Wake Word. Mode persists in storage but is not coercive here.
@@ -631,19 +644,35 @@ export class VoiceAgent extends EventTarget {
       try { this._sttController.stop(); } catch {}
     }
 
-    // audio-flow: stop the background loop FIRST so the end-call chime
-    // isn't muddied. Then flush any in-flight Gemini playback (no more
-    // agent speech).
-    try { this.pipeline.callAudio.stopBackground(); } catch {}
-    this.pipeline.flushPlayback();
+    // audio-flow (requirement 7): SYNCHRONOUSLY kill every in-flight
+    // sound source THEN AND THERE. This includes:
+    //   • activePlaybackSources — any scheduled Gemini PCM chunks,
+    //   • openAudio — if the start chime is still ringing,
+    //   • backgroundAudio — the ambience loop,
+    //   • any queued agent speech sitting in preSetupBuffer.
+    // We tell the capture worklet to drop frames so even if the mic
+    // thread fires one more time, nothing reaches the server.
+    this.pipeline.setCapturePaused(true);
+    this.preSetupBuffer = [];
+    this.preSetupBytes = 0;
+    // Hard-kill call-audio layer (pauses open + background immediately
+    // and latches against late starts). Then we clear the latch so the
+    // callClose chime we're about to play is allowed.
+    try { this.pipeline.callAudio.stopAllCallAudio(); } catch {}
+    try { this.pipeline.flushPlayback(); } catch {}
+    // Clear the hard-kill latch JUST for the end-call chime. The
+    // controller is idempotent — the latch is re-armed on the next
+    // placeCall().
+    try { this.pipeline.callAudio.armForNextCall(); } catch {}
     if (this.transcript) this.transcript.turnBreak();
 
     // Tell the server we're done — they'll close upstream cleanly.
     try { this._sendJson({ type: 'call_end' }); } catch {}
 
-    // audio-flow: play the end-call chime. The controller caps wait at
-    // 2s so a missing clip never stalls shutdown. Awaited before the WS
-    // close so the user hears the hang-up before the socket tears down.
+    // audio-flow: play the end-call chime (phoneCut + 3× end-call beeps).
+    // The controller caps wait at END_AUDIO_MAX_MS so a missing clip
+    // never stalls shutdown. Awaited so the user hears the full hang-up
+    // sequence before we flip the UI back to "Place Call".
     try { await this.pipeline.callAudio.playCallClose(); } catch {}
 
     // Close mic + WS.
@@ -689,10 +718,10 @@ export class VoiceAgent extends EventTarget {
     if (this._sttController) {
       try { this._sttController.stop(); } catch {}
     }
-    // audio-flow: hard-stop the background loop on error. No end-chime
-    // here — this path is for invalid keys / mic death, not user intent.
-    try { this.pipeline.callAudio.stopBackground(); } catch {}
-    this.pipeline.flushPlayback();
+    // audio-flow: hard-stop ALL call-audio on error. No end-chime here —
+    // this path is for invalid keys / mic death, not user intent. The
+    // hard-kill latch is cleared next time placeCall() runs.
+    try { this.pipeline.stopAllAudio(); } catch {}
     this.pipeline.stopCapture();
     try { if (this.ws) this.ws.close(); } catch {}
     this.ws = null;

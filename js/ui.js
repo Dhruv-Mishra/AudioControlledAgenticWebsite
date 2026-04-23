@@ -173,15 +173,17 @@ function buildDockMarkup() {
         </button>
       </header>
 
-      <nav class="voice-settings-tabs" role="tablist" aria-label="Settings sections">
-        <button class="voice-settings-tab is-active" role="tab" type="button" data-settings-tab="voice" aria-selected="true" aria-controls="voice-settings-panel-voice">Voice</button>
-        <button class="voice-settings-tab" role="tab" type="button" data-settings-tab="agent" aria-selected="false" aria-controls="voice-settings-panel-agent">Agent</button>
-        <button class="voice-settings-tab" role="tab" type="button" data-settings-tab="transcript" aria-selected="false" aria-controls="voice-settings-panel-transcript">Transcript</button>
-        <button class="voice-settings-tab" role="tab" type="button" data-settings-tab="theme" aria-selected="false" aria-controls="voice-settings-panel-theme">Theme</button>
-      </nav>
+      <!-- FIX (requirement 10): single scrollable settings page. Tabs
+           removed. All agent settings — Voice/Persona/Transcript/Theme —
+           live in one container that scrolls vertically when content
+           overflows. Section headers (<h3>) aid scannability. Every JS
+           wiring hook (ids, data-agent-id, segmented class names)
+           is preserved. -->
+      <div class="voice-settings-body voice-settings-body--single" id="voice-settings-body">
 
-      <div class="voice-settings-body">
-        <section class="voice-settings-panel is-active" id="voice-settings-panel-voice" role="tabpanel" data-settings-panel="voice" aria-labelledby="voice-settings-tab-voice">
+        <section class="voice-settings-section" aria-labelledby="voice-settings-h-voice">
+          <h3 class="voice-settings-section-title" id="voice-settings-h-voice">Voice</h3>
+
           <div class="voice-settings-row voice-settings-row--labeled voice-settings-row--segmented" role="radiogroup" aria-label="Listening mode">
             <div class="voice-settings-row-text">
               <span class="voice-settings-row-label">Mode</span>
@@ -199,8 +201,6 @@ function buildDockMarkup() {
           </div>
           <p class="voice-settings-note" id="voice-mode-note"></p>
 
-          <!-- audio-flow: Background audio toggle. Default checked; state
-               persists to localStorage.jarvis.backgroundAudio. -->
           <div class="voice-settings-row voice-settings-row--toggle">
             <div class="voice-settings-row-text">
               <span class="voice-settings-row-label">Background audio</span>
@@ -213,9 +213,6 @@ function buildDockMarkup() {
             </label>
           </div>
 
-          <!-- Phone-line compression: new control wired to
-               agent.setPhoneCompression(). Persists to
-               localStorage.jarvis.phoneCompression. -->
           <div class="voice-settings-row voice-settings-row--toggle">
             <div class="voice-settings-row-text">
               <span class="voice-settings-row-label">Phone-line compression</span>
@@ -245,7 +242,8 @@ function buildDockMarkup() {
           </div>
         </section>
 
-        <section class="voice-settings-panel" id="voice-settings-panel-agent" role="tabpanel" data-settings-panel="agent" aria-labelledby="voice-settings-tab-agent" hidden>
+        <section class="voice-settings-section" aria-labelledby="voice-settings-h-agent">
+          <h3 class="voice-settings-section-title" id="voice-settings-h-agent">Agent</h3>
           <div class="voice-settings-row voice-settings-row--segmented">
             <div class="voice-settings-row-text">
               <span class="voice-settings-row-label">Persona</span>
@@ -257,7 +255,8 @@ function buildDockMarkup() {
           </div>
         </section>
 
-        <section class="voice-settings-panel" id="voice-settings-panel-transcript" role="tabpanel" data-settings-panel="transcript" aria-labelledby="voice-settings-tab-transcript" hidden>
+        <section class="voice-settings-section" aria-labelledby="voice-settings-h-transcript">
+          <h3 class="voice-settings-section-title" id="voice-settings-h-transcript">Transcript</h3>
           <div class="voice-settings-row voice-settings-row--labeled voice-settings-row--segmented" role="radiogroup" aria-label="Transcript mode">
             <div class="voice-settings-row-text">
               <span class="voice-settings-row-label">Mode</span>
@@ -276,7 +275,8 @@ function buildDockMarkup() {
           </div>
         </section>
 
-        <section class="voice-settings-panel" id="voice-settings-panel-theme" role="tabpanel" data-settings-panel="theme" aria-labelledby="voice-settings-tab-theme" hidden>
+        <section class="voice-settings-section" aria-labelledby="voice-settings-h-theme">
+          <h3 class="voice-settings-section-title" id="voice-settings-h-theme">Theme</h3>
           <div class="voice-settings-row voice-settings-row--labeled voice-settings-row--segmented" role="radiogroup" aria-label="Theme">
             <div class="voice-settings-row-text">
               <span class="voice-settings-row-label">Theme</span>
@@ -604,18 +604,24 @@ function wireVuMeter(agent) {
 }
 
 // --- Persona buttons ---
-
+// FIX (requirement 9): personas visually match the other segmented pill
+// controls in the dock (mode-seg, transcript-seg, theme-seg). No colored
+// per-persona dots — they made the section feel "too colourful" and out
+// of step with the rest of the UI. Active state = filled secondary
+// container pill. Inactive = transparent outlined pill (same as the mode
+// segmented control). Selection state is driven purely by
+// `aria-pressed="true"`.
 function buildPersonaButtons(container, personas, current, onSelect) {
   if (!container) return;
   container.innerHTML = '';
   personas.forEach((p) => {
     const btn = document.createElement('button');
+    btn.type = 'button';
     btn.setAttribute('role', 'tab');
     btn.setAttribute('aria-pressed', p.id === current ? 'true' : 'false');
+    btn.setAttribute('aria-checked', p.id === current ? 'true' : 'false');
     btn.setAttribute('data-persona-id', p.id);
     btn.setAttribute('data-agent-id', `voice.persona.${p.id}`);
-    btn.style.setProperty('--persona-color', p.dotColor);
-    btn.innerHTML = '<span class="persona-dot" aria-hidden="true"></span>';
     const label = document.createElement('span');
     label.textContent = p.label;
     btn.appendChild(label);
@@ -673,39 +679,11 @@ function closeSettings() {
   if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.focus(); }
 }
 
-// Tabbed settings — Voice / Agent / Transcript / Theme.
-function wireSettingsTabs() {
-  const sheet = $('#voice-settings-sheet');
-  if (!sheet) return;
-  const tabs = sheet.querySelectorAll('[data-settings-tab]');
-  const panels = sheet.querySelectorAll('[data-settings-panel]');
-  if (!tabs.length) return;
-  function activate(name) {
-    tabs.forEach((t) => {
-      const active = t.getAttribute('data-settings-tab') === name;
-      t.classList.toggle('is-active', active);
-      t.setAttribute('aria-selected', active ? 'true' : 'false');
-      t.tabIndex = active ? 0 : -1;
-    });
-    panels.forEach((p) => {
-      const active = p.getAttribute('data-settings-panel') === name;
-      p.classList.toggle('is-active', active);
-      p.hidden = !active;
-    });
-  }
-  tabs.forEach((t) => {
-    t.addEventListener('click', () => activate(t.getAttribute('data-settings-tab')));
-    t.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      e.preventDefault();
-      const list = Array.from(tabs);
-      const i = list.indexOf(t);
-      const next = list[(i + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length];
-      next.focus();
-      activate(next.getAttribute('data-settings-tab'));
-    });
-  });
-}
+// FIX (requirement 10): tabs retired — all settings live in one
+// scrollable page. This function is kept as a no-op shim so callers in
+// `bootstrapVoiceShell` don't need to change wiring and downstream tests
+// that check for its existence keep passing.
+function wireSettingsTabs() { /* intentional no-op — single-page layout */ }
 
 // --- Bootstrap ---
 
@@ -739,7 +717,9 @@ export async function bootstrapVoiceShell() {
   buildPersonaButtons(personaContainer, agent.getPersonas(), agent.getCurrentPersonaId(), (id) => {
     agent.setPersona(id);
     document.querySelectorAll('#voice-persona-seg button').forEach((b) => {
-      b.setAttribute('aria-pressed', b.getAttribute('data-persona-id') === id ? 'true' : 'false');
+      const active = b.getAttribute('data-persona-id') === id;
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+      b.setAttribute('aria-checked', active ? 'true' : 'false');
     });
   });
   agent.addEventListener('personas-ready', (e) => {
@@ -767,20 +747,45 @@ export async function bootstrapVoiceShell() {
   agent.addEventListener('mode-changed', (e) => setModeSegmented(e.detail.mode));
 
   // --- Place / End Call button. SYNCHRONOUS unlock on click.
+  //
+  // FIX (requirement 7): when the user clicks End Call, ALL audio
+  // (agent speech, background ambience, any in-flight chime) must stop
+  // THEN AND THERE. `agent.endCall()` handles the graceful transition
+  // (which plays the hangup chime), but we also synchronously flush any
+  // already-scheduled PCM + HTMLAudioElement playback here so there's
+  // zero delay before silence. The hangup chime that follows is re-armed
+  // inside `_gracefullyEndCall`.
   const callBtn = $('#voice-call-btn');
   on(callBtn, 'click', async () => {
     // unlockAudioSync must run BEFORE any await.
     try { agent.unlockAudioSync(); } catch {}
     const state = agent.getState();
     if (IS_IN_CALL_STATES.has(state) || state === STATES.RECONNECTING) {
+      // Kill any in-flight audio immediately (synchronous on this tick).
+      try { agent.pipeline.stopAllAudio(); } catch {}
       await agent.endCall();
     } else if (state === STATES.DIALING || state === STATES.LIVE_OPENING) {
+      // Cancel during dial — also hard-stop any playing open-chime.
+      try { agent.pipeline.stopAllAudio(); } catch {}
       await agent.cancelDial();
     } else if (state === STATES.CLOSING) {
       /* ignore */
     } else {
       await agent.placeCall();
     }
+  });
+
+  // FIX (requirement 6): when every managed audio element has stopped,
+  // force a re-render of the call button so it reverts to green. The
+  // state machine already transitions to IDLE after `playCallClose`
+  // resolves, but this listener is a belt-and-braces guarantee — any
+  // race where the button's DOM classes fall out of sync with state
+  // gets corrected here. Also hide the live chip since the call is
+  // fully over.
+  agent.addEventListener('call-audio-all-stopped', () => {
+    renderCallButton(agent.getState());
+    const chip = $('#voice-live-chip');
+    if (chip && !agent.isInCall()) chip.hidden = true;
   });
 
   // Enter / Space on the call button also toggles the call (buttons do
@@ -887,15 +892,31 @@ export async function bootstrapVoiceShell() {
 
   // --- Ambient chip mirrors the background audio state. It remains in
   // the header as the only visible "call-audio is playing" affordance.
+  //
+  // FIX (requirement 8): previously the chip only reacted to the
+  // `background-changed` event, which fires when the *preference* flips
+  // — not when playback itself starts/stops. We now also listen for
+  // `call-audio-changed`, which fires from the pipeline every time the
+  // background element actually starts or stops. That keeps the chip in
+  // sync with real audio state even if the `startBackground()` retry
+  // path takes effect.
   const ambientChip = $('#voice-ambient-chip');
   if (ambientChip) {
     const reflectAmbient = (on) => { ambientChip.hidden = !on; };
     agent.addEventListener('background-changed', (e) => {
       reflectAmbient(!!(e && e.detail && e.detail.playing));
     });
+    agent.addEventListener('call-audio-changed', (e) => {
+      const d = e && e.detail;
+      if (!d) return;
+      if (typeof d.backgroundPlaying === 'boolean') {
+        reflectAmbient(!!d.backgroundPlaying);
+      }
+    });
     agent.addEventListener('state', () => {
       if (!agent.isInCall()) reflectAmbient(false);
     });
+    agent.addEventListener('call-audio-all-stopped', () => reflectAmbient(false));
   }
 
   // --- Dock collapse + clear

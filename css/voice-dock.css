@@ -257,14 +257,26 @@
 }
 
 /* ============ 3. STATUS PILL + TIMER CHIP ============ */
+/* FIX (requirements 4 + 5): the chip row previously clipped the status
+ * pill ("Stand…") and the live chip ("On call 0:02"). Root cause: the
+ * container had `overflow: hidden` and the flex children had no
+ * `flex-shrink: 0`, so at narrow widths the browser squeezed the text
+ * until it disappeared. Fix: allow the row to wrap horizontally overflow
+ * but pin the pill + live chip to `flex-shrink: 0` so their content
+ * is never truncated; the scrollbar-free `overflow-x: auto` hides the
+ * scrollbar while still preventing clipping. */
 .voice-dock-header-chips {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   flex: 1 1 auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.voice-dock-header-chips::-webkit-scrollbar { display: none; }
 
 .voice-status-pill {
   display: inline-flex;
@@ -278,16 +290,19 @@
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* FIX: never shrink the status pill — its label (Stand by / Dialling /
+   * Listening) is essential for users to know where they are. */
+  flex-shrink: 0;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
   transition:
     background-color var(--voice-dur-base) var(--voice-ease-emphasized),
     color var(--voice-dur-base) var(--voice-ease-emphasized);
 }
 .voice-status-pill .label {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -335,8 +350,19 @@
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
+  /* FIX (requirement 4): never shrink — "On call 0:02" was being
+   * truncated to "On call 0:0…" when the row got tight. Pin the full
+   * chip width. */
+  flex-shrink: 0;
+  overflow: visible;
+  text-overflow: clip;
 }
 .voice-chip:not([hidden]) { display: inline-flex; }
+.voice-chip .voice-chip-label,
+.voice-chip .voice-chip-timer {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .voice-chip--live {
   background: var(--voice-primary-container);
   color: var(--voice-on-primary-container);
@@ -1002,6 +1028,38 @@
   overflow-y: auto;
   padding: 16px 0 20px;
 }
+
+/* FIX (requirement 10): single scrollable settings page. All sections
+ * stack vertically in one container; no tabs, no hiding. A thin hairline
+ * separates sections. The container stays scrollable when content
+ * exceeds the sheet height. */
+.voice-settings-body--single {
+  padding: 8px 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+.voice-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px 0 8px;
+  border-bottom: 1px solid var(--voice-outline-variant);
+}
+.voice-settings-section:last-of-type { border-bottom: none; }
+.voice-settings-section-title {
+  margin: 0;
+  padding: 4px 16px 10px;
+  font-family: var(--voice-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide, 0.04em);
+  text-transform: uppercase;
+  color: var(--voice-on-surface-variant);
+}
+
 .voice-settings-panel {
   display: none;
   flex-direction: column;
@@ -1160,7 +1218,12 @@
   text-transform: none;
 }
 
-/* Fallback styling for the segmented control (Dev A owns .segmented). */
+/* Fallback styling for the segmented control (Dev A owns .segmented).
+ * FIX (requirement 10): scope widened to `#voice-settings-body .segmented`
+ * so the new single-page layout picks up the same styling without an
+ * intermediate `.voice-settings-panel` wrapper. Legacy panel selectors
+ * preserved for any downstream consumer still using them. */
+#voice-settings-body .segmented,
 .voice-settings-panel .segmented {
   display: inline-flex;
   gap: 2px;
@@ -1169,6 +1232,7 @@
   border: 1px solid var(--voice-outline-variant);
   border-radius: var(--voice-radius-pill);
 }
+#voice-settings-body .segmented button,
 .voice-settings-panel .segmented button {
   min-height: 32px;
   padding: 0 14px;
@@ -1181,16 +1245,22 @@
   border-radius: var(--voice-radius-pill);
   cursor: pointer;
 }
+#voice-settings-body .segmented button.is-active,
+#voice-settings-body .segmented button[aria-pressed="true"],
+#voice-settings-body .segmented button[aria-checked="true"],
 .voice-settings-panel .segmented button.is-active,
 .voice-settings-panel .segmented button[aria-pressed="true"],
 .voice-settings-panel .segmented button[aria-checked="true"] {
   background: var(--voice-secondary-container);
   color: var(--voice-on-secondary-container);
 }
+#voice-settings-body .segmented button:focus-visible,
 .voice-settings-panel .segmented button:focus-visible {
   outline: none;
   box-shadow: var(--voice-focus-ring);
 }
+#voice-settings-body .segmented button:disabled,
+#voice-settings-body .segmented button[aria-disabled="true"],
 .voice-settings-panel .segmented button:disabled,
 .voice-settings-panel .segmented button[aria-disabled="true"] {
   opacity: 0.5; cursor: not-allowed;
@@ -1213,38 +1283,70 @@
   justify-content: flex-end;
 }
 
+/* FIX (requirement 9): persona selector now matches every other
+ * segmented pill control in the dock (mode-seg, transcript-seg,
+ * theme-seg). No colored per-persona dots, no coloured borders — just
+ * the same neutral pill look. Active state uses the secondary-container
+ * fill exactly like other pill buttons. Wraps onto multiple rows when
+ * there are enough personas to overflow.
+ *
+ * The selector works WITHOUT a `.voice-settings-panel` ancestor now that
+ * the settings page is single-scroll (no tab panels), so match on the
+ * `#voice-settings-body` scope instead. */
+#voice-settings-body .persona-seg,
 .voice-settings-panel .persona-seg {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
+  gap: 4px;
+  padding: 2px;
+  background: var(--voice-surface-body);
+  border: 1px solid var(--voice-outline-variant);
+  border-radius: var(--voice-radius-pill);
 }
+#voice-settings-body .persona-seg button,
 .voice-settings-panel .persona-seg button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 12px;
-  border-radius: var(--voice-radius-pill);
-  background: transparent;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 14px;
+  font-family: var(--voice-font-sans);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--voice-on-surface-variant);
-  border: 1px solid var(--voice-outline-variant);
+  background: transparent;
+  border: none;
+  border-radius: var(--voice-radius-pill);
+  cursor: pointer;
+  transition:
+    background-color var(--voice-dur-fast) var(--voice-ease-emphasized),
+    color var(--voice-dur-fast) var(--voice-ease-emphasized);
 }
-.voice-settings-panel .persona-seg button[aria-pressed="true"] {
+#voice-settings-body .persona-seg button:hover,
+.voice-settings-panel .persona-seg button:hover {
+  background: color-mix(in oklab, var(--voice-on-surface) 6%, transparent);
+  color: var(--voice-on-surface);
+}
+#voice-settings-body .persona-seg button[aria-pressed="true"],
+#voice-settings-body .persona-seg button[aria-checked="true"],
+.voice-settings-panel .persona-seg button[aria-pressed="true"],
+.voice-settings-panel .persona-seg button[aria-checked="true"] {
   background: var(--voice-secondary-container);
   color: var(--voice-on-secondary-container);
-  border-color: transparent;
 }
-.persona-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--persona-color, var(--voice-primary));
-  flex-shrink: 0;
+#voice-settings-body .persona-seg button:focus-visible,
+.voice-settings-panel .persona-seg button:focus-visible {
+  outline: none;
+  box-shadow: var(--voice-focus-ring);
 }
+#voice-settings-body .persona-seg button:disabled,
+.voice-settings-panel .persona-seg button:disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
+
+/* Legacy persona-dot — hidden to prevent any stray colored swatches if
+ * old markup is re-rendered from cached state. */
+.persona-dot { display: none !important; }
 
 .voice-debug-panel {
   padding: 12px 16px 16px;

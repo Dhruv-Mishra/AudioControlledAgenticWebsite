@@ -40,12 +40,13 @@ const START_END_VOLUME = 0.85;
 // audio-flow: safety cap on how long we wait for callOpen / callClose
 // clips to finish before we move on. A missing or corrupt file must never
 // block the call flow — we log and continue.
-//   • callOpen cap: 6000ms — the combined ring-then-pickup asset is
-//     ~5s; the 6s cap gives the pickup a moment of slack while still
-//     bounding the greet delay if the asset is corrupt.
-//   • callClose cap: 3000ms — combined hangup-then-disconnect is ~2.4s.
-const START_AUDIO_MAX_MS = 6000;
-const END_AUDIO_MAX_MS = 3000;
+//   • callOpen cap: 20000ms — the combined ring-then-pickup asset is
+//     ~15.8s (FULL startCall + phonePick). 20s gives the asset room to
+//     finish naturally even on a slow first decode while still bounding
+//     the greet delay if the file is corrupt.
+//   • callClose cap: 6000ms — combined hangup + 3× end-call beeps is ~4.1s.
+const START_AUDIO_MAX_MS = 20000;
+const END_AUDIO_MAX_MS = 6000;
 
 // audio-flow: candidate asset paths. We probe <audio>.canPlayType for
 // Opus-in-WebM up-front; if it returns a non-empty string we use .webm,
@@ -94,8 +95,13 @@ function pickCallAudioSrc(kind) {
  *  the ambience should be running, rewind + play again. A warn is logged
  *  so the root cause surfaces in DevTools. */
 class CallAudioController {
-  constructor({ onStateChange } = {}) {
+  constructor({ onStateChange, onAllStopped } = {}) {
     this._onStateChange = typeof onStateChange === 'function' ? onStateChange : () => {};
+    // audio-flow: `onAllStopped` fires when the call-audio layer goes
+    // quiet (no open/background/close playing). UI listens to this so
+    // the End Call button reverts to green ONLY when every audio element
+    // has stopped (requirement 6).
+    this._onAllStopped = typeof onAllStopped === 'function' ? onAllStopped : () => {};
     this._backgroundEnabled = true; // default ON; VoiceAgent overrides from localStorage
 
     this.openAudio = this._buildAudio('callOpen', { loop: false, volume: START_END_VOLUME });
@@ -106,21 +112,69 @@ class CallAudioController {
     this._openPlaying = false;
     this._backgroundPlaying = false;
     this._closePlaying = false;
+    // audio-flow: latch set by `stopAllCallAudio()` — bars any further
+    // playback kick-offs until the next call is placed. Prevents a stale
+    // `startBackground()` or a scheduled `playCallClose()` from firing
+    // after the user has smashed End Call.
+    this._hardKilled = false;
 
-    // audio-flow: watchdog for the background loop. If the browser ever
-    // fires `ended` while we still want ambience playing, rewind and
-    // restart. Covers: (a) Chrome bug where loop=true is dropped after
-    // pause+resume, (b) a corrupt short file that terminates before
-    // metadata resolves, (c) media element recycling across tab blurs.
+    // audio-flow: watchdog for the background loop. Historically
+    // `loop=true` occasionally no-ops on Chrome after tab blur, and the
+    // user reported the background "still not playing" — the fix lives
+    // in a tighter restart-and-log path:
+    //   • Log every `ended` so the cause is visible in DevTools.
+    //   • Rewind + retry play() up to 3 times on the same fire-and-forget
+    //     axis. After the 3rd failure, emit an event so the agent can
+    //     surface it rather than silently staying quiet.
+    //   • Covers: (a) Chrome bug where loop=true drops after pause/resume,
+    //     (b) corrupt file that terminates before metadata resolves,
+    //     (c) media element recycling across tab blurs,
+    //     (d) autoplay-policy race where the first play() was rejected
+    //         before unlock() landed.
+    this._bgRestartAttempts = 0;
     this.backgroundAudio.addEventListener('ended', () => {
-      if (this._backgroundEnabled && this._backgroundPlaying) {
-        // eslint-disable-next-line no-console
-        console.warn('[audio-flow] background ended while loop expected; restarting');
-        try { this.backgroundAudio.currentTime = 0; } catch {}
-        const p = this.backgroundAudio.play();
-        if (p && typeof p.catch === 'function') p.catch(() => { this._backgroundPlaying = false; });
-      }
+      if (!this._backgroundEnabled || !this._backgroundPlaying) return;
+      // eslint-disable-next-line no-console
+      console.warn('[audio-flow] background ended while loop expected; restarting');
+      this._restartBackground('ended');
     });
+    // Log pauses so we can see whether a rogue caller is silencing the
+    // background mid-call. Only warn when the pause wasn't caused by us.
+    this.backgroundAudio.addEventListener('pause', () => {
+      if (!this._backgroundPlaying) return;
+      // eslint-disable-next-line no-console
+      console.warn('[audio-flow] background paused unexpectedly; restarting');
+      this._restartBackground('pause');
+    });
+  }
+
+  /** audio-flow: restart the background loop after an `ended` or rogue
+   *  `pause`. Capped at 3 attempts per continuous playing session; counter
+   *  resets on every fresh `startBackground()`. */
+  _restartBackground(cause) {
+    if (!this._backgroundEnabled || !this._backgroundPlaying) return;
+    this._bgRestartAttempts += 1;
+    if (this._bgRestartAttempts > 3) {
+      // eslint-disable-next-line no-console
+      console.error('[audio-flow] background restart exceeded retry budget (cause=' + cause + ')');
+      this._backgroundPlaying = false;
+      this._onStateChange({ backgroundPlaying: false, reason: 'restart_failed' });
+      this._checkAllStopped();
+      return;
+    }
+    try { this.backgroundAudio.currentTime = 0; } catch {}
+    try { this.backgroundAudio.loop = true; } catch {}
+    try { this.backgroundAudio.muted = false; } catch {}
+    const p = this.backgroundAudio.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[audio-flow] background restart rejected (cause=' + cause + ')', err && err.message);
+        // Try once more on next tick — sometimes a single rejection is a
+        // transient autoplay-policy hiccup.
+        setTimeout(() => this._restartBackground(cause + '_retry'), 120);
+      });
+    }
   }
 
   _buildAudio(kind, { loop, volume }) {
@@ -152,6 +206,11 @@ class CallAudioController {
     // resolved AFTER playCallOpen() had already called play(), and the
     // late pause() cancelled the real playback. See audio-pipeline
     // warning "The play() request was interrupted by a call to pause()".
+    //
+    // NOTE: `backgroundAudio` gets the same treatment so every element
+    // is user-activated up-front. The new `pause` watchdog on the
+    // background element only fires when `_backgroundPlaying` is true,
+    // so this unlock dance doesn't trigger it.
     for (const el of [this.openAudio, this.backgroundAudio, this.closeAudio]) {
       try {
         el.muted = true;
@@ -168,23 +227,67 @@ class CallAudioController {
 
   /** audio-flow: play the call-open clip (ring + pickup). Resolves when
    *  playback ends or after START_AUDIO_MAX_MS as a safety cap. Never
-   *  rejects. */
+   *  rejects. Returns `{ ok, reason }` so callers can log timeouts. */
   playCallOpen() {
+    if (this._hardKilled) return Promise.resolve({ ok: false, reason: 'hard_killed' });
     this._openPlaying = true;
     return this._playOneShot(this.openAudio, 'callOpen', START_AUDIO_MAX_MS).then((outcome) => {
       this._openPlaying = false;
+      this._checkAllStopped();
       return outcome;
     });
   }
 
-  /** audio-flow: play the call-close clip (hangup + disconnect). Resolves
-   *  when playback ends or after END_AUDIO_MAX_MS. Never rejects. */
+  /** audio-flow: play the call-close clip (hangup + 3× end-call beeps).
+   *  Resolves when playback ends or after END_AUDIO_MAX_MS. Never rejects.
+   *  The `call-audio-all-stopped` event fires after this resolves AND all
+   *  other elements are idle. */
   playCallClose() {
+    if (this._hardKilled) return Promise.resolve({ ok: false, reason: 'hard_killed' });
     this._closePlaying = true;
     return this._playOneShot(this.closeAudio, 'callClose', END_AUDIO_MAX_MS).then((outcome) => {
       this._closePlaying = false;
+      this._checkAllStopped();
       return outcome;
     });
+  }
+
+  /** audio-flow: emit the `all-stopped` event when every managed audio
+   *  element is idle. UI uses it to flip the End Call button back to
+   *  green only after the very last sample has played (requirement 6). */
+  _checkAllStopped() {
+    if (this._openPlaying || this._backgroundPlaying || this._closePlaying) return;
+    try { this._onAllStopped(); } catch { /* never break the chain */ }
+  }
+
+  /** audio-flow: HARD kill — synchronously stops every managed element
+   *  and latches `_hardKilled` so nothing re-starts. Used when the user
+   *  smashes End Call (requirement 7). A subsequent placeCall() clears
+   *  the latch via `armForNextCall()`. */
+  stopAllCallAudio() {
+    this._hardKilled = true;
+    this._backgroundPlaying = false;
+    this._openPlaying = false;
+    this._closePlaying = false;
+    for (const el of [this.openAudio, this.backgroundAudio, this.closeAudio]) {
+      try { el.pause(); } catch {}
+      try { el.currentTime = 0; } catch {}
+      try { el.muted = true; } catch {}
+    }
+    // Un-mute for next call — pause already prevents playback.
+    setTimeout(() => {
+      try { this.openAudio.muted = false; } catch {}
+      try { this.backgroundAudio.muted = false; } catch {}
+      try { this.closeAudio.muted = false; } catch {}
+    }, 50);
+    this._checkAllStopped();
+  }
+
+  /** audio-flow: called by the agent at the top of placeCall() so a
+   *  previous hard-kill doesn't bar the new call's audio. */
+  armForNextCall() {
+    this._hardKilled = false;
+    this._bgRestartAttempts = 0;
   }
 
   _playOneShot(el, label, maxMs) {
@@ -195,15 +298,30 @@ class CallAudioController {
         done = true;
         try { el.removeEventListener('ended', onEnded); } catch {}
         try { el.removeEventListener('error', onError); } catch {}
+        try { el.removeEventListener('pause', onPause); } catch {}
         clearTimeout(t);
         resolve({ ok: why === 'ended', reason: why });
       };
       const onEnded = () => finish('ended');
       const onError = () => finish('error');
+      // audio-flow: if the element is paused mid-play (e.g. from
+      // stopAllCallAudio during End Call), resolve the shot immediately
+      // so the _openPlaying / _closePlaying flag flips and
+      // `call-audio-all-stopped` can eventually fire. Without this, a
+      // mid-chime kill would leave the flag set until the 20s safety
+      // timeout, delaying the green-button reset (requirement 6).
+      const onPause = () => {
+        // Ignore the pause that naturally follows `ended` — some
+        // browsers fire pause right after ended; the `done` latch
+        // already covers that case but we bail here for clarity.
+        if (el.ended) return;
+        finish('paused');
+      };
       const t = setTimeout(() => finish('timeout'), maxMs);
       try {
         el.addEventListener('ended', onEnded, { once: true });
         el.addEventListener('error', onError, { once: true });
+        el.addEventListener('pause', onPause);
         try { el.currentTime = 0; } catch {}
         const p = el.play();
         if (p && typeof p.catch === 'function') {
@@ -224,31 +342,79 @@ class CallAudioController {
   /** audio-flow: start looping the background ambience. No-op if the
    *  toggle is off or background is already playing.
    *
-   *  bug-fix: `loop=true` is re-asserted here (in addition to
-   *  `_buildAudio`) because some browsers drop the property when the
-   *  element is pause-resumed after an unlock() gesture. Belt-and-
-   *  braces against the "background never loops" regression. */
+   *  HARDENED FIX for "background sound not playing":
+   *   1. `loop=true` re-asserted (some browsers drop it after pause/resume
+   *      or unlock's muted-play cycle).
+   *   2. `muted=false` re-asserted — `stopAllCallAudio()` can leave the
+   *      element muted for a brief window; asserting here is safe.
+   *   3. `volume` re-set — defends against a rogue caller zeroing it.
+   *   4. `preload='auto'` re-asserted so the file is eager-decoded.
+   *   5. `src` re-assigned if empty (destroy() clears it) — the element
+   *      survives the AudioPipeline lifetime so we must be defensive.
+   *   6. `play()` rejection triggers an immediate retry on the next
+   *      macrotask. A second rejection logs at ERROR severity so the
+   *      failure is LOUD in DevTools rather than silent.
+   *   7. If the user toggled Background off mid-play, we respect it and
+   *      no-op. */
   startBackground() {
-    if (!this._backgroundEnabled) return;
+    if (!this._backgroundEnabled) {
+      // eslint-disable-next-line no-console
+      console.warn('[audio-flow] startBackground skipped — toggle off');
+      return;
+    }
+    if (this._hardKilled) {
+      // eslint-disable-next-line no-console
+      console.warn('[audio-flow] startBackground skipped — hard-killed (pending next call)');
+      return;
+    }
     if (this._backgroundPlaying) return;
+
     this._backgroundPlaying = true;
-    try {
-      this.backgroundAudio.loop = true;
-      this.backgroundAudio.volume = BACKGROUND_VOLUME;
-      try { this.backgroundAudio.currentTime = 0; } catch {}
-      const p = this.backgroundAudio.play();
+    this._bgRestartAttempts = 0;
+
+    // 1–5: re-assert element state.
+    try { this.backgroundAudio.loop = true; } catch {}
+    try { this.backgroundAudio.volume = BACKGROUND_VOLUME; } catch {}
+    try { this.backgroundAudio.muted = false; } catch {}
+    try { this.backgroundAudio.preload = 'auto'; } catch {}
+    if (!this.backgroundAudio.src || this.backgroundAudio.src === 'about:blank') {
+      const src = pickCallAudioSrc('background');
+      if (src) {
+        try { this.backgroundAudio.src = src; } catch {}
+        try { this.backgroundAudio.load(); } catch {}
+      }
+    }
+    try { this.backgroundAudio.currentTime = 0; } catch {}
+
+    const doPlay = (attempt) => {
+      let p;
+      try {
+        p = this.backgroundAudio.play();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[audio-flow] background play threw (attempt ' + attempt + ')', err && err.message);
+        if (attempt < 2) return setTimeout(() => doPlay(attempt + 1), 120);
+        this._backgroundPlaying = false;
+        this._onStateChange({ backgroundPlaying: false, reason: 'play_threw' });
+        this._checkAllStopped();
+        return;
+      }
       if (p && typeof p.catch === 'function') {
         p.catch((err) => {
           // eslint-disable-next-line no-console
-          console.warn('[audio-flow] background play rejected', err && err.message);
+          console.warn('[audio-flow] background play rejected (attempt ' + attempt + ')', err && err.message);
+          if (attempt < 2) return setTimeout(() => doPlay(attempt + 1), 120);
+          // Loud, persistent: surface the failure mode rather than stay silent.
+          // eslint-disable-next-line no-console
+          console.error('[audio-flow] background play REJECTED after retries — ambience will be silent for this call', err && err.message);
           this._backgroundPlaying = false;
+          this._onStateChange({ backgroundPlaying: false, reason: 'play_rejected' });
+          this._checkAllStopped();
         });
       }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('[audio-flow] background play threw', err && err.message);
-      this._backgroundPlaying = false;
-    }
+    };
+    doPlay(1);
+
     this._onStateChange({ backgroundPlaying: true });
   }
 
@@ -259,6 +425,7 @@ class CallAudioController {
     try { this.backgroundAudio.pause(); } catch {}
     try { this.backgroundAudio.currentTime = 0; } catch {}
     if (wasPlaying) this._onStateChange({ backgroundPlaying: false });
+    this._checkAllStopped();
   }
 
   /** audio-flow: toggle the user's background preference. When called
@@ -328,7 +495,8 @@ export class AudioPipeline extends EventTarget {
     // It's independent from the Web Audio graph so it keeps working even
     // if the ctx is suspended — the browser drives <audio> scheduling.
     this.callAudio = new CallAudioController({
-      onStateChange: (ev) => this.dispatchEvent(new CustomEvent('call-audio-changed', { detail: ev }))
+      onStateChange: (ev) => this.dispatchEvent(new CustomEvent('call-audio-changed', { detail: ev })),
+      onAllStopped: () => this.dispatchEvent(new CustomEvent('call-audio-all-stopped'))
     });
 
     this._analyser = null;
@@ -556,6 +724,26 @@ export class AudioPipeline extends EventTarget {
     }
     this.activePlaybackSources.clear();
     this.nextStartTime = this.ctx ? this.ctx.currentTime : 0;
+  }
+
+  /** audio-flow: Total-audio kill-switch. Synchronously stops every
+   *  Gemini playback source AND every HTMLAudioElement so no further
+   *  sound can reach the speakers. Used when the user clicks End Call
+   *  and we need "THEN AND THERE" silence (requirement 7).
+   *
+   *  Emits the `call-audio-all-stopped` event so the UI flips the End
+   *  Call button back to green (requirement 6). */
+  stopAllAudio() {
+    // 1. Kill scheduled PCM sources (Gemini voice).
+    this.flushPlayback();
+    // 2. HARD-kill every lifecycle <audio> element (callOpen, background,
+    //    callClose). Also latches the controller so a late-arriving
+    //    `startBackground()` or `playCallClose()` can't resurrect audio.
+    try { this.callAudio.stopAllCallAudio(); } catch {}
+    // 3. Make sure the "all stopped" event fires even if the controller
+    //    already flipped its internal flags. Idempotent consumers are
+    //    expected.
+    try { this.dispatchEvent(new CustomEvent('call-audio-all-stopped')); } catch {}
   }
 
   setOutputVolume(v) {
