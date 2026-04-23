@@ -1,12 +1,24 @@
-/* Map page styles — Leaflet wrapper + filter rail + detail panel.
- * Loaded once at /map.html; Leaflet's own CSS is injected from
- * js/map-widget.js at first mount so the home page never pays the cost. */
+/* map.css — Harbor Bridge map page
+ * ------------------------------------------------------------
+ * Full-bleed layout, filter rail, detail drawer, pin styles, controls.
+ * Every JS-queried id (#map-canvas, #map-detail, #map-attribution,
+ * #map-filter-rail, #map-filter-list, #map-list-view, #map-list-items,
+ * #map-list-toggle, #map-search, #map-zoom-in, #map-zoom-out,
+ * #map-reset, #map-tile-error, #map-tile-retry) and every class
+ * (.chip-btn[data-layer], .map-pin, .is-agent-highlighted) must
+ * stay resolvable.
+ */
+
+/* ============================================================
+ * 1. Full-bleed container (page-map.js toggles this on <main>)
+ * ============================================================ */
 
 .app-main--map {
   max-width: none;
   padding: 0;
-  min-height: calc(100vh - 48px);
-  min-height: calc(100dvh - 48px);
+  margin: 0;
+  min-height: calc(100vh - 56px);
+  min-height: calc(100dvh - 56px);
   display: flex;
 }
 
@@ -14,10 +26,150 @@
   position: relative;
   flex: 1;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 320px 1fr;
   grid-template-rows: 1fr;
   min-height: 0;
+  background: var(--color-map-bg);
 }
+
+/* ============================================================
+ * 2. Filter rail (desktop: 320px; tablet: collapsed 56px icon rail;
+ *    mobile: bottom-sheet chip bar at top)
+ * ============================================================ */
+
+.map-filter-rail {
+  grid-column: 1;
+  grid-row: 1;
+  background: var(--color-bg-elev-1);
+  border-right: 1px solid var(--color-border);
+  box-shadow: inset -1px 0 0 rgba(247, 179, 43, 0.10);
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.map-filter-rail-title {
+  font-family: var(--font-sans);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin: 0;
+  padding-bottom: var(--sp-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.map-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* chip-btn[aria-pressed="true"] — active filter state */
+.map-filter-rail .chip-btn[aria-pressed="true"] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-color: var(--color-accent-outline);
+}
+
+/* cyan state dot for delayed (danger-hue) when active */
+.map-filter-rail .chip-btn[data-layer="delayed"][aria-pressed="true"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: rgba(225, 90, 76, 0.40);
+}
+
+.map-filter-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.map-filter-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elev-2);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  color: var(--color-text);
+  text-align: left;
+  width: 100%;
+  transition:
+    border-color var(--dur-fast) var(--ease-snap),
+    background var(--dur-fast) var(--ease-snap);
+}
+.map-filter-list-item:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elev-3);
+}
+.map-filter-list-item:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring-accent);
+}
+
+.map-filter-list-item .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.map-filter-list-item .meta {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  letter-spacing: 0.02em;
+}
+
+.map-list-toggle-wrap {
+  margin-top: auto;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--color-border);
+}
+.map-list-toggle-wrap .btn { width: 100%; }
+
+/* Metric strip (top of rail) — optional */
+.map-metric-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--color-bg-elev-2);
+  border: 1px solid var(--color-border-accent);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+.map-metric-strip strong {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--color-accent);
+  margin-left: 4px;
+}
+
+/* ============================================================
+ * 3. Canvas — Leaflet mounts here
+ * ============================================================ */
 
 .map-canvas {
   grid-column: 2;
@@ -28,73 +180,22 @@
   transition: opacity var(--dur-base) var(--ease-out-expo);
 }
 
-.map-filter-rail {
-  grid-column: 1;
-  grid-row: 1;
-  background: var(--color-bg-elev-1);
-  border-right: 1px solid var(--color-border);
-  padding: var(--sp-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  overflow-y: auto;
+/* Warm-filter on the Leaflet raster tiles — keeps tiles legible but
+ * tints them to match the Harbor Bridge palette. Never use invert(). */
+.map-canvas .leaflet-tile {
+  filter: saturate(0.82) brightness(0.92) contrast(1.05);
 }
 
-.map-filter-rail-title {
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  margin: 0;
+.map-canvas[aria-hidden="true"] {
+  opacity: 0;
+  visibility: visible;
+  pointer-events: none;
 }
 
-.map-filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-1);
-}
+/* ============================================================
+ * 4. Loading skeleton (compass-rose pulse)
+ * ============================================================ */
 
-.map-filter-rail .chip-btn[aria-pressed="true"] {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-  border-color: var(--color-accent-outline);
-}
-
-.map-filter-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-
-.map-filter-list-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-elev-2);
-  border: 1px solid var(--color-border);
-  cursor: pointer;
-  font-size: var(--fs-xs);
-  color: var(--color-text);
-  text-align: left;
-  width: 100%;
-  transition: border-color var(--dur-fast) var(--ease-out-expo);
-}
-.map-filter-list-item:hover { border-color: var(--color-border-strong); }
-.map-filter-list-item:focus-visible { outline: none; box-shadow: var(--shadow-focus-ring-accent); }
-
-.map-filter-list-item .dot {
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-/* ---- Loading skeleton ---- */
 .map-skeleton {
   position: absolute;
   inset: 0;
@@ -102,7 +203,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
   background: var(--color-map-bg);
   z-index: calc(var(--z-map-ui) - 1);
   opacity: 1;
@@ -118,29 +219,33 @@
   border-radius: 50%;
   background: radial-gradient(
     circle at center,
-    var(--color-bg-elev-2) 0%,
-    var(--color-bg-elev-1) 45%,
+    rgba(247, 179, 43, 0.12) 0%,
+    rgba(247, 179, 43, 0.04) 45%,
     transparent 70%
   );
   animation: map-skeleton-breath 2000ms ease-in-out infinite;
-  filter: blur(8px);
+  filter: blur(6px);
   opacity: 0.7;
 }
 
 .map-skeleton-label {
-  font-size: var(--fs-sm);
-  color: var(--color-text-muted);
   font-family: var(--font-mono);
-  letter-spacing: var(--tracking-wide);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-accent);
   margin: 0;
 }
 
 @keyframes map-skeleton-breath {
-  0%, 100% { transform: scale(1);   opacity: 0.55; }
-  50%      { transform: scale(1.1); opacity: 0.85; }
+  0%, 100% { transform: scale(1);    opacity: 0.55; }
+  50%      { transform: scale(1.12); opacity: 0.90; }
 }
 
-/* ---- Layer pane visibility (chip toggle fade) ---- */
+/* ============================================================
+ * 5. Layer pane visibility (chip fade)
+ * ============================================================ */
+
 .leaflet-pane {
   transition: opacity var(--dur-base) var(--ease-out-expo);
 }
@@ -149,7 +254,10 @@
   pointer-events: none;
 }
 
-/* ---- Pins ---- */
+/* ============================================================
+ * 6. Pins — circle loads, square carriers, breathing delayed
+ * ============================================================ */
+
 .map-pin {
   width: 16px;
   height: 16px;
@@ -158,33 +266,42 @@
   border: 2px solid var(--color-map-pin-ring);
   box-shadow: var(--shadow-pin);
   cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease-out-expo);
+  transition: transform var(--dur-fast) var(--ease-snap);
 }
 .map-pin:hover {
-  transform: scale(1.15);
+  transform: scale(1.18);
   outline: none;
 }
 .map-pin:focus-visible {
-  transform: scale(1.25);
+  transform: scale(1.28);
   outline: none;
   box-shadow:
     0 0 0 2px var(--color-map-pin-ring),
-    0 0 0 5px rgba(110, 231, 183, 0.7),
+    0 0 0 5px rgba(247, 179, 43, 0.65),
     var(--shadow-pin);
 }
 
-.map-pin--booked      { background: var(--color-accent); }
-.map-pin--pending     { background: var(--color-warn); }
-.map-pin--delayed     { background: var(--color-danger); }
-.map-pin--delivered   { background: var(--color-text-dim); }
-.map-pin--in_transit  { background: var(--color-info); }
+.map-pin--booked     { background: var(--color-accent); }
+.map-pin--pending    { background: var(--color-warn); }
+.map-pin--delayed    {
+  background: var(--color-danger);
+  animation: map-pin-breath 2000ms ease-in-out infinite;
+}
+.map-pin--delivered  { background: var(--color-text-dim); }
+.map-pin--in_transit { background: var(--color-cyan); }
 
+/* Carrier pins use a rounded square — distinct silhouette */
 .map-pin--carrier {
-  background: var(--color-info);
+  background: var(--color-cyan);
   border-radius: var(--radius-xs);
 }
 
-/* ---- Agent-highlighted pin: triple-ring pulse ---- */
+@keyframes map-pin-breath {
+  0%, 100% { box-shadow: var(--shadow-pin), 0 0 0 0 rgba(225, 90, 76, 0.0); }
+  50%      { box-shadow: var(--shadow-pin), 0 0 0 6px rgba(225, 90, 76, 0.22); }
+}
+
+/* Agent-highlighted pin — outer amber glow + triple-ring pulse */
 .map-pin.is-agent-highlighted {
   outline: 2px solid var(--color-accent);
   outline-offset: 3px;
@@ -218,25 +335,33 @@
 }
 
 @keyframes map-pin-pulse-shadow {
-  0%   { box-shadow: 0 0 0 0 var(--color-map-highlight-ring), var(--shadow-pin); }
+  0%   { box-shadow: 0 0 0 4px var(--color-map-highlight-ring), var(--shadow-pin); }
   60%  { box-shadow: 0 0 0 14px transparent, var(--shadow-pin); }
   100% { box-shadow: 0 0 0 0 transparent, var(--shadow-pin); }
 }
 
-/* ---- Lane polylines ---- */
+/* ============================================================
+ * 7. Lane polylines — amber solid, warn dashed, cyan marching
+ * ============================================================ */
+
 .leaflet-interactive.map-lane {
   stroke: var(--color-map-polyline);
-  stroke-width: 2px;
+  stroke-width: 2.5px;
   stroke-dasharray: none;
+  filter: drop-shadow(0 0 2px rgba(247, 179, 43, 0.35));
 }
 .leaflet-interactive.map-lane--pending {
   stroke: var(--color-map-polyline-pending);
   stroke-width: 2px;
   stroke-dasharray: 6 4;
+  filter: none;
 }
 .leaflet-interactive.map-lane:hover { stroke-width: 3px; }
 
-/* ---- Popups ---- */
+/* ============================================================
+ * 8. Popups — dark-bridge style
+ * ============================================================ */
+
 .leaflet-popup-content-wrapper {
   background: var(--color-bg-elev-3);
   color: var(--color-text);
@@ -247,6 +372,7 @@
 }
 .leaflet-popup-content {
   margin: var(--sp-2) var(--sp-3);
+  font-family: var(--font-sans);
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
 }
@@ -254,15 +380,14 @@
   background: var(--color-bg-elev-3);
   border: 1px solid var(--color-border);
 }
-/* Leaflet stamps inline `color` on the close button — one targeted
- * !important override is justified. See specs/upgrade-v2-design.md §2.6. */
 .leaflet-popup-close-button { color: var(--color-text-muted) !important; }
 
 .map-popup-title {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-wide);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-accent);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -270,27 +395,32 @@
   margin-bottom: var(--sp-1);
 }
 .map-popup-sub {
+  font-family: var(--font-sans);
   font-size: var(--fs-sm);
   color: var(--color-text-muted);
 }
 
-/* ---- Detail panel ---- */
+/* ============================================================
+ * 9. Detail drawer (right on desktop, bottom on mobile)
+ * ============================================================ */
+
 .map-detail {
   position: absolute;
   top: 0;
   right: 0;
   height: 100%;
-  width: min(380px, 100%);
+  width: min(400px, 100%);
   background: var(--color-bg-elev-1);
+  background-image: linear-gradient(180deg, rgba(255, 248, 220, 0.012) 0%, transparent 40%);
   border-left: 1px solid var(--color-border);
   box-shadow: var(--shadow-overlay);
   transform: translateX(100%);
   transition:
-    transform  var(--dur-base) var(--ease-out-expo),
+    transform  var(--dur-base) var(--ease-spring),
     box-shadow var(--dur-slow) var(--ease-out-expo);
   z-index: var(--z-map-ui);
   overflow-y: auto;
-  padding: var(--sp-4);
+  padding: var(--sp-5);
 }
 .map-detail[hidden] { display: none; }
 .map-detail.is-open {
@@ -298,18 +428,18 @@
   box-shadow: var(--shadow-overlay-strong);
 }
 
-/* Children stagger in just behind the panel slide. */
+/* Stagger children in after slide */
 .map-detail.is-open > * {
   opacity: 0;
   animation: map-detail-stagger var(--dur-base) var(--ease-out-expo) forwards;
 }
-.map-detail.is-open > *:nth-child(1) { animation-delay: 60ms; }
-.map-detail.is-open > *:nth-child(2) { animation-delay: 120ms; }
-.map-detail.is-open > *:nth-child(3) { animation-delay: 180ms; }
-.map-detail.is-open > *:nth-child(n+4) { animation-delay: 240ms; }
+.map-detail.is-open > *:nth-child(1) { animation-delay: 80ms; }
+.map-detail.is-open > *:nth-child(2) { animation-delay: 140ms; }
+.map-detail.is-open > *:nth-child(3) { animation-delay: 200ms; }
+.map-detail.is-open > *:nth-child(n+4) { animation-delay: 260ms; }
 
 @keyframes map-detail-stagger {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0);   }
 }
 
@@ -318,71 +448,139 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  margin-bottom: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
 }
 .map-detail-header h2 {
-  font-size: var(--fs-md);
-  line-height: var(--lh-md);
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 400;
+  line-height: var(--lh-xl);
+  letter-spacing: var(--tracking-tight);
+  font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 1;
+  color: var(--color-text);
+  margin: 0;
 }
 
-/* ---- Map controls ---- */
+/* Ledger-style detail rows inside the drawer */
+.map-detail .detail-kv {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: var(--sp-2) var(--sp-3);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+}
+.map-detail .detail-kv dt {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
+  line-height: 24px;
+  margin: 0;
+}
+.map-detail .detail-kv dd {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 24px;
+}
+.map-detail .detail-kv dd.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-accent);
+  letter-spacing: 0.02em;
+}
+
+/* ============================================================
+ * 10. Map controls — bottom-right cluster
+ * ============================================================ */
+
 .map-controls {
   position: absolute;
-  right: var(--sp-3);
-  bottom: var(--sp-3);
+  right: var(--sp-4);
+  bottom: var(--sp-4);
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
   z-index: var(--z-map-ui);
-}
-.map-controls .icon-btn {
   background: var(--color-bg-elev-1);
   border: 1px solid var(--color-border);
-  color: var(--color-text);
-  width: 32px;
-  height: 32px;
-  font-size: var(--fs-md);
-  font-weight: var(--fw-medium);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  box-shadow: var(--shadow-overlay);
 }
-.map-controls .icon-btn:hover { background: var(--color-bg-elev-2); }
+.map-controls .icon-btn {
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  border-radius: var(--radius-xs);
+  transition:
+    background var(--dur-fast) var(--ease-snap),
+    color var(--dur-fast) var(--ease-snap);
+  cursor: pointer;
+}
+.map-controls .icon-btn:hover {
+  background: var(--color-accent-wash);
+  color: var(--color-accent);
+}
+.map-controls .icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring-accent);
+}
 
-/* ---- Attribution ---- */
+/* ============================================================
+ * 11. Attribution — copper-outlined pill (§8.8)
+ * ============================================================ */
+
 .map-attribution {
   position: absolute;
-  left: var(--sp-2);
-  bottom: var(--sp-2);
-  font-size: 10px;
-  color: var(--color-text-dim);
+  left: var(--sp-3);
+  bottom: var(--sp-3);
+  padding: 3px 8px;
+  border: 1px solid var(--color-border-accent);
+  border-radius: var(--radius-pill);
   background: var(--color-overlay-bg);
-  padding: 2px var(--sp-1);
-  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
   z-index: var(--z-map-ui);
   pointer-events: auto;
 }
 .map-attribution a { color: var(--color-text-muted); }
+.map-attribution a:hover { color: var(--color-accent); }
 
-/* ---- Tile-error banner ---- */
+/* ============================================================
+ * 12. Tile-error toast — amber warn, top-center
+ * ============================================================ */
+
 .map-tile-error {
   position: absolute;
-  top: var(--sp-3);
+  top: var(--sp-4);
   left: 50%;
   transform: translateX(-50%) translateY(-8px);
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--color-danger-soft);
-  border: 1px solid var(--color-danger);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--color-warn-soft);
+  border: 1px solid var(--color-warn);
   border-radius: var(--radius-md);
-  color: var(--color-danger);
+  color: var(--color-warn);
+  font-family: var(--font-sans);
   font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
+  font-weight: 500;
   z-index: var(--z-map-ui);
   opacity: 0;
   box-shadow: var(--shadow-overlay);
   transition:
     opacity   var(--dur-base) var(--ease-out-expo),
-    transform var(--dur-base) var(--ease-out-expo);
+    transform var(--dur-base) var(--ease-spring);
   pointer-events: none;
 }
 .map-tile-error:not([hidden]) {
@@ -392,55 +590,71 @@
 }
 .map-tile-error[hidden] { display: flex; visibility: hidden; }
 
-/* ---- Empty state (all layers off) ---- */
+.map-tile-error-text {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+}
+
+/* ============================================================
+ * 13. Empty state (all layers off)
+ * ============================================================ */
+
 .map-empty-state {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  max-width: 280px;
-  padding: var(--sp-4);
+  max-width: 300px;
+  padding: var(--sp-5);
   background: var(--color-overlay-bg);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-accent);
   border-radius: var(--radius-md);
   text-align: center;
   color: var(--color-text-muted);
+  font-family: var(--font-sans);
   font-size: var(--fs-sm);
   z-index: var(--z-map-ui);
   pointer-events: auto;
+  box-shadow: var(--shadow-overlay);
 }
 .map-empty-state[hidden] { display: none; }
 .map-empty-state-title {
-  font-size: var(--fs-md);
-  font-weight: var(--fw-semibold);
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  font-variation-settings: "opsz" 72, "SOFT" 30, "WONK" 1;
   color: var(--color-text);
   margin: 0 0 var(--sp-2) 0;
 }
 .map-empty-state-body { margin: 0; }
 
-/* ---- Load-data error banner (page-map fallback) ---- */
+/* ============================================================
+ * 14. Load-data error banner (page-map fallback)
+ * ============================================================ */
+
 .map-load-error {
   padding: var(--sp-3) var(--sp-4);
   background: var(--color-danger-soft);
   border: 1px solid var(--color-danger);
   border-radius: var(--radius-md);
   color: var(--color-danger);
+  font-family: var(--font-sans);
   font-size: var(--fs-sm);
   margin: var(--sp-3);
 }
 
-/* ---- List-view fallback (accessibility + cross-fade) ---- */
-.map-list-toggle-wrap {
-  margin-top: auto;
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--color-border);
-}
+/* ============================================================
+ * 15. List view — ledger table when toggled
+ * ============================================================ */
 
 .map-list-view {
   position: absolute;
   inset: 0;
   background: var(--color-bg);
-  padding: var(--sp-4);
+  background-image:
+    radial-gradient(1000px 500px at 10% -10%, rgba(247, 179, 43, 0.04), transparent 55%),
+    var(--color-bg);
+  padding: var(--sp-5);
   overflow-y: auto;
   z-index: calc(var(--z-map-ui) + 1);
   opacity: 0;
@@ -457,34 +671,74 @@
   pointer-events: none;
 }
 .map-list-view h2 {
-  font-size: var(--fs-md);
-  margin-bottom: var(--sp-3);
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 400;
+  letter-spacing: var(--tracking-tight);
+  font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 1;
+  margin: 0 0 var(--sp-4) 0;
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
+  position: relative;
 }
+.map-list-view h2::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 64px;
+  height: 2px;
+  background: var(--color-accent);
+}
+
 .map-list-view ul {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: 0;
+  /* ledger rules */
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0 43px,
+    var(--color-border) 43px 44px
+  );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-elev-1);
+  overflow: hidden;
 }
 .map-list-view li {
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-elev-1);
+  padding: 0 var(--sp-4);
+  height: 44px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--sp-3);
+  font-family: var(--font-sans);
   font-size: var(--fs-sm);
+  border-bottom: 1px solid transparent;
+  color: var(--color-text);
 }
-.map-list-view .meta { color: var(--color-text-muted); font-size: var(--fs-xs); }
-
-.map-canvas[aria-hidden="true"] {
-  opacity: 0;
-  visibility: visible;
-  pointer-events: none;
+.map-list-view li:last-child { border-bottom: none; }
+.map-list-view .meta {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
 }
 
-/* ---- Responsive ---- */
+/* ============================================================
+ * 16. Responsive — tablet & mobile
+ * ============================================================ */
+
+/* Tablet: rail collapses to horizontal chip bar at top */
 @media (max-width: 900px) {
+  .app-main--map {
+    min-height: calc(100vh - 48px);
+    min-height: calc(100dvh - 48px);
+  }
   .map-page {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
@@ -494,40 +748,88 @@
     grid-row: 1;
     border-right: 0;
     border-bottom: 1px solid var(--color-border);
+    box-shadow: inset 0 -1px 0 rgba(247, 179, 43, 0.10);
     flex-direction: row;
-    padding: var(--sp-2) var(--sp-3);
+    padding: var(--sp-3) var(--sp-3);
     overflow-x: auto;
     overflow-y: visible;
     scrollbar-width: none;
     align-items: center;
+    gap: var(--sp-2);
   }
   .map-filter-rail::-webkit-scrollbar { display: none; }
   .map-filter-list,
   .map-filter-list-item,
-  .map-filter-rail-title { display: none; }
+  .map-filter-rail-title,
+  .map-metric-strip { display: none; }
   .map-filter-chips { flex-wrap: nowrap; }
+  .map-filter-rail .input {
+    flex: 0 1 240px;
+    min-width: 160px;
+  }
+  .map-list-toggle-wrap {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    flex: 0 0 auto;
+  }
+  .map-list-toggle-wrap .btn { width: auto; }
   .map-canvas { grid-column: 1; grid-row: 2; }
 }
 
+/* Mobile: detail panel = bottom sheet */
 @media (max-width: 640px) {
+  .map-filter-rail {
+    padding: var(--sp-2) var(--sp-3);
+  }
   .map-detail {
     top: auto;
     right: 0;
     left: 0;
     bottom: 0;
     width: 100%;
-    height: min(60vh, 420px);
+    height: min(60vh, 460px);
     border-left: 0;
     border-top: 1px solid var(--color-border);
     border-top-left-radius: var(--radius-lg);
     border-top-right-radius: var(--radius-lg);
     transform: translateY(100%);
+    padding: var(--sp-4);
     padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
   }
   .map-detail.is-open { transform: translateY(0); }
+  .map-detail::before {
+    /* grab handle */
+    content: "";
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--color-border-strong);
+  }
+  .map-controls {
+    right: var(--sp-3);
+    bottom: var(--sp-3);
+  }
+  .map-controls .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .map-attribution {
+    left: var(--sp-2);
+    bottom: var(--sp-2);
+    font-size: 9px;
+    padding: 2px 6px;
+  }
 }
 
-/* ---- Reduced-motion matrix ---- */
+/* ============================================================
+ * 17. Reduced-motion matrix
+ * ============================================================ */
+
 @media (prefers-reduced-motion: reduce) {
   .map-skeleton-pulse { animation: none; opacity: 0.65; }
   .map-skeleton { transition: none; }
@@ -538,6 +840,7 @@
   .map-pin { transition: none; }
   .map-pin:hover,
   .map-pin:focus-visible { transform: none; }
+  .map-pin--delayed { animation: none; }
   .map-detail { transition: none; transform: none; }
   .map-detail.is-open { transform: none; }
   .map-detail.is-open > * { opacity: 1; animation: none; transform: none; }

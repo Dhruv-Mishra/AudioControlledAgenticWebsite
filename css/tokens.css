@@ -1,153 +1,332 @@
-/* Design tokens — single source of truth. Values documented in DESIGN.md. */
+/* Design tokens — single source of truth.
+ * "Harbor Bridge" palette: ink-dark indigo substrate, brass amber lamp,
+ * compass cyan, warm bone ink. Light theme is a paper-chart cream.
+ * All token names consumed by JS inline styles (map-widget, page-dispatch)
+ * and page/component CSS must continue to resolve from this file.
+ */
 
 :root {
-  /* Color — dark default */
-  --color-bg: #0B0D10;
-  --color-bg-elev-1: #11151A;
-  --color-bg-elev-2: #171C23;
-  --color-bg-elev-3: #1E2530;
-  --color-border: #232933;
-  --color-border-strong: #2E3542;
+  /* ============================================================
+   * 1. Color — Dark default ("Night Bridge")
+   * ============================================================ */
 
-  --color-text: #E7ECF3;
-  --color-text-muted: #9AA3B2;
-  --color-text-dim: #5D6573;
-  --color-text-inverse: #0B0D10;
+  /* Canvas — deep indigo-ink */
+  --color-bg:             #0A0F14;
+  --color-bg-grain:       #0C1219;
+  --color-bg-elev-1:      #10161D;
+  --color-bg-elev-2:      #151C26;
+  --color-bg-elev-3:      #1B2430;
+  --color-bg-elev-4:      #222D3B;
 
-  --color-accent: #6EE7B7;
-  --color-accent-strong: #34D399;
-  --color-accent-soft: #064E3B;
+  /* Hairlines */
+  --color-border:          #1F2935;
+  --color-border-strong:   #2C3849;
+  --color-border-accent:   rgba(247, 179, 43, 0.32);
 
-  --color-warn: #FBBF24;
-  --color-warn-soft: #3B2F0E;
-  --color-danger: #F87171;
-  --color-danger-soft: #3A1E1E;
-  --color-info: #60A5FA;
-  --color-info-soft: #0F2A4A;
+  /* Ink */
+  --color-text:            #ECE6D6;
+  --color-text-muted:      #9CA7B6;
+  --color-text-dim:        #5B6675;
+  --color-text-inverse:    #0A0F14;
 
-  --color-state-idle: #5D6573;
-  --color-state-listening: #6EE7B7;
-  --color-state-thinking: #C084FC;
-  --color-state-speaking: #60A5FA;
-  --color-state-tool: #FBBF24;
-  --color-state-error: #F87171;
+  /* Amber (transmit) + cyan (receive) accent system */
+  --color-accent:          #F7B32B;
+  --color-accent-strong:   #E39A0C;
+  --color-accent-soft:     #2A1E06;
+  --color-accent-wash:     rgba(247, 179, 43, 0.08);
+  --color-accent-outline:  rgba(247, 179, 43, 0.38);
 
-  /* Type */
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --color-cyan:            #4FD1C5;
+  --color-cyan-strong:     #2BB3A6;
+  --color-cyan-soft:       #0A2A2A;
 
-  --fs-xs: 11px;
-  --lh-xs: 16px;
-  --fs-sm: 13px;
-  --lh-sm: 20px;
-  --fs-base: 14px;
-  --lh-base: 22px;
-  --fs-md: 16px;
-  --lh-md: 24px;
-  --fs-lg: 18px;
-  --lh-lg: 26px;
-  --fs-xl: 22px;
-  --lh-xl: 30px;
-  --fs-2xl: 28px;
-  --lh-2xl: 36px;
+  /* State semantics */
+  --color-warn:            #F59E3C;
+  --color-warn-soft:       #2C1E0B;
+  --color-danger:          #E15A4C;
+  --color-danger-soft:     #2D0F0E;
+  --color-info:            #4FD1C5;
+  --color-info-soft:       #0A2A2A;
+  --color-success:         #6BBF7B;
+  --color-success-soft:    #0E1F14;
 
-  --fw-regular: 400;
-  --fw-medium: 500;
+  /* Voice agent state colors — each state owns a hue */
+  --color-state-idle:       #5B6675;
+  --color-state-listening:  #4FD1C5;
+  --color-state-thinking:   #C39BE8;
+  --color-state-speaking:   #F7B32B;
+  --color-state-tool:       #F59E3C;
+  --color-state-error:      #E15A4C;
+
+  /* Atmosphere */
+  --color-grain-overlay:    rgba(255, 248, 220, 0.015);
+  --color-scanline:         rgba(255, 248, 220, 0.018);
+  --color-vignette:         rgba(0, 0, 0, 0.38);
+
+  /* Overlay / scrim surfaces */
+  --color-overlay-bg:       rgba(16, 22, 29, 0.92);
+  --color-overlay-scrim:    rgba(0, 0, 0, 0.55);
+  --color-spotlight-mask:   rgba(0, 0, 0, 0.70);
+
+  /* Map surfaces (consumed inline by map-widget.js) */
+  --color-map-bg:                 #0B1118;
+  --color-map-polyline:           rgba(247, 179, 43, 0.70);
+  --color-map-polyline-pending:   rgba(245, 158, 60, 0.55);
+  --color-map-pin-ring:           rgba(10, 15, 20, 0.85);
+  --color-map-highlight-ring:     rgba(247, 179, 43, 0.78);
+
+  /* ============================================================
+   * 2. Typography
+   * ============================================================ */
+
+  /* IBM Plex Mono stands in for Commit Mono / Berkeley Mono —
+   * same tabular, wide-aperture instrument feel, free via Google Fonts,
+   * distinctive (NOT JetBrains Mono). Self-hosted Commit Mono can be
+   * layered in as a drop-in replacement via @font-face. */
+  --font-display: "Fraunces", "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
+  --font-sans:    "Schibsted Grotesk", "Neue Haas Grotesk Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono:    "IBM Plex Mono", "Commit Mono", "Berkeley Mono", "Iosevka", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Fluid type scale (mobile-first) */
+  --fs-2xs:    clamp(10px, 0.68rem + 0.05vw, 11px);
+  --fs-xs:     clamp(11px, 0.72rem + 0.10vw, 12px);
+  --fs-sm:     clamp(13px, 0.82rem + 0.10vw, 14px);
+  --fs-base:   clamp(14px, 0.90rem + 0.15vw, 15px);
+  --fs-md:     clamp(15px, 0.95rem + 0.25vw, 17px);
+  --fs-lg:     clamp(18px, 1.05rem + 0.45vw, 21px);
+  --fs-xl:     clamp(22px, 1.20rem + 0.85vw, 28px);
+  --fs-2xl:    clamp(28px, 1.40rem + 1.60vw, 40px);
+  --fs-display:clamp(36px, 1.70rem + 3.40vw, 64px);
+
+  /* Line heights */
+  --lh-xs:      1.45;
+  --lh-sm:      1.50;
+  --lh-base:    1.55;
+  --lh-md:      1.45;
+  --lh-lg:      1.30;
+  --lh-xl:      1.15;
+  --lh-2xl:     1.05;
+  --lh-display: 0.98;
+
+  /* Weights */
+  --fw-regular:  400;
+  --fw-medium:   500;
   --fw-semibold: 600;
+  --fw-bold:     700;
 
-  --tracking-tight: -0.01em;
+  /* Tracking */
+  --tracking-tight:  -0.015em;
   --tracking-normal: 0;
-  --tracking-wide: 0.04em;
+  --tracking-open:   0.02em;
+  --tracking-wide:   0.08em;
+  --tracking-caps:   0.14em;
 
-  /* Spacing 4px base */
-  --sp-0: 0;
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 24px;
-  --sp-6: 32px;
-  --sp-7: 48px;
-  --sp-8: 64px;
-  --sp-9: 96px;
+  /* ============================================================
+   * 3. Spacing — 4px base, extended scale
+   * ============================================================ */
+  --sp-0:  0;
+  --sp-px: 1px;
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-7:  32px;
+  --sp-8:  40px;
+  --sp-9:  56px;
+  --sp-10: 72px;
+  --sp-11: 96px;
+  --sp-12: 128px;
 
-  /* Radius */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* ============================================================
+   * 4. Radius
+   * ============================================================ */
+  --radius-xs:   4px;
+  --radius-sm:   8px;
+  --radius-md:   14px;
+  --radius-lg:   20px;
+  --radius-xl:   28px;
   --radius-pill: 9999px;
+  --radius-dock: 28px 28px 14px 14px;
 
-  /* Shadow */
-  --shadow-overlay: 0 12px 32px -8px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
-  --shadow-overlay-strong: 0 20px 56px -12px rgba(0, 0, 0, 0.60), 0 4px 10px rgba(0, 0, 0, 0.35);
-  --shadow-focus-ring-accent: 0 0 0 2px rgba(110, 231, 183, 0.35);
-  --shadow-focus-ring-danger: 0 0 0 2px rgba(248, 113, 113, 0.35);
-  --shadow-pin: 0 1px 2px rgba(0, 0, 0, 0.45);
-  --color-accent-outline: rgba(110, 231, 183, 0.35);
+  /* ============================================================
+   * 5. Elevation / Shadow
+   * ============================================================ */
+  --shadow-hairline:   inset 0 0 0 1px var(--color-border);
+  --shadow-inset-lift: inset 0 1px 0 rgba(255, 248, 220, 0.03);
 
-  /* Overlay surfaces (added 2026-04-22 for upgrade) */
-  --color-overlay-bg: rgba(17, 21, 26, 0.92);
-  --color-overlay-scrim: rgba(0, 0, 0, 0.55);
-  --color-spotlight-mask: rgba(0, 0, 0, 0.70);
+  --shadow-overlay:
+    0 1px 0 rgba(255, 248, 220, 0.03) inset,
+    0 2px 8px rgba(0, 0, 0, 0.35),
+    0 18px 40px -12px rgba(0, 0, 0, 0.55);
 
-  /* Map surfaces (v2 upgrade — Leaflet page) */
-  --color-map-bg: #0E1217;
-  --color-map-polyline: rgba(110, 231, 183, 0.65);
-  --color-map-polyline-pending: rgba(251, 191, 36, 0.55);
-  --color-map-pin-ring: rgba(11, 13, 16, 0.85);
-  --color-map-highlight-ring: rgba(110, 231, 183, 0.75);
+  --shadow-overlay-strong:
+    0 1px 0 rgba(255, 248, 220, 0.04) inset,
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    0 28px 56px -12px rgba(0, 0, 0, 0.65);
+
+  --shadow-dock:
+    0 1px 0 rgba(255, 248, 220, 0.05) inset,
+    0 0 0 1px rgba(247, 179, 43, 0.08),
+    0 28px 60px -18px rgba(0, 0, 0, 0.70),
+    0 -10px 40px -8px rgba(247, 179, 43, 0.06);
+
+  --shadow-focus-ring-accent: 0 0 0 3px rgba(247, 179, 43, 0.38);
+  --shadow-focus-ring-cyan:   0 0 0 3px rgba(79, 209, 197, 0.38);
+  --shadow-focus-ring-danger: 0 0 0 3px rgba(225, 90, 76, 0.38);
+
+  --shadow-press-dark: inset 0 2px 3px rgba(0, 0, 0, 0.35);
+  --shadow-pin:        0 1px 2px rgba(0, 0, 0, 0.55);
+
+  /* ============================================================
+   * 6. Motion
+   * ============================================================ */
+  --dur-instant:  80ms;
+  --dur-fast:    140ms;
+  --dur-base:    220ms;
+  --dur-slow:    360ms;
+  --dur-stage:   560ms;
   --dur-map-fly: 900ms;
 
-  /* Z-index scale */
-  --z-header: 100;
-  --z-dock: 200;
-  --z-captions: 250;
-  --z-map-ui: 300;
-  --z-overlay: 500;
+  --ease-snap:     cubic-bezier(0.2, 0.9, 0.2, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-material: cubic-bezier(0.34, 1.2, 0.3, 1);
+  --ease-in-out:   cubic-bezier(0.85, 0, 0.15, 1);
+  --ease-spring:   linear(
+    0, 0.009, 0.035 2.1%, 0.141, 0.281 5.7%, 0.723 10.6%,
+    0.938 14.1%, 1.017, 1.077, 1.121, 1.149 21.3%, 1.159,
+    1.162, 1.156, 1.136 27.3%, 1.082 30.3%, 1.025, 0.974,
+    0.939 38.9%, 0.936, 0.942, 0.95 45%, 0.991 55.3%,
+    1.006 62.3%, 1.014 80.7%, 1.009 97.1%, 1
+  );
+
+  /* ============================================================
+   * 7. Z-index scale
+   * ============================================================ */
+  --z-header:    100;
+  --z-dock:      200;
+  --z-captions:  250;
+  --z-map-ui:    300;
+  --z-overlay:   500;
   --z-skip-link: 1000;
 
-  /* Motion */
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-  --dur-fast: 120ms;
-  --dur-base: 180ms;
-  --dur-slow: 280ms;
+  /* ============================================================
+   * 8. Page-entry stagger delays (consumed by pages.css)
+   * ============================================================ */
+  --stagger-delay-1: 40ms;
+  --stagger-delay-2: 140ms;
+  --stagger-delay-3: 240ms;
+  --stagger-delay-4: 320ms;
+  --stagger-delay-5: 440ms;
+  --stagger-delay-6: 560ms;
 }
 
-/* Optional light theme — not the default. */
+/* ============================================================
+ * Light theme ("Paper Chart") — warm cream, umber ink, teal
+ * ============================================================ */
 [data-theme="light"] {
-  --color-bg: #FAFBFC;
-  --color-bg-elev-1: #FFFFFF;
-  --color-bg-elev-2: #F4F6F8;
-  --color-bg-elev-3: #EDEFF2;
-  --color-border: #E3E6EA;
-  --color-border-strong: #C9CFD6;
-  --color-text: #0B0D10;
-  --color-text-muted: #4A5260;
-  --color-text-dim: #8A93A0;
-  --color-text-inverse: #FAFBFC;
-  --color-accent: #059669;
-  --color-accent-strong: #047857;
-  --color-accent-soft: #D1FAE5;
-  --color-warn: #B45309;
-  --color-warn-soft: #FDE68A;
-  --color-danger: #B91C1C;
-  --color-danger-soft: #FECACA;
-  --color-info: #1D4ED8;
-  --color-info-soft: #DBEAFE;
-  --color-overlay-bg: rgba(255, 255, 255, 0.94);
+  --color-bg:             #F4EFE3;
+  --color-bg-grain:       #F0EAD8;
+  --color-bg-elev-1:      #FBF7EC;
+  --color-bg-elev-2:      #EAE2CE;
+  --color-bg-elev-3:      #DDD2B9;
+  --color-bg-elev-4:      #C9BD9E;
+
+  --color-border:          #C8BCA0;
+  --color-border-strong:   #A39577;
+  --color-border-accent:   rgba(138, 76, 0, 0.32);
+
+  --color-text:            #1B150A;
+  --color-text-muted:      #57503F;
+  --color-text-dim:        #8A806C;
+  --color-text-inverse:    #FBF7EC;
+
+  --color-accent:          #8A4C00;
+  --color-accent-strong:   #5E3400;
+  --color-accent-soft:     #F0DFC2;
+  --color-accent-wash:     rgba(138, 76, 0, 0.06);
+  --color-accent-outline:  rgba(138, 76, 0, 0.38);
+
+  --color-cyan:            #1A6A63;
+  --color-cyan-strong:     #0E4944;
+  --color-cyan-soft:       #D2ECE8;
+
+  --color-warn:            #B45309;
+  --color-warn-soft:       #F5E3C7;
+  --color-danger:          #B4261D;
+  --color-danger-soft:     #F3D6D2;
+  --color-info:            #1A6A63;
+  --color-info-soft:       #D2ECE8;
+  --color-success:         #2F6B3B;
+  --color-success-soft:    #D8E8DA;
+
+  --color-state-idle:       #8A806C;
+  --color-state-listening:  #1A6A63;
+  --color-state-thinking:   #6B4EA0;
+  --color-state-speaking:   #8A4C00;
+  --color-state-tool:       #B45309;
+  --color-state-error:      #B4261D;
+
+  --color-grain-overlay:    rgba(27, 21, 10, 0.015);
+  --color-scanline:         rgba(27, 21, 10, 0.012);
+  --color-vignette:         rgba(27, 21, 10, 0.18);
+
+  --color-overlay-bg:       rgba(251, 247, 236, 0.94);
+  --color-overlay-scrim:    rgba(27, 21, 10, 0.35);
+  --color-spotlight-mask:   rgba(27, 21, 10, 0.50);
+
+  --color-map-bg:                 #F0EAD8;
+  --color-map-polyline:           rgba(138, 76, 0, 0.70);
+  --color-map-polyline-pending:   rgba(180, 83, 9, 0.55);
+  --color-map-pin-ring:           rgba(251, 247, 236, 0.90);
+  --color-map-highlight-ring:     rgba(138, 76, 0, 0.78);
+
+  --shadow-hairline:   inset 0 0 0 1px var(--color-border);
+  --shadow-inset-lift: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+
+  --shadow-overlay:
+    0 1px 0 rgba(255, 255, 255, 0.45) inset,
+    0 2px 8px rgba(27, 21, 10, 0.10),
+    0 18px 40px -12px rgba(27, 21, 10, 0.20);
+
+  --shadow-overlay-strong:
+    0 1px 0 rgba(255, 255, 255, 0.45) inset,
+    0 4px 14px rgba(27, 21, 10, 0.10),
+    0 28px 56px -12px rgba(27, 21, 10, 0.22);
+
+  --shadow-dock:
+    0 1px 0 rgba(255, 255, 255, 0.55) inset,
+    0 0 0 1px rgba(138, 76, 0, 0.12),
+    0 28px 60px -18px rgba(27, 21, 10, 0.28),
+    0 -10px 40px -8px rgba(138, 76, 0, 0.08);
+
+  --shadow-focus-ring-accent: 0 0 0 3px rgba(138, 76, 0, 0.38);
+  --shadow-focus-ring-cyan:   0 0 0 3px rgba(26, 106, 99, 0.38);
+  --shadow-focus-ring-danger: 0 0 0 3px rgba(180, 38, 29, 0.38);
+
+  --shadow-press-dark: inset 0 2px 3px rgba(27, 21, 10, 0.18);
+  --shadow-pin:        0 1px 2px rgba(27, 21, 10, 0.30);
 }
 
-[data-theme="light"] html,
-html[data-theme="light"] {
+html[data-theme="light"],
+[data-theme="light"] html {
   color-scheme: light;
 }
 
+/* ============================================================
+ * Reduced motion — zero all durations, flatten springs
+ * ============================================================ */
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --dur-fast: 0ms;
-    --dur-base: 0ms;
-    --dur-slow: 0ms;
+    --dur-instant: 0ms;
+    --dur-fast:    0ms;
+    --dur-base:    0ms;
+    --dur-slow:    0ms;
+    --dur-stage:   0ms;
     --dur-map-fly: 0ms;
+    --ease-spring:   linear;
+    --ease-material: linear;
+    --ease-snap:     linear;
   }
 }

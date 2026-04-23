@@ -1,11 +1,11 @@
 <section class="page-header">
-  <div>
+  <div class="page-header-text">
     <h1 class="page-title">Carrier Directory</h1>
-    <div class="page-subtitle muted">Ask Jarvis to filter or shortlist carriers for a lane.</div>
+    <p class="page-subtitle muted">Ask Jarvis to filter or shortlist carriers for a lane.</p>
   </div>
-  <div class="toolbar">
-    <button class="btn" data-agent-id="carriers.action.import">Import carriers</button>
-    <button class="btn btn--primary" data-agent-id="carriers.action.new">Add carrier</button>
+  <div class="toolbar" role="toolbar" aria-label="Carrier actions">
+    <button class="btn" type="button" data-agent-id="carriers.action.import">Import carriers</button>
+    <button class="btn btn--primary" type="button" data-agent-id="carriers.action.new">Add carrier</button>
   </div>
 </section>
 
@@ -37,7 +37,7 @@
 <section class="panel" aria-label="Carrier cards">
   <header class="panel-header">
     <div class="panel-title">Carriers</div>
-    <div class="row-sm muted" style="font-size: var(--fs-xs);">Click Call to dial, Shortlist to pin</div>
+    <div class="row-sm muted" style="font-size: var(--fs-xs);">Call to dial, Shortlist to pin</div>
   </header>
   <div class="panel-body">
     <div class="carrier-grid" id="carrier-grid" data-agent-id="carriers.grid"></div>

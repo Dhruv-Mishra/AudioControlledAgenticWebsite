@@ -1,0 +1,161 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - link "Dhruv FreightOps" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e4]: Dhruv FreightOps
+    - navigation "Primary" [ref=e5]:
+      - link "Dispatch" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - link "Carriers" [ref=e7] [cursor=pointer]:
+        - /url: /carriers.html
+      - link "Negotiate" [ref=e8] [cursor=pointer]:
+        - /url: /negotiate.html
+      - link "Map" [ref=e9] [cursor=pointer]:
+        - /url: /map.html
+      - link "Contact" [ref=e10] [cursor=pointer]:
+        - /url: /contact.html
+    - link "Voice" [ref=e12] [cursor=pointer]:
+      - /url: "#voice-dock"
+      - generic [ref=e13]: Voice
+  - link "Skip to main content" [ref=e14] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - generic [ref=e19]:
+          - heading "Carrier Directory" [active] [level=1] [ref=e20]
+          - paragraph [ref=e21]: Ask Jarvis to filter or shortlist carriers for a lane.
+        - toolbar "Carrier actions" [ref=e22]:
+          - button "Import carriers" [ref=e23] [cursor=pointer]
+          - button "Add carrier" [ref=e24] [cursor=pointer]
+      - region "Filter carriers" [ref=e25]:
+        - generic [ref=e26]:
+          - generic [ref=e27]: Search
+          - searchbox "Search" [ref=e28]
+        - generic [ref=e29]:
+          - generic [ref=e30]: Equipment
+          - combobox "Equipment" [ref=e31]:
+            - option "Any" [selected]
+            - option "Dry van"
+            - option "Reefer"
+            - option "Flatbed"
+            - option "Tanker"
+        - generic [ref=e32]:
+          - generic [ref=e33]: Availability
+          - combobox "Availability" [ref=e34]:
+            - option "Any" [selected]
+            - option "Available now"
+            - option "Unavailable"
+      - region "Carrier cards" [ref=e35]:
+        - generic [ref=e36]:
+          - generic [ref=e37]: Carriers
+          - generic [ref=e38]: Call to dial, Shortlist to pin
+        - generic [ref=e40]:
+          - article [ref=e41]:
+            - generic [ref=e42]:
+              - generic [ref=e43]: Liberty Freight
+              - generic [ref=e44]: Available
+            - generic [ref=e45]: C-088 · MC-554812 · ★ 4.6
+            - generic [ref=e46]: "Lanes: NJ-NC, NY-GA, PA-FL"
+            - generic [ref=e47]: "Equipment: Dry van, Reefer"
+            - generic [ref=e48]:
+              - link "Call" [ref=e49] [cursor=pointer]:
+                - /url: tel:%2B1%20(201)%20555-0188
+              - button "Message" [ref=e50] [cursor=pointer]
+              - button "Shortlist" [ref=e51] [cursor=pointer]
+          - article [ref=e52]:
+            - generic [ref=e53]:
+              - generic [ref=e54]: Peach Express
+              - generic [ref=e55]: Available
+            - generic [ref=e56]: C-118 · MC-671044 · ★ 4.3
+            - generic [ref=e57]: "Lanes: GA-FL, GA-TN, AL-FL"
+            - generic [ref=e58]: "Equipment: Reefer"
+            - generic [ref=e59]:
+              - link "Call" [ref=e60] [cursor=pointer]:
+                - /url: tel:%2B1%20(404)%20555-0118
+              - button "Message" [ref=e61] [cursor=pointer]
+              - button "Shortlist" [ref=e62] [cursor=pointer]
+          - article [ref=e63]:
+            - generic [ref=e64]:
+              - generic [ref=e65]: Midwest Haulage
+              - generic [ref=e66]: Unavailable
+            - generic [ref=e67]: C-204 · MC-448790 · ★ 4.8
+            - generic [ref=e68]: "Lanes: IL-TX, IL-MO, WI-OH"
+            - generic [ref=e69]: "Equipment: Dry van, Flatbed"
+            - generic [ref=e70]:
+              - link "Call" [ref=e71] [cursor=pointer]:
+                - /url: tel:%2B1%20(312)%20555-0204
+              - button "Message" [ref=e72] [cursor=pointer]
+              - button "Shortlist" [ref=e73] [cursor=pointer]
+          - article [ref=e74]:
+            - generic [ref=e75]:
+              - generic [ref=e76]: Cascade Transit
+              - generic [ref=e77]: Available
+            - generic [ref=e78]: C-302 · MC-889203 · ★ 4.1
+            - generic [ref=e79]: "Lanes: WA-CO, OR-UT, WA-CA"
+            - generic [ref=e80]: "Equipment: Dry van"
+            - generic [ref=e81]:
+              - link "Call" [ref=e82] [cursor=pointer]:
+                - /url: tel:%2B1%20(206)%20555-0302
+              - button "Message" [ref=e83] [cursor=pointer]
+              - button "Shortlist" [ref=e84] [cursor=pointer]
+          - article [ref=e85]:
+            - generic [ref=e86]:
+              - generic [ref=e87]: Delta Roadways
+              - generic [ref=e88]: Available
+            - generic [ref=e89]: C-410 · MC-221503 · ★ 4.5
+            - generic [ref=e90]: "Lanes: TN-KY, TN-MS, TN-AL"
+            - generic [ref=e91]: "Equipment: Dry van, Reefer"
+            - generic [ref=e92]:
+              - link "Call" [ref=e93] [cursor=pointer]:
+                - /url: tel:%2B1%20(901)%20555-0410
+              - button "Message" [ref=e94] [cursor=pointer]
+              - button "Shortlist" [ref=e95] [cursor=pointer]
+          - article [ref=e96]:
+            - generic [ref=e97]:
+              - generic [ref=e98]: North Star Logistics
+              - generic [ref=e99]: Available
+            - generic [ref=e100]: C-511 · MC-334812 · ★ 4.4
+            - generic [ref=e101]: "Lanes: MN-MO, MN-IA, WI-KS"
+            - generic [ref=e102]: "Equipment: Dry van, Flatbed"
+            - generic [ref=e103]:
+              - link "Call" [ref=e104] [cursor=pointer]:
+                - /url: tel:%2B1%20(612)%20555-0511
+              - button "Message" [ref=e105] [cursor=pointer]
+              - button "Shortlist" [ref=e106] [cursor=pointer]
+          - article [ref=e107]:
+            - generic [ref=e108]:
+              - generic [ref=e109]: Gulf Coast Carriers
+              - generic [ref=e110]: Available
+            - generic [ref=e111]: C-722 · MC-120034 · ★ 4.7
+            - generic [ref=e112]: "Lanes: TX-LA, TX-MS, LA-FL"
+            - generic [ref=e113]: "Equipment: Tanker, Flatbed"
+            - generic [ref=e114]:
+              - link "Call" [ref=e115] [cursor=pointer]:
+                - /url: tel:%2B1%20(713)%20555-0722
+              - button "Message" [ref=e116] [cursor=pointer]
+              - button "Shortlist" [ref=e117] [cursor=pointer]
+          - article [ref=e118]:
+            - generic [ref=e119]:
+              - generic [ref=e120]: Sierra West Freight
+              - generic [ref=e121]: Unavailable
+            - generic [ref=e122]: C-845 · MC-998123 · ★ 4.2
+            - generic [ref=e123]: "Lanes: CA-AZ, CA-NV, CA-UT"
+            - generic [ref=e124]: "Equipment: Dry van"
+            - generic [ref=e125]:
+              - link "Call" [ref=e126] [cursor=pointer]:
+                - /url: tel:%2B1%20(213)%20555-0845
+              - button "Message" [ref=e127] [cursor=pointer]
+              - button "Shortlist" [ref=e128] [cursor=pointer]
+  - region "Voice agent" [ref=e129] [cursor=pointer]:
+    - generic [ref=e130]:
+      - generic [ref=e134]: Jarvis
+      - generic [ref=e138]: Stand by
+      - generic [ref=e139]:
+        - button "Call settings" [ref=e140]:
+          - img [ref=e141]
+        - button "Collapse voice panel" [ref=e144]:
+          - img [ref=e145]
+          - generic [ref=e147]: Collapse voice panel
+    - text: Dial Jarvis to begin. Transcript lands here.
+  - status [ref=e148]: Loaded Carriers — Dhruv FreightOps

@@ -1,15 +1,15 @@
-<section class="page-header">
-  <div>
+<section class="page-header dispatch-hero">
+  <div class="page-header-text">
     <h1 class="page-title">Dispatch Board</h1>
-    <div class="page-subtitle muted">Live view of active loads. Click any row or ask Jarvis to take an action.</div>
+    <p class="page-subtitle muted">Live view of active loads. Click any row or ask Jarvis to take an action.</p>
   </div>
-  <div class="toolbar">
-    <button class="btn" data-agent-id="dispatch.action.new_load">New load</button>
-    <button class="btn btn--primary" data-agent-id="dispatch.action.export">Export CSV</button>
+  <div class="toolbar" role="toolbar" aria-label="Dispatch actions">
+    <button class="btn" type="button" data-agent-id="dispatch.action.new_load">New load</button>
+    <button class="btn btn--primary" type="button" data-agent-id="dispatch.action.export">Export CSV</button>
   </div>
 </section>
 
-<div class="summary-grid" id="summary-grid" aria-label="Key metrics"></div>
+<div class="summary-grid" id="summary-grid" role="region" aria-label="Key metrics"></div>
 
 <div class="filter-bar" role="region" aria-label="Filter loads">
   <div class="field">
@@ -33,8 +33,28 @@
   </div>
 </div>
 
-<div class="grid-2">
-  <section class="panel" aria-label="Loads table">
+<div class="dispatch-board">
+  <aside class="activity-rail" aria-label="Activity feed">
+    <div class="activity-rail-header">Fleet activity</div>
+    <div class="activity-rail-item" data-tone="cyan">
+      <span class="sr-only">Status:</span>
+      Auto-refresh
+      <span class="mono">2m ago</span>
+    </div>
+    <div class="activity-rail-item" data-tone="amber">
+      <span class="sr-only">Status:</span>
+      Rate alerts
+      <span class="mono">live</span>
+    </div>
+    <div class="activity-rail-item" data-tone="warn">
+      <span class="sr-only">Status:</span>
+      Pending bookings
+      <span class="mono">3</span>
+    </div>
+    <p class="activity-rail-empty">Ask Jarvis to watch a lane or carrier here.</p>
+  </aside>
+
+  <section class="dispatch-board-main panel" aria-label="Loads table">
     <header class="panel-header">
       <div class="panel-title">Loads</div>
       <div class="row-sm">
@@ -59,19 +79,19 @@
     </div>
   </section>
 
-  <aside class="stack">
-    <div class="detail-panel" id="detail-panel" aria-label="Load detail">
+  <aside class="dispatch-board-aside stack">
+    <section class="detail-panel" id="detail-panel" aria-label="Load detail">
       <div class="muted">Select a load to see details.</div>
-    </div>
-    <aside class="dispatch-map-card" aria-label="Fleet map preview">
+    </section>
+    <section class="dispatch-map-card" aria-label="Fleet map preview">
       <header class="dispatch-map-card-header">
         <div>
           <div class="dispatch-map-card-title">Fleet map</div>
           <div class="dispatch-map-card-sub" id="dispatch-map-sub">Active lanes across the network</div>
         </div>
-        <a class="btn btn--primary btn--sm" href="/map.html" data-agent-id="dispatch.open_map">Open map →</a>
+        <a class="btn btn--primary btn--sm" href="/map.html" data-agent-id="dispatch.open_map">Open map &rarr;</a>
       </header>
       <ul class="dispatch-map-lanes" id="dispatch-map-lanes" data-agent-id="dispatch.map_lanes" aria-label="Active lanes"></ul>
-    </aside>
+    </section>
   </aside>
 </div>

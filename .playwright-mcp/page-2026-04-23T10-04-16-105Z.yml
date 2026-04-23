@@ -1,0 +1,66 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "Dhruv FreightOps" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e4]: Dhruv FreightOps
+    - navigation "Primary" [ref=e5]:
+      - link "Dispatch" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - link "Carriers" [ref=e7] [cursor=pointer]:
+        - /url: /carriers.html
+      - link "Negotiate" [ref=e8] [cursor=pointer]:
+        - /url: /negotiate.html
+      - link "Map" [ref=e9] [cursor=pointer]:
+        - /url: /map.html
+      - link "Contact" [ref=e10] [cursor=pointer]:
+        - /url: /contact.html
+    - link "Voice" [ref=e12] [cursor=pointer]:
+      - /url: "#voice-dock"
+      - generic [ref=e13]: Voice
+  - link "Skip to main content" [ref=e14] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e16]
+  - region "Voice agent" [ref=e17]:
+    - generic [ref=e18]:
+      - generic [ref=e22]: Jarvis
+      - generic [ref=e26]: Stand by
+      - generic [ref=e27]:
+        - button "Call settings" [ref=e28] [cursor=pointer]:
+          - img [ref=e29]
+        - button "Collapse voice panel" [expanded] [ref=e32] [cursor=pointer]:
+          - img [ref=e33]
+          - generic [ref=e36]: Collapse voice panel
+    - generic [ref=e37]:
+      - generic [ref=e38]:
+        - img
+        - generic [ref=e39]:
+          - generic [ref=e40]: STATUS
+          - generic [ref=e41]: Stand by
+          - generic [ref=e42]: ·
+          - generic [ref=e43]: SESS
+          - generic [ref=e44]: —
+      - generic: Dial Jarvis to begin. Transcript lands here.
+    - generic [ref=e45]:
+      - button "Place a call to Jarvis" [ref=e47] [cursor=pointer]:
+        - generic [ref=e48]:
+          - img [ref=e50]
+          - generic [ref=e52]: Place Call
+      - generic [ref=e53]:
+        - paragraph [ref=e54]: Click Place Call to talk to Jarvis.
+        - list "Keyboard shortcuts" [ref=e55]:
+          - listitem [ref=e56]:
+            - generic [ref=e57]: Space
+            - generic [ref=e58]: call
+          - listitem [ref=e59]:
+            - generic [ref=e60]: M
+            - generic [ref=e61]: mute
+          - listitem [ref=e62]:
+            - generic [ref=e63]: Esc
+            - generic [ref=e64]: close
+          - listitem [ref=e65]:
+            - generic [ref=e66]: ⌘K
+            - generic [ref=e67]: cmd
+          - listitem [ref=e68]:
+            - generic [ref=e69]: /
+            - generic [ref=e70]: focus
+  - status [ref=e71]

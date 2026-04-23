@@ -32,6 +32,18 @@ function $(sel, root = document) { return root.querySelector(sel); }
 function on(el, ev, fn, opts) { el.addEventListener(ev, fn, opts); }
 
 // --- Dock markup ---
+//
+// "Harbor Bridge" voice dock. Five stacked rows when expanded:
+//   1. Header     — brand + state pill + chips + icon actions
+//   2. Scope      — canvas-driven radar visualiser + VU baton
+//   3. Transcript — ledger-ruled conversation feed
+//   4. Quick chips — in-call horizontal chip strip (mounted by quick-chips.js)
+//   5. Action      — Place / End call button + mute + hint + kbd pips
+//
+// Settings sheet slides in from the right of the dock (desktop) or occupies
+// the full bottom-sheet (mobile). Uses a tabbed layout (Voice / Agent /
+// Transcript / Theme) but every control ID from the old single-column layout
+// is preserved so no JS wiring breaks.
 
 function buildDockMarkup() {
   const dock = document.createElement('section');
@@ -39,158 +51,264 @@ function buildDockMarkup() {
   dock.id = 'voice-dock';
   dock.setAttribute('aria-label', 'Voice agent');
   dock.innerHTML = `
-    <div class="voice-dock-header">
-      <div class="voice-dock-title">
-        <span class="app-brand" aria-hidden="true"><span class="dot"></span></span>
+    <div class="voice-dock-halo" aria-hidden="true"></div>
+    <div class="voice-dock-grab" aria-hidden="true"></div>
+
+    <header class="voice-dock-header">
+      <div class="voice-dock-brand">
+        <span class="voice-dock-radar" aria-hidden="true">
+          <span class="voice-dock-radar-dot"></span>
+        </span>
         <span class="voice-dock-brand-name">Jarvis</span>
-        <span class="status-pill" id="voice-status-pill" data-state="idle" aria-live="polite">
-          <span class="dot" aria-hidden="true"></span>
-          <span class="label">Not connected</span>
+      </div>
+      <div class="voice-dock-header-chips">
+        <span class="voice-status-pill" id="voice-status-pill" data-state="idle" aria-live="polite">
+          <span class="voice-status-pill-dot" aria-hidden="true"></span>
+          <span class="voice-status-pill-label label">Stand by</span>
         </span>
-        <span class="chip chip--danger" id="voice-muted-chip" hidden>Muted</span>
-        <span class="chip chip--ok" id="voice-live-chip" hidden>
-          <span class="live-dot" aria-hidden="true"></span>
-          <span id="voice-live-timer">0:00</span>
+        <span class="voice-chip voice-chip--live" id="voice-live-chip" hidden>
+          <span class="voice-chip-dot" aria-hidden="true"></span>
+          <span class="voice-chip-label">LIVE</span>
+          <span class="voice-chip-timer mono" id="voice-live-timer">0:00</span>
         </span>
-        <span class="chip chip--neutral voice-ambient-chip" id="voice-ambient-chip" data-agent-id="voice.ambient_chip" hidden>Ambient</span>
+        <span class="voice-chip voice-chip--muted" id="voice-muted-chip" hidden>
+          <span class="voice-chip-dot" aria-hidden="true"></span>
+          <span class="voice-chip-label">Muted</span>
+        </span>
+        <span class="voice-chip voice-chip--ambient voice-ambient-chip" id="voice-ambient-chip" data-agent-id="voice.ambient_chip" hidden>
+          <span class="voice-chip-dot" aria-hidden="true"></span>
+          <span class="voice-chip-label">Ambient</span>
+        </span>
       </div>
       <div class="voice-dock-header-actions">
-        <button class="icon-btn" id="voice-settings" aria-label="Call settings" title="Call settings" data-agent-id="voice.settings">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor">
-            <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z"/>
-            <path d="m19.4 13.3 1.8-1.1-1.9-3.3-2 .7a7.8 7.8 0 0 0-1.7-1l-.4-2.1h-3.8l-.4 2.1c-.6.2-1.2.6-1.7 1l-2-.7L5.4 12l1.8 1.1a7.6 7.6 0 0 0 0 2l-1.8 1.1 1.9 3.3 2-.7c.5.4 1.1.7 1.7 1l.4 2.1h3.8l.4-2.1c.6-.3 1.2-.6 1.7-1l2 .7 1.9-3.3-1.8-1.1c.1-.3.1-.7.1-1s0-.7-.1-1Z"/>
+        <button class="voice-icon-btn icon-btn" id="voice-settings" aria-label="Call settings" aria-expanded="false" aria-controls="voice-settings-sheet" title="Call settings" data-agent-id="voice.settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>
           </svg>
         </button>
-        <button class="icon-btn voice-dock-collapse" id="voice-dock-toggle" aria-expanded="true" aria-controls="voice-dock" data-agent-id="voice.dock.collapse" title="Collapse voice panel">
-          <span aria-hidden="true">–</span>
+        <button class="voice-icon-btn voice-icon-btn--collapse icon-btn" id="voice-dock-toggle" aria-expanded="true" aria-controls="voice-dock-body" data-agent-id="voice.dock.collapse" title="Collapse voice panel">
+          <svg class="voice-icon voice-icon--collapse" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 14l6 6 6-6"/>
+            <path d="M6 10l6-6 6 6"/>
+          </svg>
+          <svg class="voice-icon voice-icon--expand" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
           <span class="sr-only">Collapse voice panel</span>
         </button>
       </div>
-    </div>
+    </header>
+
     <div class="voice-error-banner" id="voice-error" role="alert" hidden></div>
-    <div class="voice-dock-body">
-      <div class="voice-transcript" id="voice-transcript" aria-live="polite" aria-label="Conversation transcript"></div>
-      <p class="voice-transcript-hint" id="voice-transcript-hint" hidden>Agent speech not transcribed (configured to save credits).</p>
-      <p class="voice-transcript-hidden" id="voice-transcript-hidden" hidden>Transcripts hidden by configuration (SHOW_TEXT=false).</p>
-      <div class="voice-status-strip" id="voice-status-strip" data-state="idle">
+
+    <div class="voice-dock-body" id="voice-dock-body">
+      <section class="voice-scope" id="voice-status-strip" data-state="idle" aria-hidden="true">
+        <canvas class="voice-scope-canvas" aria-hidden="true"></canvas>
+        <svg class="voice-scope-compass" viewBox="0 0 280 140" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <radialGradient id="voice-scope-gradient" cx="50%" cy="50%" r="55%">
+              <stop offset="0%" stop-color="var(--color-accent, #F7B32B)" stop-opacity="0.10"/>
+              <stop offset="70%" stop-color="var(--color-accent, #F7B32B)" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <g transform="translate(140 70)">
+            <circle r="58" fill="url(#voice-scope-gradient)"/>
+            <circle class="voice-scope-ring voice-scope-ring--outer" r="58" fill="none" stroke="currentColor" stroke-width="0.6" stroke-opacity="0.32"/>
+            <circle class="voice-scope-ring" r="40" fill="none" stroke="currentColor" stroke-width="0.4" stroke-opacity="0.22"/>
+            <circle class="voice-scope-ring" r="22" fill="none" stroke="currentColor" stroke-width="0.4" stroke-opacity="0.20"/>
+            <g class="voice-scope-ticks" stroke="currentColor" stroke-opacity="0.35" stroke-linecap="round">
+              <line x1="0" y1="-58" x2="0" y2="-50" stroke-width="1.1"/>
+              <line x1="58" y1="0" x2="50" y2="0" stroke-width="1.1"/>
+              <line x1="0" y1="58" x2="0" y2="50" stroke-width="1.1"/>
+              <line x1="-58" y1="0" x2="-50" y2="0" stroke-width="1.1"/>
+              <line x1="29" y1="-50.23" x2="25.12" y2="-43.5" stroke-width="0.5"/>
+              <line x1="50.23" y1="-29" x2="43.5" y2="-25.12" stroke-width="0.5"/>
+              <line x1="50.23" y1="29" x2="43.5" y2="25.12" stroke-width="0.5"/>
+              <line x1="29" y1="50.23" x2="25.12" y2="43.5" stroke-width="0.5"/>
+              <line x1="-29" y1="50.23" x2="-25.12" y2="43.5" stroke-width="0.5"/>
+              <line x1="-50.23" y1="29" x2="-43.5" y2="25.12" stroke-width="0.5"/>
+              <line x1="-50.23" y1="-29" x2="-43.5" y2="-25.12" stroke-width="0.5"/>
+              <line x1="-29" y1="-50.23" x2="-25.12" y2="-43.5" stroke-width="0.5"/>
+            </g>
+            <line class="voice-scope-needle" x1="0" y1="0" x2="0" y2="-58" stroke-linecap="round" stroke-width="1.4"/>
+            <circle class="voice-scope-hub" r="3" fill="currentColor"/>
+          </g>
+        </svg>
         <div class="voice-vu" aria-hidden="true">
-          <span class="bar"></span><span class="bar"></span><span class="bar"></span>
-          <span class="bar"></span><span class="bar"></span>
+          <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
         </div>
-        <span class="voice-status-text" id="voice-status-text">Not connected</span>
-        <div class="spacer"></div>
-        <span class="mono-id" id="voice-session-id"></span>
-      </div>
+        <div class="voice-scope-readout">
+          <span class="voice-scope-readout-label">STATUS</span>
+          <span class="voice-status-text" id="voice-status-text">Stand by</span>
+          <span class="voice-scope-readout-sep" aria-hidden="true">·</span>
+          <span class="voice-scope-readout-label">SESS</span>
+          <span class="mono-id voice-scope-readout-id" id="voice-session-id">—</span>
+        </div>
+      </section>
+
+      <section class="voice-transcript-pane">
+        <div class="voice-transcript" id="voice-transcript" aria-live="polite" aria-label="Conversation transcript"></div>
+        <p class="voice-transcript-hint" id="voice-transcript-hint" hidden>Agent speech not transcribed (configured to save credits).</p>
+        <p class="voice-transcript-hidden" id="voice-transcript-hidden" hidden>Transcripts hidden by configuration (SHOW_TEXT=false).</p>
+      </section>
     </div>
+
     <div class="voice-dock-action">
-      <button class="call-btn call-btn--place" id="voice-call-btn" data-agent-id="voice.call_btn" data-call-state="idle" type="button">
-        <svg class="call-btn-icon call-btn-icon--phone" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor">
-          <path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.6 1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .6 3.6 1 1 0 0 1-.25 1l-2.25 2.2Z"/>
-        </svg>
-        <svg class="call-btn-icon call-btn-icon--end" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor">
-          <path d="M12 9c-3.6 0-7 1-9.4 2.6a1 1 0 0 0-.3 1.4l1.8 2.4a1 1 0 0 0 1.2.3L7.2 15a1 1 0 0 0 .6-.9V12a11 11 0 0 1 8.4 0v2.1a1 1 0 0 0 .6.9l1.9.8a1 1 0 0 0 1.2-.3l1.8-2.4a1 1 0 0 0-.3-1.4C19 10 15.6 9 12 9Z"/>
-        </svg>
-        <span class="call-btn-label" id="voice-call-btn-label">Place Call</span>
-      </button>
-      <button class="mic-btn mic-btn--inline" id="voice-mic" data-agent-id="voice.mic" aria-pressed="false" title="Mute (M)" hidden>
-        <svg class="mic-icon mic-icon--on" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 1 0 6 0V5a3 3 0 0 0-3-3Z" fill="currentColor"/>
-          <path d="M5 11a7 7 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <path d="M12 18v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        <svg class="mic-icon mic-icon--off" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 2a3 3 0 0 0-3 3v4l6 6V5a3 3 0 0 0-3-3Z" fill="currentColor"/>
-          <path d="M19 11a7 7 0 0 1-11.3 5.55L9 15a5 5 0 0 0 8-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <path d="M12 18v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        <span class="sr-only" id="voice-mic-label">Mute</span>
-      </button>
-      <p class="call-hint" id="voice-call-hint">Click Place Call to talk to Jarvis.</p>
-    </div>
-    <div class="voice-settings-sheet" id="voice-settings-sheet" role="dialog" aria-label="Call settings" aria-modal="false" hidden>
-      <div class="voice-settings-header">
-        <span>Call settings</span>
-        <button class="icon-btn" id="voice-settings-close" aria-label="Close settings" title="Close">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+      <div class="voice-dock-action-row">
+        <button class="voice-call-btn call-btn call-btn--place call-btn--idle" id="voice-call-btn" data-agent-id="voice.call_btn" data-call-state="idle" type="button">
+          <span class="voice-call-btn-inner">
+            <span class="voice-call-btn-icons" aria-hidden="true">
+              <svg class="call-btn-icon call-btn-icon--phone" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.6 1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .6 3.6 1 1 0 0 1-.25 1l-2.25 2.2Z"/>
+              </svg>
+              <svg class="call-btn-icon call-btn-icon--end" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M12 9c-3.6 0-7 1-9.4 2.6a1 1 0 0 0-.3 1.4l1.8 2.4a1 1 0 0 0 1.2.3L7.2 15a1 1 0 0 0 .6-.9V12a11 11 0 0 1 8.4 0v2.1a1 1 0 0 0 .6.9l1.9.8a1 1 0 0 0 1.2-.3l1.8-2.4a1 1 0 0 0-.3-1.4C19 10 15.6 9 12 9Z"/>
+              </svg>
+              <svg class="call-btn-icon call-btn-icon--cancel" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <path d="M6 6l12 12M18 6 6 18"/>
+              </svg>
+            </span>
+            <span class="voice-call-btn-label call-btn-label" id="voice-call-btn-label">Place Call</span>
+          </span>
+        </button>
+        <button class="voice-mic-btn mic-btn mic-btn--inline" id="voice-mic" data-agent-id="voice.mic" aria-pressed="false" title="Mute (M)" hidden>
+          <svg class="mic-icon mic-icon--on" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 1 0 6 0V5a3 3 0 0 0-3-3Z" fill="currentColor"/>
+            <path d="M5 11a7 7 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 18v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <svg class="mic-icon mic-icon--off" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2a3 3 0 0 0-3 3v4l6 6V5a3 3 0 0 0-3-3Z" fill="currentColor"/>
+            <path d="M19 11a7 7 0 0 1-11.3 5.55L9 15a5 5 0 0 0 8-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 18v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="sr-only" id="voice-mic-label">Mute</span>
         </button>
       </div>
-      <div class="voice-settings-body">
-        <div class="voice-control-row">
-          <span class="voice-control-label">Persona</span>
-          <div class="segmented persona-seg" role="tablist" id="voice-persona-seg"></div>
-        </div>
-        <div class="voice-control-row noise-row">
-          <span class="voice-control-label">Noise</span>
-          <select class="select" id="voice-noise" data-agent-id="voice.noise">
-            <option value="off">Off</option>
-            <option value="phone">Phone line hiss</option>
-            <option value="office" selected>Office chatter</option>
-            <option value="static">Static</option>
-          </select>
-          <input class="slider" type="range" id="voice-noise-vol" data-agent-id="voice.noise_volume" min="0" max="100" value="15" aria-label="Noise volume" />
-        </div>
-        <div class="voice-control-row">
-          <label class="toggle" for="voice-phone" title="Narrowband phone compression">
-            <input type="checkbox" id="voice-phone" data-agent-id="voice.phone_compression" checked />
-            <span class="track"></span>
-            <span>Phone-line compression</span>
-          </label>
-          <div class="spacer"></div>
-          <input class="slider" type="range" id="voice-volume" data-agent-id="voice.output_volume" min="0" max="150" value="100" aria-label="Agent output volume" />
-        </div>
-        <div class="voice-control-row compression-strength-row">
-          <span class="voice-control-label">Strength</span>
-          <input
-            class="slider"
-            type="range"
-            id="voice-compression-strength"
-            data-agent-id="voice.compression_strength"
-            min="0" max="100" step="1" value="50"
-            aria-label="Phone-line compression strength"
-            aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"
-            aria-describedby="voice-compression-strength-readout"
-          />
-          <span class="compression-strength-readout" id="voice-compression-strength-readout" aria-live="polite">50%</span>
-        </div>
-        <div class="voice-control-row" role="radiogroup" aria-label="Listening mode">
-          <span class="voice-control-label">Mode</span>
-          <div class="segmented mode-seg" id="voice-mode-seg">
-            <button role="radio" type="button" data-mode="live" data-agent-id="voice.mode.live" aria-checked="true" title="Place Call mode — default.">
-              <span>Place Call</span>
-            </button>
-            <button role="radio" type="button" data-mode="wakeword" data-agent-id="voice.mode.wakeword" aria-checked="false" title="Wake word ('Hey Jarvis') — advanced.">
-              <span>Wake Word</span>
-            </button>
-          </div>
-        </div>
-        <p class="voice-settings-note" id="voice-mode-note"></p>
-        <div class="voice-control-row" role="radiogroup" aria-label="Transcript mode">
-          <span class="voice-control-label">Transcript</span>
-          <div class="segmented transcript-seg" id="voice-transcript-seg" data-agent-id="transcript.mode_seg">
-            <button role="radio" type="button" data-mode="off" data-agent-id="transcript.mode.off" aria-checked="true">Off</button>
-            <button role="radio" type="button" data-mode="captions" data-agent-id="transcript.mode.captions" aria-checked="false">Captions</button>
-            <button role="radio" type="button" data-mode="full" data-agent-id="transcript.mode.full" aria-checked="false">Full</button>
-          </div>
-        </div>
-        <p class="voice-settings-note" id="voice-transcript-note"></p>
-        <div class="voice-control-row" role="radiogroup" aria-label="Theme">
-          <span class="voice-control-label">Theme</span>
-          <div class="segmented theme-seg" id="voice-theme-seg" data-agent-id="theme.toggle">
-            <button role="radio" type="button" data-theme-value="dark" data-agent-id="theme.dark" aria-checked="false">Dark</button>
-            <button role="radio" type="button" data-theme-value="light" data-agent-id="theme.light" aria-checked="false">Light</button>
-            <button role="radio" type="button" data-theme-value="system" data-agent-id="theme.system" aria-checked="false">System</button>
-          </div>
-        </div>
-        <div class="voice-control-row voice-settings-actions">
-          <button class="btn btn--ghost btn--sm" id="voice-clear" data-agent-id="voice.clear_transcript">Clear transcript</button>
-        </div>
-        <div class="voice-control-row debug-panel" id="voice-debug-panel" hidden>
-          <span class="voice-control-label">Debug</span>
-          <pre class="debug-metrics" id="voice-debug-metrics"></pre>
-        </div>
+      <div class="voice-dock-action-footer">
+        <p class="voice-call-hint call-hint" id="voice-call-hint">Click Place Call to talk to Jarvis.</p>
+        <ul class="voice-kbd-hints" aria-label="Keyboard shortcuts">
+          <li><kbd class="voice-kbd">Space</kbd><span>call</span></li>
+          <li><kbd class="voice-kbd">M</kbd><span>mute</span></li>
+          <li><kbd class="voice-kbd">Esc</kbd><span>close</span></li>
+          <li><kbd class="voice-kbd">⌘K</kbd><span>cmd</span></li>
+          <li><kbd class="voice-kbd">/</kbd><span>focus</span></li>
+        </ul>
       </div>
     </div>
+
+    <aside class="voice-settings-sheet" id="voice-settings-sheet" role="dialog" aria-modal="true" aria-labelledby="voice-settings-title" aria-hidden="true" hidden>
+      <div class="voice-settings-grab" aria-hidden="true"></div>
+      <header class="voice-settings-header">
+        <h2 id="voice-settings-title" class="voice-settings-title">Call settings</h2>
+        <button class="voice-icon-btn icon-btn" id="voice-settings-close" aria-label="Close settings" title="Close">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <nav class="voice-settings-tabs" role="tablist" aria-label="Settings sections">
+        <button class="voice-settings-tab is-active" role="tab" type="button" data-settings-tab="voice" aria-selected="true" aria-controls="voice-settings-panel-voice">Voice</button>
+        <button class="voice-settings-tab" role="tab" type="button" data-settings-tab="agent" aria-selected="false" aria-controls="voice-settings-panel-agent">Agent</button>
+        <button class="voice-settings-tab" role="tab" type="button" data-settings-tab="transcript" aria-selected="false" aria-controls="voice-settings-panel-transcript">Transcript</button>
+        <button class="voice-settings-tab" role="tab" type="button" data-settings-tab="theme" aria-selected="false" aria-controls="voice-settings-panel-theme">Theme</button>
+      </nav>
+
+      <div class="voice-settings-body">
+        <section class="voice-settings-panel is-active" id="voice-settings-panel-voice" role="tabpanel" data-settings-panel="voice" aria-labelledby="voice-settings-tab-voice">
+          <div class="voice-control-row" role="radiogroup" aria-label="Listening mode">
+            <span class="voice-control-label label-caps">Mode</span>
+            <div class="segmented mode-seg" id="voice-mode-seg">
+              <button role="radio" type="button" data-mode="live" data-agent-id="voice.mode.live" aria-checked="true" title="Place Call mode — default.">
+                <span>Place Call</span>
+              </button>
+              <button role="radio" type="button" data-mode="wakeword" data-agent-id="voice.mode.wakeword" aria-checked="false" title="Wake word ('Hey Jarvis') — advanced.">
+                <span>Wake Word</span>
+              </button>
+            </div>
+          </div>
+          <p class="voice-settings-note" id="voice-mode-note"></p>
+
+          <div class="voice-control-row noise-row">
+            <span class="voice-control-label label-caps">Noise</span>
+            <select class="select" id="voice-noise" data-agent-id="voice.noise">
+              <option value="off">Off</option>
+              <option value="phone">Phone line hiss</option>
+              <option value="office" selected>Office chatter</option>
+              <option value="static">Static</option>
+            </select>
+            <input class="slider" type="range" id="voice-noise-vol" data-agent-id="voice.noise_volume" min="0" max="100" value="15" aria-label="Noise volume" />
+          </div>
+
+          <div class="voice-control-row">
+            <label class="toggle" for="voice-phone" title="Narrowband phone compression">
+              <input type="checkbox" id="voice-phone" data-agent-id="voice.phone_compression" checked />
+              <span class="track"></span>
+              <span class="label-caps">Phone-line compression</span>
+            </label>
+          </div>
+
+          <div class="voice-control-row compression-strength-row">
+            <span class="voice-control-label label-caps">Strength</span>
+            <input
+              class="slider"
+              type="range"
+              id="voice-compression-strength"
+              data-agent-id="voice.compression_strength"
+              min="0" max="100" step="1" value="50"
+              aria-label="Phone-line compression strength"
+              aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"
+              aria-describedby="voice-compression-strength-readout"
+            />
+            <span class="compression-strength-readout mono" id="voice-compression-strength-readout" aria-live="polite">50%</span>
+          </div>
+
+          <div class="voice-control-row">
+            <span class="voice-control-label label-caps">Volume</span>
+            <input class="slider" type="range" id="voice-volume" data-agent-id="voice.output_volume" min="0" max="150" value="100" aria-label="Agent output volume" />
+          </div>
+        </section>
+
+        <section class="voice-settings-panel" id="voice-settings-panel-agent" role="tabpanel" data-settings-panel="agent" aria-labelledby="voice-settings-tab-agent" hidden>
+          <div class="voice-control-row voice-control-row--stack">
+            <span class="voice-control-label label-caps">Persona</span>
+            <div class="segmented persona-seg" role="tablist" id="voice-persona-seg"></div>
+          </div>
+        </section>
+
+        <section class="voice-settings-panel" id="voice-settings-panel-transcript" role="tabpanel" data-settings-panel="transcript" aria-labelledby="voice-settings-tab-transcript" hidden>
+          <div class="voice-control-row" role="radiogroup" aria-label="Transcript mode">
+            <span class="voice-control-label label-caps">Mode</span>
+            <div class="segmented transcript-seg" id="voice-transcript-seg" data-agent-id="transcript.mode_seg">
+              <button role="radio" type="button" data-mode="off" data-agent-id="transcript.mode.off" aria-checked="true">Off</button>
+              <button role="radio" type="button" data-mode="captions" data-agent-id="transcript.mode.captions" aria-checked="false">Captions</button>
+              <button role="radio" type="button" data-mode="full" data-agent-id="transcript.mode.full" aria-checked="false">Full</button>
+            </div>
+          </div>
+          <p class="voice-settings-note" id="voice-transcript-note"></p>
+          <div class="voice-control-row voice-settings-actions">
+            <button class="btn btn--ghost btn--sm" id="voice-clear" data-agent-id="voice.clear_transcript">Clear transcript</button>
+          </div>
+        </section>
+
+        <section class="voice-settings-panel" id="voice-settings-panel-theme" role="tabpanel" data-settings-panel="theme" aria-labelledby="voice-settings-tab-theme" hidden>
+          <div class="voice-control-row" role="radiogroup" aria-label="Theme">
+            <span class="voice-control-label label-caps">Theme</span>
+            <div class="segmented theme-seg" id="voice-theme-seg" data-agent-id="theme.toggle">
+              <button role="radio" type="button" data-theme-value="dark" data-agent-id="theme.dark" aria-checked="false">Dark</button>
+              <button role="radio" type="button" data-theme-value="light" data-agent-id="theme.light" aria-checked="false">Light</button>
+              <button role="radio" type="button" data-theme-value="system" data-agent-id="theme.system" aria-checked="false">System</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="voice-control-row debug-panel" id="voice-debug-panel" hidden>
+          <span class="voice-control-label label-caps">Debug</span>
+          <pre class="debug-metrics mono" id="voice-debug-metrics"></pre>
+        </section>
+      </div>
+    </aside>
   `;
   return dock;
 }
@@ -202,10 +320,15 @@ function buildHeader() {
   const header = document.createElement('header');
   header.className = 'app-header';
   header.innerHTML = `
-    <div class="app-brand" data-agent-id="nav.brand">
-      <span class="dot" aria-hidden="true"></span>
-      <span>Dhruv FreightOps</span>
-    </div>
+    <a class="app-brand" href="/" data-agent-id="nav.brand" data-external>
+      <span class="app-brand-mark" aria-hidden="true">
+        <span class="app-brand-mark-dot"></span>
+      </span>
+      <span class="app-brand-name">
+        <span class="app-brand-name-primary">Dhruv</span>
+        <span class="app-brand-name-secondary">FreightOps</span>
+      </span>
+    </a>
     <nav class="app-nav" aria-label="Primary">
       <a href="/" data-agent-id="nav.dispatch">Dispatch</a>
       <a href="/carriers.html" data-agent-id="nav.carriers">Carriers</a>
@@ -214,7 +337,10 @@ function buildHeader() {
       <a href="/contact.html" data-agent-id="nav.contact">Contact</a>
     </nav>
     <div class="app-header-right">
-      <a href="#voice-dock" class="btn btn--ghost btn--sm" data-agent-id="nav.voice_dock" data-external>Voice</a>
+      <a href="#voice-dock" class="btn btn--ghost btn--sm app-header-voice-link" data-agent-id="nav.voice_dock" data-external>
+        <span class="app-header-voice-dot" aria-hidden="true"></span>
+        <span>Voice</span>
+      </a>
     </div>
   `;
   document.body.insertBefore(header, document.body.firstChild);
@@ -232,20 +358,40 @@ function buildSkipLink() {
 
 // --- State rendering (single sink) ---
 
+// Harbor Bridge pill copy per §6.3 of the design spec. Falls back to
+// voice-agent's STATE_COPY when the state isn't in this table.
+const PILL_COPY = Object.freeze({
+  idle: 'Stand by',
+  arming: 'Armed',
+  dialing: 'Dialling…',
+  live_opening: 'Connecting…',
+  live_ready: 'Listening',
+  model_thinking: 'Thinking',
+  model_speaking: 'Jarvis speaks',
+  tool_executing: 'Taking action…',
+  closing: 'Hanging up',
+  reconnecting: 'Reconnecting',
+  error: 'Connection lost'
+});
+
 function setPill(state, detail) {
   const pill = $('#voice-status-pill');
   const strip = $('#voice-status-strip');
+  const dock = $('#voice-dock');
   const txt = $('#voice-status-text');
   const label = pill && pill.querySelector('.label');
   if (!pill || !strip) return;
   pill.setAttribute('data-state', state);
   strip.setAttribute('data-state', state);
-  const copy = STATE_COPY[state] || state || 'Not connected';
+  if (dock) dock.setAttribute('data-state', state);
+  const copy = PILL_COPY[state] || STATE_COPY[state] || state || 'Stand by';
   if (label) label.textContent = copy;
   if (txt) txt.textContent = copy;
 }
 
-/** Render the Place/End/Cancel/Ending-call button for the given state. */
+/** Render the Place/End/Cancel/Ending-call button for the given state.
+ *  Five data-call-state values: idle · cancel · end · reconnect · closing.
+ *  Matching `call-btn--*` classes (legacy) and `call-btn--idle` added. */
 function renderCallButton(state) {
   const btn = $('#voice-call-btn');
   const label = $('#voice-call-btn-label');
@@ -259,7 +405,10 @@ function renderCallButton(state) {
   const reconnecting = state === STATES.RECONNECTING;
   const error = state === STATES.ERROR;
 
-  btn.classList.remove('call-btn--place', 'call-btn--end', 'call-btn--cancel', 'call-btn--closing', 'call-btn--reconnect');
+  btn.classList.remove(
+    'call-btn--place', 'call-btn--idle', 'call-btn--end',
+    'call-btn--cancel', 'call-btn--closing', 'call-btn--reconnect'
+  );
   btn.disabled = false;
 
   if (closing) {
@@ -274,15 +423,21 @@ function renderCallButton(state) {
     btn.setAttribute('data-call-state', 'cancel');
     label.textContent = 'Cancel';
     btn.setAttribute('aria-label', 'Cancel dialing');
-    if (hint) hint.textContent = state === STATES.DIALING ? 'Dialing…' : 'Connecting…';
-  } else if (inCall || reconnecting) {
-    btn.classList.add(reconnecting ? 'call-btn--reconnect' : 'call-btn--end');
-    btn.setAttribute('data-call-state', reconnecting ? 'reconnect' : 'end');
-    label.textContent = reconnecting ? 'End Call' : 'End Call';
+    if (hint) hint.textContent = state === STATES.DIALING ? 'Dialling Jarvis…' : 'Connecting…';
+  } else if (reconnecting) {
+    btn.classList.add('call-btn--reconnect');
+    btn.setAttribute('data-call-state', 'reconnect');
+    label.textContent = 'End Call';
     btn.setAttribute('aria-label', 'End call');
-    if (hint) hint.textContent = reconnecting ? 'Reconnecting — still on the call.' : 'On the call. Press M to mute.';
+    if (hint) hint.textContent = 'Reconnecting — still on the call.';
+  } else if (inCall) {
+    btn.classList.add('call-btn--end');
+    btn.setAttribute('data-call-state', 'end');
+    label.textContent = 'End Call';
+    btn.setAttribute('aria-label', 'End call');
+    if (hint) hint.textContent = 'On the call. Press M to mute.';
   } else {
-    btn.classList.add('call-btn--place');
+    btn.classList.add('call-btn--place', 'call-btn--idle');
     btn.setAttribute('data-call-state', 'idle');
     label.textContent = error ? 'Try Again' : 'Place Call';
     btn.setAttribute('aria-label', error ? 'Try placing the call again' : 'Place a call to Jarvis');
@@ -408,24 +563,250 @@ function showPlaybackBlockedHint(agent) {
   setTimeout(() => clearInterval(t), 30_000);
 }
 
-// --- VU meter ---
+// --- VU meter + Scope canvas ---
 
+// Drives both (a) the five `.voice-vu .bar` children that the old contract
+// requires, and (b) the new canvas "Scope" — a radar sweep + burst-dot
+// visualisation whose glyph changes per voice-agent state. Runs as a
+// single rAF loop. Safe if any of agent/pipeline/canvas are missing.
 function wireVuMeter(agent) {
-  const bars = document.querySelectorAll('#voice-status-strip .voice-vu .bar');
-  if (!bars.length) return;
-  function tick() {
-    const inCall = agent.isInCall();
-    const level = inCall && !agent.isMuted()
-      ? agent.pipeline.readMicLevel()
-      : agent.pipeline.readVuLevel();
-    bars.forEach((b, i) => {
-      const weight = [0.35, 0.55, 0.75, 0.9, 1.0][i] || 1;
-      const h = Math.max(4, Math.round(4 + level * 18 * weight));
-      b.style.height = h + 'px';
-    });
+  const strip = document.getElementById('voice-status-strip');
+  const bars = strip ? strip.querySelectorAll('.voice-vu .bar') : [];
+  const canvas = strip ? strip.querySelector('.voice-scope-canvas') : null;
+  const ctx = canvas ? canvas.getContext('2d') : null;
+
+  const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  let cssW = 0, cssH = 0;
+
+  function ensureCanvasSize() {
+    if (!canvas) return false;
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.floor(rect.width));
+    const h = Math.max(1, Math.floor(rect.height));
+    if (w === cssW && h === cssH) return true;
+    cssW = w; cssH = h;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    return true;
+  }
+  if (canvas) {
+    ensureCanvasSize();
+    window.addEventListener('resize', ensureCanvasSize);
+  }
+
+  // Rolling buffer of burst dots (radar pings).
+  const BURSTS = [];
+  const BURST_TTL = 1200; // ms
+
+  // Rolling waveform window for idle bars (tiny history for smoother bars).
+  const HIST_LEN = 32;
+  const hist = new Array(HIST_LEN).fill(0);
+  let histIdx = 0;
+
+  let lastBurstAt = 0;
+  let start = performance.now();
+
+  function readLevel() {
+    try {
+      const inCall = agent.isInCall && agent.isInCall();
+      const muted = agent.isMuted && agent.isMuted();
+      if (inCall && !muted && agent.pipeline && agent.pipeline.readMicLevel) {
+        return Math.min(1, Math.max(0, agent.pipeline.readMicLevel()));
+      }
+      if (agent.pipeline && agent.pipeline.readVuLevel) {
+        return Math.min(1, Math.max(0, agent.pipeline.readVuLevel()));
+      }
+    } catch {}
+    return 0;
+  }
+
+  function stateOf() {
+    try {
+      return agent.getState ? agent.getState() : 'idle';
+    } catch { return 'idle'; }
+  }
+
+  // State → accent colour for canvas strokes. Kept in sync with §6.3.
+  function stateColor(s) {
+    const cs = getComputedStyle(document.documentElement);
+    const pick = (v, fb) => (cs.getPropertyValue(v).trim() || fb);
+    switch (s) {
+      case 'live_ready':
+      case 'listening':
+        return pick('--color-state-listening', '#4FD1C5');
+      case 'model_thinking':
+      case 'thinking':
+        return pick('--color-state-thinking', '#C39BE8');
+      case 'model_speaking':
+      case 'speaking':
+        return pick('--color-state-speaking', '#F7B32B');
+      case 'tool_executing':
+        return pick('--color-state-tool', '#F59E3C');
+      case 'error':
+        return pick('--color-state-error', '#E15A4C');
+      case 'dialing':
+      case 'live_opening':
+      case 'reconnecting':
+        return pick('--color-warn', '#F59E3C');
+      case 'closing':
+        return pick('--color-text-dim', '#5B6675');
+      default:
+        return pick('--color-state-idle', '#5B6675');
+    }
+  }
+
+  function tick(now) {
+    // 1. Update bar heights (contract: five bars must animate).
+    const level = readLevel();
+    hist[histIdx] = level;
+    histIdx = (histIdx + 1) % HIST_LEN;
+
+    if (bars.length) {
+      bars.forEach((b, i) => {
+        const weight = [0.35, 0.55, 0.75, 0.9, 1.0][i] || 1;
+        const h = Math.max(4, Math.round(4 + level * 22 * weight));
+        b.style.height = h + 'px';
+      });
+    }
+
+    // 2. Paint the scope canvas.
+    if (ctx && canvas && cssW > 0 && cssH > 0) {
+      ensureCanvasSize();
+      const s = stateOf();
+      const color = stateColor(s);
+      const cx = cssW / 2;
+      const cy = cssH / 2;
+      const radius = Math.min(cssW, cssH) * 0.42;
+      const t = (now - start) / 1000;
+
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssW, cssH);
+
+      // Radar sweep — only rotates when not reduced-motion. Speed varies
+      // by state: fast during dialing, slow during listening.
+      let sweepPeriod = 3.0;
+      let drawSweep = true;
+      if (s === 'dialing' || s === 'live_opening' || s === 'reconnecting') sweepPeriod = 1.2;
+      else if (s === 'model_thinking' || s === 'thinking') sweepPeriod = 2.2;
+      else if (s === 'model_speaking' || s === 'speaking') { drawSweep = false; }
+      else if (s === 'tool_executing') sweepPeriod = 2.8;
+      else if (s === 'error' || s === 'closing' || s === 'idle' || s === 'arming') drawSweep = false;
+
+      if (drawSweep && !reducedMotion) {
+        const sweepAngle = (t / sweepPeriod) * Math.PI * 2;
+        const grad = ctx.createRadialGradient(
+          cx + Math.cos(sweepAngle - Math.PI / 2) * radius * 0.3,
+          cy + Math.sin(sweepAngle - Math.PI / 2) * radius * 0.3,
+          2,
+          cx, cy, radius
+        );
+        grad.addColorStop(0, withAlpha(color, 0.35));
+        grad.addColorStop(1, withAlpha(color, 0));
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        const span = Math.PI / 3; // 60°
+        ctx.arc(cx, cy, radius, sweepAngle - Math.PI / 2 - span, sweepAngle - Math.PI / 2);
+        ctx.closePath();
+        ctx.fill();
+
+        // Leading edge.
+        ctx.strokeStyle = withAlpha(color, 0.6);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(
+          cx + Math.cos(sweepAngle - Math.PI / 2) * radius,
+          cy + Math.sin(sweepAngle - Math.PI / 2) * radius
+        );
+        ctx.stroke();
+
+        // Deposit burst dots when mic level spikes.
+        if (level > 0.18 && now - lastBurstAt > 80) {
+          lastBurstAt = now;
+          const r = (0.4 + level * 0.55) * radius;
+          BURSTS.push({
+            x: cx + Math.cos(sweepAngle - Math.PI / 2) * r,
+            y: cy + Math.sin(sweepAngle - Math.PI / 2) * r,
+            born: now,
+            life: BURST_TTL
+          });
+          if (BURSTS.length > 40) BURSTS.shift();
+        }
+      }
+
+      // Equalizer bars for speaking / thinking states.
+      if (s === 'model_speaking' || s === 'speaking' || s === 'model_thinking' || s === 'thinking') {
+        const N = 24;
+        const barW = Math.max(2, (radius * 1.6) / (N * 1.5));
+        const gap = barW * 0.5;
+        const totalW = N * barW + (N - 1) * gap;
+        const startX = cx - totalW / 2;
+        ctx.fillStyle = color;
+        for (let i = 0; i < N; i++) {
+          const idx = (histIdx - i + HIST_LEN) % HIST_LEN;
+          const v = hist[idx] || 0;
+          // Blend in a sine so there's movement even with zero input.
+          const jitter = reducedMotion ? 0.5 : (0.35 + 0.35 * Math.sin(t * 3 + i * 0.6));
+          const amp = Math.max(0.08, Math.min(1, v * 1.4 + jitter * 0.35));
+          const h = Math.max(3, amp * radius * 0.9);
+          const x = startX + i * (barW + gap);
+          ctx.fillRect(x, cy - h / 2, barW, h);
+        }
+      }
+
+      // Burst dots fade.
+      for (let i = BURSTS.length - 1; i >= 0; i--) {
+        const b = BURSTS[i];
+        const age = now - b.born;
+        if (age > b.life) { BURSTS.splice(i, 1); continue; }
+        const a = 1 - age / b.life;
+        ctx.fillStyle = withAlpha(color, a * 0.85);
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Error state — static red dash through centre.
+      if (s === 'error') {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(cx - radius * 0.6, cy);
+        ctx.lineTo(cx + radius * 0.6, cy);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
     requestAnimationFrame(tick);
   }
+
+  // If everything's missing, bail — but safely (matches old contract).
+  if (!bars.length && !canvas) return;
   requestAnimationFrame(tick);
+}
+
+// Parse CSS color token + apply alpha. Accepts #RRGGBB or rgb()/rgba().
+function withAlpha(color, alpha) {
+  const c = (color || '').trim();
+  if (c.startsWith('#')) {
+    const h = c.slice(1);
+    const full = h.length === 3
+      ? h.split('').map((x) => x + x).join('')
+      : h.length === 6 ? h : '5B6675';
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  if (c.startsWith('rgba')) return c.replace(/rgba\(([^,]+),([^,]+),([^,]+),[^)]+\)/, `rgba($1,$2,$3,${alpha})`);
+  if (c.startsWith('rgb')) return c.replace(/rgb\(([^,]+),([^,]+),([^)]+)\)/, `rgba($1,$2,$3,${alpha})`);
+  return `rgba(91,102,117,${alpha})`;
 }
 
 // --- Persona buttons ---
@@ -477,7 +858,9 @@ function openSettings() {
   const btn = $('#voice-settings');
   if (!sheet) return;
   sheet.hidden = false;
-  sheet.classList.add('is-open');
+  // Next frame so the `is-open` transition catches after `hidden=false`.
+  requestAnimationFrame(() => sheet.classList.add('is-open'));
+  sheet.setAttribute('aria-hidden', 'false');
   if (btn) btn.setAttribute('aria-expanded', 'true');
   const closer = $('#voice-settings-close');
   if (closer) closer.focus();
@@ -487,8 +870,47 @@ function closeSettings() {
   const btn = $('#voice-settings');
   if (!sheet) return;
   sheet.classList.remove('is-open');
-  sheet.hidden = true;
+  sheet.setAttribute('aria-hidden', 'true');
+  // Keep `hidden` in sync after the transition window so focus isn't
+  // trapped on elements inside a visually-closed sheet.
+  setTimeout(() => {
+    if (!sheet.classList.contains('is-open')) sheet.hidden = true;
+  }, 320);
   if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.focus(); }
+}
+
+// Tabbed settings — Voice / Agent / Transcript / Theme.
+function wireSettingsTabs() {
+  const sheet = $('#voice-settings-sheet');
+  if (!sheet) return;
+  const tabs = sheet.querySelectorAll('[data-settings-tab]');
+  const panels = sheet.querySelectorAll('[data-settings-panel]');
+  if (!tabs.length) return;
+  function activate(name) {
+    tabs.forEach((t) => {
+      const active = t.getAttribute('data-settings-tab') === name;
+      t.classList.toggle('is-active', active);
+      t.setAttribute('aria-selected', active ? 'true' : 'false');
+      t.tabIndex = active ? 0 : -1;
+    });
+    panels.forEach((p) => {
+      const active = p.getAttribute('data-settings-panel') === name;
+      p.classList.toggle('is-active', active);
+      p.hidden = !active;
+    });
+  }
+  tabs.forEach((t) => {
+    t.addEventListener('click', () => activate(t.getAttribute('data-settings-tab')));
+    t.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const list = Array.from(tabs);
+      const i = list.indexOf(t);
+      const next = list[(i + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length];
+      next.focus();
+      activate(next.getAttribute('data-settings-tab'));
+    });
+  });
 }
 
 // --- Bootstrap ---
@@ -500,6 +922,21 @@ export async function bootstrapVoiceShell() {
 
   const dock = buildDockMarkup();
   document.body.appendChild(dock);
+
+  // On mobile the dock starts as a compact pill so first paint shows the
+  // page content; user taps the toggle to expand. Desktop stays expanded
+  // because the app shell reserves right-gutter space for it.
+  try {
+    const isMobile = window.matchMedia('(max-width: 640px)').matches;
+    if (isMobile) {
+      dock.classList.add('is-collapsed');
+      const toggle = dock.querySelector('#voice-dock-toggle');
+      if (toggle) {
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.setAttribute('title', 'Expand voice panel');
+      }
+    }
+  } catch {}
 
   const transcriptEl = $('#voice-transcript');
   const agent = new VoiceAgent({ transcriptEl });
@@ -571,6 +1008,7 @@ export async function bootstrapVoiceShell() {
   });
 
   // --- Settings sheet
+  wireSettingsTabs();
   const settingsBtn = $('#voice-settings');
   const settingsClose = $('#voice-settings-close');
   on(settingsBtn, 'click', () => {
@@ -678,8 +1116,14 @@ export async function bootstrapVoiceShell() {
   const collapseBtn = $('#voice-dock-toggle');
   on(collapseBtn, 'click', () => {
     const d = $('#voice-dock');
-    const expanded = d.classList.toggle('is-collapsed');
-    collapseBtn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    const isCollapsed = d.classList.toggle('is-collapsed');
+    collapseBtn.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+    collapseBtn.setAttribute('title', isCollapsed ? 'Expand voice panel' : 'Collapse voice panel');
+    // When collapsing, ensure the settings sheet is closed so it can't linger
+    // behind a hidden body.
+    if (isCollapsed && $('#voice-settings-sheet').classList.contains('is-open')) {
+      closeSettings();
+    }
   });
   const clearBtn = $('#voice-clear');
   if (clearBtn) on(clearBtn, 'click', () => agent.clearTranscript());
