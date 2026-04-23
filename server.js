@@ -70,7 +70,34 @@ if (IS_PROD && SERVE_ROOT === ROOT) {
 }
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
+  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+
+// Pre-compile exact vs. wildcard origins once at module load so the
+// upgrade path stays O(1)/O(small) per request. Wildcard syntax mirrors
+// TLS-cert semantics: `https://*.example.com` matches exactly one label
+// (no dots) — `foo.example.com` yes, `example.com` no, `a.b.example.com`
+// no. Scheme and port (if present) are matched literally.
+const ALLOWED_ORIGIN_EXACT = new Set();
+const ALLOWED_ORIGIN_WILDCARDS = [];
+for (const entry of ALLOWED_ORIGINS) {
+  if (entry.includes('*')) {
+    const pattern = entry
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // regex-escape literals
+      .replace(/\*/g, '[^.]+');              // each `*` → one DNS label
+    ALLOWED_ORIGIN_WILDCARDS.push(new RegExp('^' + pattern + '$'));
+  } else {
+    ALLOWED_ORIGIN_EXACT.add(entry);
+  }
+}
+
+function matchesAllowedOrigin(origin) {
+  const o = String(origin).toLowerCase();
+  if (ALLOWED_ORIGIN_EXACT.has(o)) return true;
+  for (const re of ALLOWED_ORIGIN_WILDCARDS) {
+    if (re.test(o)) return true;
+  }
+  return false;
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -216,13 +243,13 @@ function isOriginAllowed(origin) {
   if (IS_PROD) {
     if (!origin) return false;
     if (!ALLOWED_ORIGINS.length) return false;
-    return ALLOWED_ORIGINS.includes(origin);
+    return matchesAllowedOrigin(origin);
   }
   if (!origin) return true; // loopback / curl / ws client
   if (!ALLOWED_ORIGINS.length) {
     return /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
   }
-  return ALLOWED_ORIGINS.includes(origin);
+  return matchesAllowedOrigin(origin);
 }
 
 // When this flag is set (tests / smoke stubs), WS-upgrade skips the nonce
