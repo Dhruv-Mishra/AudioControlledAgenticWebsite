@@ -5,21 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Dhruv FreightOps</title>
   <meta name="description" content="Live dispatcher console with a voice agent that actually takes actions on the page." />
-  <script>(function(){try{var t=localStorage.getItem('jarvis.theme')||'system';if(t==='system'){t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+  <!-- Anti-FOUC theme bootstrap. Must load synchronously and BEFORE the
+       stylesheets so [data-theme="light"] applies on first paint. Lives in
+       an external file (not inlined) so the production CSP can keep
+       `script-src 'self'` without `'unsafe-inline'`. -->
+  <script src="/js/theme-bootstrap.js"></script>
   <link rel="icon" type="image/svg+xml" href="/public/favicon.svg" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <!-- latency-pass: preconnect to the same-origin WS endpoint so the
        TLS handshake + HTTP/1.1 upgrade socket is warm before the user
        clicks Place Call. Saves ~150-300 ms on the first dial. We also
        prefetch the nonce endpoint's DNS since it sits behind the same
-       origin. -->
+       origin. Fonts are now self-hosted under /public/fonts/ so the old
+       fonts.googleapis.com / fonts.gstatic.com preconnects are gone. -->
   <link rel="preconnect" href="/" />
   <link rel="dns-prefetch" href="/api/ws-nonce" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" />
+  <!-- Preload the two latin variable woff2 files so first paint can swap
+       to Geist immediately rather than running through the system fallback
+       for ~200 ms. crossorigin is required for woff2 even when same-origin. -->
+  <link rel="preload" as="font" type="font/woff2" href="/public/fonts/geist-latin.woff2" crossorigin />
+  <link rel="preload" as="font" type="font/woff2" href="/public/fonts/geist-mono-latin.woff2" crossorigin />
   <link rel="modulepreload" href="/js/app.js" />
   <link rel="modulepreload" href="/js/voice-agent.js" />
   <link rel="modulepreload" href="/js/router.js" />
+  <link rel="stylesheet" href="/css/fonts.css" />
   <link rel="stylesheet" href="/css/tokens.css" />
   <link rel="stylesheet" href="/css/base.css" />
   <link rel="stylesheet" href="/css/components.css" />

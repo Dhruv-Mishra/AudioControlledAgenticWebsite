@@ -232,6 +232,42 @@ minute.
 That's fine — certbot renews ALL certs on the box. It's cron-scheduled by
 default; no action needed.
 
+### CSP violations in the browser console after a deploy
+The nginx config in `deploy/nginx/jarvis.whoisdhruv.com.conf` ships a
+locked-down `Content-Security-Policy` header that allows exactly the
+hosts the app touches at runtime:
+
+| Directive | Why |
+|---|---|
+| `img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org` | OSM tile servers for `/map.html`. The `*.` covers a/b/c subdomains. |
+| `script-src 'self' https://static.cloudflareinsights.com` | Cloudflare Web Analytics auto-injects `/beacon.min.js` when CF Analytics is enabled on the zone. |
+| `connect-src 'self' wss: https://cloudflareinsights.com` | Same beacon's POST target + the Gemini Live WebSocket. |
+| `font-src 'self'` | Geist + Geist Mono are self-hosted under `/public/fonts/` — no Google Fonts CDN. |
+| `style-src 'self' 'unsafe-inline'` | Leaflet injects `style="..."` on every tile and pin. Required. |
+
+If you add a new third-party (analytics, embeds, image CDN, etc.) extend
+the matching directive and reload nginx (see "Update nginx config" above).
+**Never** add `'unsafe-inline'` to `script-src` — it negates CSP. Use an
+external file in `js/` instead and add the path to `index.html`.
+
+#### Cloudflare Web Analytics — optional cleanup
+If you don't need Web Analytics for this zone, disabling it in the
+Cloudflare dashboard removes the auto-injected beacon entirely and lets
+you tighten CSP further:
+
+1. Cloudflare dashboard → select the zone (`whoisdhruv.com`).
+2. **Analytics & Logs** → **Web Analytics** → **Manage site**.
+3. Click **Disable** (or remove the site from the Web Analytics list).
+4. After the change propagates (a few minutes), drop these from the CSP
+   in `deploy/nginx/jarvis.whoisdhruv.com.conf`:
+   - `https://static.cloudflareinsights.com` from `script-src`
+   - `https://cloudflareinsights.com` from `connect-src`
+5. `sudo nginx -t && sudo systemctl reload nginx`.
+
+The current shipped CSP keeps both whitelisted so the deploy works
+end-to-end without touching the dashboard. Tightening it later is
+optional, not required.
+
 ---
 
 ## What's in `deploy/`

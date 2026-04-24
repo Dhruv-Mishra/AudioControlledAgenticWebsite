@@ -86,6 +86,22 @@ async function buildWorklet() {
   return res;
 }
 
+async function buildClassicScripts() {
+  // Tiny classic <script src="..."> files loaded outside the ESM graph (no
+  // imports, no exports). Built as IIFE so they execute in script-tag scope
+  // without the module-mode strictness. Today this is just the anti-FOUC
+  // theme bootstrap referenced from index.html <head>.
+  const res = await esbuild.build({
+    ...commonJsOpts,
+    entryPoints: [path.join(ROOT, 'js/theme-bootstrap.js')],
+    outdir: path.join(DIST, 'js'),
+    format: 'iife',
+    splitting: false,
+    metafile: EMIT_META
+  });
+  return res;
+}
+
 async function buildCss() {
   const cssEntries = (await fsp.readdir(path.join(ROOT, 'css')))
     .filter((f) => f.endsWith('.css'))
@@ -224,6 +240,7 @@ async function main() {
   const results = await Promise.all([
     buildJs(jsEntries),
     buildWorklet(),
+    buildClassicScripts(),
     buildCss()
   ]);
 
