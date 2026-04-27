@@ -332,3 +332,12 @@ export function exit() {
   state = null;
   agentRef = null;
 }
+
+export function getState() {
+  return { selectedId: state ? state.selectedId : null };
+}
+
+export function setState(snap) {
+  if (!snap || !state) return;
+  if (snap.selectedId) selectLoad(snap.selectedId);
+}

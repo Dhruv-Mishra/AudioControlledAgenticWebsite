@@ -106,3 +106,15 @@ export function exit() {
   state = null;
   agentRef = null;
 }
+
+export function getState() {
+  return { callbacks: state ? state.callbacks.slice() : [] };
+}
+
+export function setState(snap) {
+  if (!snap || !state) return;
+  if (Array.isArray(snap.callbacks)) {
+    state.callbacks = snap.callbacks.slice();
+    renderCallbacks();
+  }
+}

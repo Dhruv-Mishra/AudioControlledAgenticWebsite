@@ -175,3 +175,15 @@ export function exit() {
   state = null;
   agentRef = null;
 }
+
+export function getState() {
+  return { log: state ? state.log.slice() : [] };
+}
+
+export function setState(snap) {
+  if (!snap || !state) return;
+  if (Array.isArray(snap.log)) {
+    state.log = snap.log.slice();
+    renderLog();
+  }
+}

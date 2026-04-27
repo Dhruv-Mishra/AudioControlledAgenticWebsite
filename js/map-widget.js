@@ -495,11 +495,8 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
           })
         : null;
 
-      const popup = buildLoadPopup(load);
-
       [pickupMarker, dropoffMarker].forEach((m, idx) => {
         if (!m) return;
-        m.bindPopup(popup);
         const side = idx === 0 ? 'pickup' : 'dropoff';
         m.on('click', () => openLoadDetail(load, side));
         m.on('keypress', (ev) => {
@@ -519,7 +516,6 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
           [[pickupLL.lat, pickupLL.lng], [dropoffLL.lat, dropoffLL.lng]],
           { className: laneClass, weight: 2, interactive: true, pane: 'lanes-pane' }
         );
-        lane.bindPopup(popup);
         lane.on('click', () => openLoadDetail(load));
         laneLayer.addLayer(lane);
       }
@@ -568,27 +564,6 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       const pinEl = m.getElement();
       if (pinEl) pinEl.setAttribute('data-agent-id', id);
       registry.set(carrier.id, { kind: 'carrier', record: carrier, marker: m, coords, agentId: id });
-    }
-
-    function buildLoadPopup(load) {
-      const status = STATUS_LABEL[load.status] || load.status || '';
-      const chipCls = statusChipClass(load.status);
-      const wrap = document.createElement('div');
-      const head = document.createElement('div');
-      head.className = 'map-popup-title';
-      const idSpan = document.createElement('span');
-      idSpan.textContent = load.id;
-      head.appendChild(idSpan);
-      const chip = document.createElement('span');
-      chip.className = chipCls;
-      chip.textContent = status;
-      head.appendChild(chip);
-      const sub = document.createElement('div');
-      sub.className = 'map-popup-sub';
-      sub.textContent = `${load.pickup || '?'} → ${load.dropoff || '?'} · ${load.miles ? load.miles + 'mi' : ''} · ETA ${fmtEta(load.eta)}`;
-      wrap.appendChild(head);
-      wrap.appendChild(sub);
-      return wrap;
     }
 
     function buildCarrierPopup(carrier, city) {
@@ -1182,8 +1157,6 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       const ok = focusLoadInternal(loadId);
       if (!ok) return null;
       const entry = registry.get(loadId);
-      const m = entry.pickup || entry.dropoff;
-      if (m) m.openPopup();
       announceFocus(`load ${loadId}`);
       if (window.__loadModal && entry.record) {
         try { window.__loadModal.open(entry.record, { context: 'map' }); } catch {}
@@ -1517,6 +1490,39 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
         );
       }
       return envelopeOk(r);
+    };
+
+    api.getViewState = function getViewState() {
+      if (destroyed) return null;
+      try {
+        const c = map.getCenter();
+        return {
+          center: { lat: c.lat, lng: c.lng },
+          zoom: map.getZoom(),
+          visibleLayers: [...visibleLayers],
+          delayedOnly,
+          listOpen
+        };
+      } catch { return null; }
+    };
+
+    api.restoreViewState = function restoreViewState(snap) {
+      if (destroyed || !snap) return;
+      try {
+        if (snap.center && Number.isFinite(snap.center.lat) && Number.isFinite(snap.center.lng) && Number.isFinite(snap.zoom)) {
+          map.setView([snap.center.lat, snap.center.lng], snap.zoom, { animate: false });
+        }
+        ['loads', 'carriers', 'lanes'].forEach((l) => {
+          const want = Array.isArray(snap.visibleLayers) && snap.visibleLayers.includes(l);
+          if (want !== visibleLayers.has(l)) setLayerVisibleInternal(l, want);
+        });
+        if (typeof snap.delayedOnly === 'boolean' && snap.delayedOnly !== delayedOnly) {
+          setLayerVisibleInternal('delayed', snap.delayedOnly);
+        }
+        if (typeof snap.listOpen === 'boolean' && snap.listOpen !== listOpen) {
+          setListView(snap.listOpen);
+        }
+      } catch {}
     };
 
     // Expose BEFORE ready resolves so callers can `await w.ready`.

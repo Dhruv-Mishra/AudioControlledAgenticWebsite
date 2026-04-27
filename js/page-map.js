@@ -94,3 +94,21 @@ export function exit() {
     try { delete window.__mapWidget; } catch { window.__mapWidget = undefined; }
   }
 }
+
+export function getState() {
+  try {
+    if (window.__mapWidget && typeof window.__mapWidget.getViewState === 'function') {
+      return { mapView: window.__mapWidget.getViewState() };
+    }
+  } catch {}
+  return null;
+}
+
+export function setState(snap) {
+  if (!snap || !snap.mapView) return;
+  try {
+    if (window.__mapWidget && typeof window.__mapWidget.restoreViewState === 'function') {
+      window.__mapWidget.restoreViewState(snap.mapView);
+    }
+  } catch {}
+}

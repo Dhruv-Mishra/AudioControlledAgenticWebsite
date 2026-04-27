@@ -999,10 +999,12 @@ export async function bootstrapVoiceShell() {
     volumeReadout.textContent = `${Math.round(Number(val) || 0)}%`;
   }
   if (volume) {
+    const initialVol = (agent.outputVolume != null && Number.isFinite(agent.outputVolume)) ? agent.outputVolume : 1;
+    volume.value = String(Math.round(initialVol * 100));
     reflectVolumeReadout(volume.value);
     on(volume, 'input', () => {
       reflectVolumeReadout(volume.value);
-      agent.pipeline.setOutputVolume(Number(volume.value) / 100);
+      agent.setVolume(Number(volume.value) / 100);
     });
   }
 

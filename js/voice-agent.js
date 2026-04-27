@@ -363,6 +363,11 @@ export class VoiceAgent extends EventTarget {
     this.phoneCompression = this._loadPhoneCompression();
     try { this.pipeline.setPhoneCompression(this.phoneCompression); } catch {}
 
+    // Output volume. Persists to localStorage under 'liveAgent.volume';
+    // range [0, 1.5], default 1.0. Applied immediately to the pipeline.
+    this.outputVolume = this._loadVolume();
+    try { this.pipeline.setOutputVolume(this.outputVolume); } catch {}
+
     // audio-prefs: the server may negotiate a narrowband output (8 kHz)
     // when phoneLine=true. Default 24 kHz tracks the Gemini Live native
     // output rate and is the safe fallback when the server hasn't sent
@@ -1213,6 +1218,25 @@ export class VoiceAgent extends EventTarget {
       if (raw === 'off') return false;
     } catch {}
     return DEFAULT_PHONE_COMPRESSION;
+  }
+
+  _loadVolume() {
+    try {
+      const raw = localStorage.getItem('liveAgent.volume');
+      if (raw != null) {
+        const v = Number(raw);
+        if (Number.isFinite(v)) return Math.max(0, Math.min(1.5, v));
+      }
+    } catch {}
+    return 1.0;
+  }
+
+  setVolume(v) {
+    const clamped = Math.max(0, Math.min(1.5, Number(v) || 0));
+    this.outputVolume = clamped;
+    try { this.pipeline.setOutputVolume(clamped); } catch {}
+    try { localStorage.setItem('liveAgent.volume', String(clamped)); } catch {}
+    return clamped;
   }
 
   /** Advanced-setting: switch between live-call and wake-word modes.

@@ -14,6 +14,8 @@
 //
 // No framework. No build step. ~150 lines of vanilla JS.
 
+import * as pageState from './page-state.js';
+
 const ROUTES = Object.freeze({
   '/': {
     name: 'dispatch',
@@ -150,6 +152,18 @@ class Router extends EventTarget {
     try {
       // Exit previous route (if any).
       if (this.currentModule && typeof this.currentModule.exit === 'function') {
+        // Snapshot view state (scroll + form fields + optional module state)
+        // BEFORE exit() tears the DOM down, so we can restore on return.
+        try {
+          const prevName = this.currentRoute && this.currentRoute.name;
+          if (prevName) {
+            let modState = null;
+            if (typeof this.currentModule.getState === 'function') {
+              try { modState = this.currentModule.getState(); } catch {}
+            }
+            pageState.save(prevName, this.target, modState);
+          }
+        } catch (err) { console.error('[router] page-state save', err); }
         try { await this.currentModule.exit(); } catch (err) { console.error('[router] exit error', err); }
       }
 
@@ -170,8 +184,16 @@ class Router extends EventTarget {
 
       // History API bookkeeping. We never call this on popstate (the browser
       // already updated the URL) — controlled via `replace`/`push` flag.
+      const savedSnap = pageState.load(route.name);
       if (!replace && location.pathname !== nextPath) {
         history.pushState({ route: route.name }, '', nextPath);
+        // Reset scroll on a fresh forward navigation only when we have no
+        // saved snapshot. Saved snapshots restore their own scrollY below
+        // after enter(). Skip on popstate (suppressNotify) so the browser
+        // can restore prior scroll position.
+        if (!suppressNotify && !(savedSnap && savedSnap.dom && savedSnap.dom.scrollY > 0)) {
+          try { window.scrollTo(0, 0); } catch {}
+        }
       } else if (replace) {
         history.replaceState({ route: route.name }, '', nextPath);
       }
@@ -185,6 +207,16 @@ class Router extends EventTarget {
       // Call the route's enter(). Gives it the mounted DOM root.
       if (mod && typeof mod.enter === 'function') {
         await mod.enter(this.target, { path: nextPath, voiceAgent: this.voiceAgent });
+      }
+
+      // Restore saved view state (form fields trigger filter handlers via
+      // input/change events; scroll restored on the next frame).
+      if (savedSnap) {
+        try { pageState.applyDom(this.target, savedSnap); } catch (err) { console.error('[router] applyDom', err); }
+        if (mod && typeof mod.setState === 'function' && savedSnap.module != null) {
+          try { mod.setState(savedSnap.module); } catch (err) { console.error('[router] setState', err); }
+        }
+        try { pageState.restoreScroll(savedSnap); } catch {}
       }
 
       this.currentRoute = { ...route, path: nextPath };

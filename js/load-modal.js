@@ -10,9 +10,8 @@ const STATUS_LABEL = {
 };
 
 const MODAL_HTML = `<div id="load-modal-root" class="load-modal" data-modal-root="load" aria-hidden="true"
-     role="dialog" aria-label="Load detail" aria-modal="true">
-  <div class="load-modal-backdrop"></div>
-  <aside class="load-modal-panel">
+     aria-label="Load detail">
+  <aside class="load-modal-card">
 
     <div class="load-modal-hero">
       <picture>
@@ -31,6 +30,7 @@ const MODAL_HTML = `<div id="load-modal-root" class="load-modal" data-modal-root
     <div class="load-modal-body">
       <h2 class="load-modal-title" data-agent-id="load_modal.title"
           data-modal-field="title"></h2>
+      <p class="load-modal-subtitle" data-modal-field="subtitle"></p>
 
       <section class="load-modal-section">
         <h3 class="load-modal-section-title">Route</h3>
@@ -73,16 +73,27 @@ function prefersReducedMotion() {
 }
 
 function ensureRoot() {
-  if (root && root.isConnected) return root;
+  const mapRoot = document.getElementById('map-root');
+  // Reparent if the preferred host changed (SPA nav between map ↔ other pages)
+  if (root && root.isConnected) {
+    const desired = mapRoot || document.body;
+    if (root.parentNode !== desired) desired.appendChild(root);
+    return root;
+  }
   root = document.getElementById('load-modal-root');
-  if (root) return root;
+  if (root) {
+    const desired = mapRoot || document.body;
+    if (root.parentNode !== desired) desired.appendChild(root);
+    return root;
+  }
   const div = document.createElement('div');
   div.innerHTML = MODAL_HTML;
   root = div.firstElementChild;
-  document.body.appendChild(root);
-  // Backdrop click
-  const backdrop = root.querySelector('.load-modal-backdrop');
-  if (backdrop) backdrop.addEventListener('click', close);
+  // Prefer mounting inside the map root so vertical placement matches
+  // the carrier-panel aside (which is also a child of #map-root and uses
+  // position:absolute relative to it). Falls back to <body> on pages
+  // without a map (e.g. dispatch) where position:fixed kicks in.
+  (mapRoot || document.body).appendChild(root);
   // Close button
   const closeBtn = root.querySelector('.load-modal-close');
   if (closeBtn) closeBtn.addEventListener('click', close);
@@ -147,6 +158,15 @@ function populateFields(load) {
   const carrier = resolveCarrier(load);
   setField('carrier', carrier ? carrier.name : (load.carrier || 'Unassigned'));
 
+  // Subtitle
+  const subtitle = root.querySelector('.load-modal-subtitle');
+  if (subtitle) {
+    const milesPart = load.miles ? `${Number(load.miles).toLocaleString('en-US')} mi` : '';
+    const etaPart = load.eta ? `ETA ${fmtEta(load.eta)}` : '';
+    const route = `${load.pickup || '?'} → ${load.dropoff || '?'}`;
+    subtitle.textContent = [route, milesPart, etaPart].filter(Boolean).join(' · ');
+  }
+
   // Hero image
   const slug = carrier && carrier.imageSlug ? carrier.imageSlug : 'truck-generic';
   const imgSrc = `/public/images/carriers/${slug}.webp`;
@@ -154,6 +174,9 @@ function populateFields(load) {
   const img = el.querySelector('[data-modal-field="hero_img"]');
   if (source) source.setAttribute('srcset', imgSrc);
   if (img) {
+    img.classList.remove('is-loaded');
+    img.onload = () => img.classList.add('is-loaded');
+    img.onerror = () => img.classList.add('is-loaded');
     img.src = imgSrc;
     img.alt = carrier
       ? `${carrier.name} — Load ${load.id}`
@@ -249,18 +272,7 @@ function handleRequestStatus() {
 }
 
 function onKeydown(ev) {
-  if (ev.key === 'Escape') { close(); return; }
-  // Focus trap — keep Tab/Shift-Tab inside the panel while open.
-  if (ev.key !== 'Tab' || !root) return;
-  const focusables = root.querySelectorAll(
-    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-  );
-  if (!focusables.length) return;
-  const first = focusables[0];
-  const last = focusables[focusables.length - 1];
-  const active = document.activeElement;
-  if (ev.shiftKey && active === first) { ev.preventDefault(); last.focus(); }
-  else if (!ev.shiftKey && active === last) { ev.preventDefault(); first.focus(); }
+  if (ev.key === 'Escape') { close(); }
 }
 
 export function open(load, opts = {}) {
@@ -268,6 +280,17 @@ export function open(load, opts = {}) {
   const el = ensureRoot();
   currentLoad = load;
   currentOpts = opts;
+
+  // When body-portaled (no #map-root on the page, e.g. dispatch), offset
+  // the panel below the sticky app-header so it doesn't overlap. On the
+  // map page the panel lives inside #map-root and this is a no-op.
+  if (el.parentNode === document.body) {
+    const header = document.querySelector('.app-header');
+    const hh = header ? Math.round(header.getBoundingClientRect().height) : 0;
+    el.style.setProperty('--load-modal-top-offset', hh + 'px');
+  } else {
+    el.style.removeProperty('--load-modal-top-offset');
+  }
 
   populateFields(load);
   renderActions(load, opts);
@@ -278,14 +301,13 @@ export function open(load, opts = {}) {
   el.setAttribute('aria-hidden', 'false');
   void el.offsetWidth;
   el.classList.add('is-open');
-  document.body.classList.add('has-modal-open');
 
   // Focus close button
   const closeBtn = el.querySelector('.load-modal-close');
   if (closeBtn) closeBtn.focus();
 
   // ESC listener
-  el.addEventListener('keydown', onKeydown);
+  document.addEventListener('keydown', onKeydown);
 }
 
 export function close() {
@@ -293,12 +315,11 @@ export function close() {
   const opener = currentOpts && currentOpts.opener;
 
   root.classList.remove('is-open');
-  root.removeEventListener('keydown', onKeydown);
+  document.removeEventListener('keydown', onKeydown);
 
   const reduced = prefersReducedMotion();
   const done = () => {
     root.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('has-modal-open');
     root.removeEventListener('transitionend', done);
     // Return focus
     if (opener && opener.isConnected && typeof opener.focus === 'function') {

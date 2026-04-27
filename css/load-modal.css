@@ -1,178 +1,196 @@
 /* ==========================================================
- * Load detail modal — body-portal slide-in panel
+ * Load detail panel — top-right floating aside (carrier-panel style)
  * Tokens: var(--color-*), var(--sp-*), var(--radius-*)
- * Mobile ≤640px → bottom-sheet
  * ========================================================== */
 
+/* Container — top-right aside inside #map-root, slide-in from right.
+ * Uses position:absolute so it tracks the map's top edge exactly like
+ * .carrier-panel does. The body-portal fallback (no #map-root on page)
+ * is upgraded to position:fixed via the selector below. */
 .load-modal {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-load-modal, 1200);
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  left: auto;
+  bottom: auto;
+  width: 352px;
+  max-height: min(640px, calc(100% - var(--sp-4) * 2));
+  z-index: var(--z-map-panel);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg-elev-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--md-sys-elevation-level-3);
+  transform: translateX(calc(100% + var(--sp-4)));
+  opacity: 0;
   visibility: hidden;
   pointer-events: none;
+  transition:
+    transform 180ms var(--ease-out-expo),
+    opacity 180ms var(--ease-out-expo),
+    visibility 0s linear 180ms;
 }
-
-/* Body scroll-lock while a modal is open (mainly mobile bottom-sheet). */
-body.has-modal-open {
-  overflow: hidden;
-  touch-action: none;
+/* Body-portal fallback (pages without #map-root): pin to viewport, offset
+ * below the sticky .app-header via --load-modal-top-offset (set in JS). */
+body > .load-modal {
+  position: fixed;
+  top: calc(var(--load-modal-top-offset, 0px) + var(--sp-4));
+  max-height: min(640px, calc(100vh - var(--load-modal-top-offset, 0px) - var(--sp-4) * 2));
 }
-
-.load-modal[aria-hidden="false"],
 .load-modal.is-open {
   visibility: visible;
   pointer-events: auto;
-}
-
-/* Backdrop */
-.load-modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  opacity: 0;
-  transition: opacity 180ms ease;
-}
-.load-modal.is-open .load-modal-backdrop {
+  transform: translateX(0);
   opacity: 1;
+  transition:
+    transform 180ms var(--ease-out-expo),
+    opacity 180ms var(--ease-out-expo),
+    visibility 0s linear 0s;
 }
 
-/* Panel — right-side drawer */
-.load-modal-panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  height: 100%;
-  width: min(420px, 90vw);
-  background: var(--color-surface, var(--color-bg-elev-3));
+/* Card — now the root IS the card; keep as inner wrapper for flex children */
+.load-modal-card {
   display: flex;
   flex-direction: column;
-  transform: translateX(100%);
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  overflow-y: auto;
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.3);
-}
-.load-modal.is-open .load-modal-panel {
-  transform: translateX(0);
+  overflow: hidden;
+  flex: 1 1 auto;
 }
 
 /* Hero */
 .load-modal-hero {
   position: relative;
+  width: 100%;
   aspect-ratio: 16 / 9;
-  overflow: hidden;
   flex-shrink: 0;
-  background: var(--color-bg-elev-2);
+  overflow: hidden;
+  background: var(--color-bg-elev-2, #2a2a2c);
 }
 .load-modal-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity var(--dur-base, 180ms) ease;
 }
+.load-modal-img.is-loaded { opacity: 1; }
+
 .load-modal-status {
   position: absolute;
-  top: var(--sp-2);
-  left: var(--sp-2);
+  top: var(--sp-2, 8px);
+  left: var(--sp-2, 8px);
 }
 .load-modal-close {
   position: absolute;
-  top: var(--sp-2);
-  right: var(--sp-2);
-  background: var(--color-overlay-bg, rgba(0, 0, 0, 0.5));
-  border-radius: var(--radius-pill, 9999px);
+  top: var(--sp-2, 8px);
+  right: var(--sp-2, 8px);
+  background: var(--color-overlay-bg);
+  color: #fff;
   width: 32px;
   height: 32px;
-  display: flex;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  color: #fff;
-  font-size: 1.25rem;
   cursor: pointer;
+  font-size: 1.25rem;
   line-height: 1;
 }
-.load-modal-close:hover,
 .load-modal-close:focus-visible {
-  background: var(--color-overlay-bg-hover, rgba(0, 0, 0, 0.7));
+  outline: 2px solid var(--color-focus-ring, var(--color-accent, #4f9cff));
+  outline-offset: 2px;
 }
 
-/* Body */
+/* Body — internal scroll if content overflows */
 .load-modal-body {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: var(--sp-4);
-}
-.load-modal-title {
-  font-family: var(--font-sans);
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-semibold);
   color: var(--color-text);
-  margin: 0 0 var(--sp-1) 0;
 }
 
-/* Sections */
-.load-modal-section {
-  padding: var(--sp-3) 0;
-  border-top: 1px solid var(--color-border);
+.load-modal-title {
+  font-size: var(--fs-lg, 1.25rem);
+  font-weight: var(--fw-semibold, 600);
+  margin: 0 0 var(--sp-1, 4px) 0;
 }
-.load-modal-section-title {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
+
+.load-modal-subtitle {
+  font-size: var(--fs-sm, 0.875rem);
   color: var(--color-text-muted);
-  margin: 0 0 var(--sp-2) 0;
+  margin: 0 0 var(--sp-4, 16px) 0;
 }
 
-/* Key-value grid */
+.load-modal-section {
+  border-top: 1px solid var(--color-border, rgba(255,255,255,0.08));
+  padding: var(--sp-3, 12px) 0 0 0;
+  margin-top: var(--sp-3, 12px);
+}
+.load-modal-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.load-modal-section-title {
+  font-size: var(--fs-xs, 0.75rem);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  font-weight: var(--fw-semibold, 600);
+  margin: 0 0 var(--sp-2, 8px) 0;
+}
+
 .load-modal-kv {
   display: grid;
   grid-template-columns: 96px 1fr;
-  gap: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-sm);
+  gap: var(--sp-1, 4px) var(--sp-3, 12px);
+  margin: 0;
+  font-size: var(--fs-sm, 0.875rem);
 }
 .load-modal-kv dt {
   color: var(--color-text-muted);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-medium);
+  font-size: var(--fs-xs, 0.75rem);
+  align-self: center;
 }
 .load-modal-kv dd {
   margin: 0;
   color: var(--color-text);
 }
 
-/* Actions row */
+/* Actions — pinned at end of flex column, with top divider */
 .load-modal-actions {
   flex-shrink: 0;
   display: flex;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
-  border-top: 1px solid var(--color-border);
   flex-wrap: wrap;
+  gap: var(--sp-2, 8px);
+  padding: var(--sp-3, 12px) var(--sp-5, 24px);
+  padding-bottom: max(var(--sp-3, 12px), env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-border, rgba(255,255,255,0.08));
 }
 
-/* ---- Mobile: bottom sheet ---- */
+/* Mobile — bottom-sheet (mirrors carrier-panel) */
 @media (max-width: 640px) {
-  .load-modal-panel {
+  .load-modal {
     top: auto;
-    bottom: 0;
-    right: 0;
     left: 0;
+    right: 0;
+    bottom: 0;
     width: 100%;
-    height: auto;
-    max-height: 80vh;
-    transform: translateY(100%);
+    max-height: 70dvh;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    transform: translateY(100%);
   }
-  .load-modal.is-open .load-modal-panel {
+  .load-modal.is-open {
     transform: translateY(0);
   }
+  .load-modal-actions .btn { flex: 1 1 calc(50% - var(--sp-2, 8px)); }
 }
 
-/* ---- Reduced motion ---- */
+/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .load-modal *,
-  .load-modal {
-    transition: none !important;
-  }
+  .load-modal { transition: none; }
+  .load-modal.is-open { visibility: visible; pointer-events: auto; transform: translateX(0); opacity: 1; }
 }
