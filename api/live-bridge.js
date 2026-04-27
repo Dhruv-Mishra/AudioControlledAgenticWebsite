@@ -97,13 +97,16 @@ function safeDelimText(s, max = 140) {
  *  `setup_complete` after the user places a call. The model is taught to
  *  respond immediately with one short greeting — introduce itself, ask how
  *  it can help, stay in-persona. */
-function buildCallInitiatedText({ page, title }) {
+function buildCallInitiatedText({ page, title, persona }) {
   const niceTitle = safeDelimText(title, 100) || '(untitled page)';
   const safePage = safeDelimText(page, 80) || '/';
+  const script = (persona && persona.introScript)
+    || 'Jarvis here, Dhruv FreightOps. How can I help?';
   const lines = [
     '<call_initiated>',
     `The user just placed a call and is now connected. They are on ${safePage} ("${niceTitle}").`,
-    'Greet them ONCE, briefly, in one short sentence — introduce yourself as Jarvis from Dhruv FreightOps and ask how you can help. Start speaking immediately; do not wait for them. Keep your persona. End with a question.',
+    `Speak this greeting EXACTLY: "${script}"`,
+    'Then wait for the user to respond. Do not call any tools yet.',
     '</call_initiated>'
   ];
   return lines.join('\n');
@@ -271,6 +274,9 @@ function attach(browserWs, req, env) {
   // subsequent `audio_prefs` control frame. phoneLine defaults to true so
   // a client that never sends the frame still gets the narrowband path.
   let audioPrefs = { phoneLine: true, outSampleRate: 8000 };
+  // Voice pinning: locked at call open from the client's selectedVoice or
+  // the persona default. Survives persona switches mid-call.
+  let pinnedVoice = null;
   // latency-pass: encode-latency HUD telemetry. Every chunk's encode span
   // is pushed here; on `turn_complete` we log a summary line. Bounded to
   // the last 1024 entries so a long call doesn't leak memory.
@@ -538,7 +544,7 @@ function attach(browserWs, req, env) {
       }
     }
 
-    const voice = KNOWN_VOICES.includes(persona.voice) ? persona.voice : 'Kore';
+    const voice = pinnedVoice || (KNOWN_VOICES.includes(persona.voice) ? persona.voice : 'Kore');
     const systemInstruction = buildSystemInstruction({
       personaFragment: persona.fragment,
       pageName
@@ -889,6 +895,14 @@ function attach(browserWs, req, env) {
           audioPrefs = { phoneLine, outSampleRate: phoneLine ? 8000 : 24000 };
           dlog(sessionId, 'hello audio_prefs phoneLine=' + phoneLine);
         }
+
+        // Voice pinning: lock the voice for this call. Client override
+        // takes precedence, then persona default.
+        const requestedVoice = typeof data.selectedVoice === 'string' ? data.selectedVoice : null;
+        pinnedVoice = (requestedVoice && KNOWN_VOICES.includes(requestedVoice))
+          ? requestedVoice
+          : persona.voice;
+
         // Let the client know the current decoding rate so the playback
         // graph picks the right sample rate per chunk.
         safeSendJson(browserWs, {
@@ -931,7 +945,7 @@ function attach(browserWs, req, env) {
         if (data.greet && typeof data.greet === 'object') {
           const gPage = String(data.greet.page || pageName || '/').slice(0, 120);
           const gTitle = String(data.greet.title || '').slice(0, 120);
-          pendingGreet = { page: gPage, title: gTitle };
+          pendingGreet = { page: gPage, title: gTitle, persona };
           greetInjected = false;
           greetAcked = true;
         }
@@ -943,6 +957,7 @@ function attach(browserWs, req, env) {
           model: LIVE_MODEL_ID,
           personas: publicPersonas(),
           mode,
+          voice: pinnedVoice,
           resumeRequested: !!incomingHandle,
           resumeWindowMs: SESSION_RESUME_WINDOW_MS,
           // latency-pass: tell client we honoured the eager-greet so it can
@@ -974,7 +989,7 @@ function attach(browserWs, req, env) {
         const page = String(data.page || pageName || '/').slice(0, 120);
         const title = String(data.title || '').slice(0, 120);
         pageName = page;
-        pendingGreet = pendingGreet || { page, title };
+        pendingGreet = pendingGreet || { page, title, persona };
         maybeFireGreeting('call_start');
         return;
       }

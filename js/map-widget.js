@@ -437,12 +437,35 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     const registry = new Map();
     track(() => registry.clear());
 
+    // Currently selected carrier pin element (for is-selected toggle).
+    let selectedPinEl = null;
+
+    const TRUCK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" fill="none">
+  <rect x="8" y="6" width="12" height="16" rx="2" fill="currentColor" opacity="0.9"/>
+  <path d="M10 6V3a1 1 0 011-1h6a1 1 0 011 1v3" fill="currentColor" opacity="0.7"/>
+  <path d="M14 1l4 4h-8z" fill="currentColor"/>
+  <circle cx="10" cy="22" r="1.5" fill="currentColor" opacity="0.5"/>
+  <circle cx="18" cy="22" r="1.5" fill="currentColor" opacity="0.5"/>
+</svg>`;
+
     function makeDivIcon(pinClass, ariaLabel, pane) {
       return L.divIcon({
         className: '',
-        html: `<div class="map-pin ${pinClass}" tabindex="0" role="button" aria-label="${escapeHtml(ariaLabel)}"></div>`,
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
+        html: `<div class="map-pin ${pinClass}" tabindex="0" role="button" aria-label="${escapeHtml(ariaLabel)}">${TRUCK_SVG}</div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        pane
+      });
+    }
+
+    function makeCarrierDivIcon(carrier, ariaLabel, pane) {
+      const statusCls = carrier.status ? `map-pin--${carrier.status}` : 'map-pin--carrier';
+      const heading = typeof carrier.heading === 'number' ? carrier.heading : 0;
+      return L.divIcon({
+        className: '',
+        html: `<div class="map-pin ${statusCls}" tabindex="0" role="button" aria-label="${escapeHtml(ariaLabel)}" style="transform: rotate(${heading}deg)">${TRUCK_SVG}</div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
         pane
       });
     }
@@ -520,15 +543,26 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       if (!coords) return;
       const id = `map.pin.${carrier.id}`;
       const m = L.marker([coords.lat, coords.lng], {
-        icon: makeDivIcon('map-pin--carrier', `Carrier ${carrier.name} in ${hq.city}`, 'carriers-pane'),
+        icon: makeCarrierDivIcon(carrier, `Carrier ${carrier.name} in ${hq.city}`, 'carriers-pane'),
         keyboard: true,
         pane: 'carriers-pane'
       });
       m.bindPopup(buildCarrierPopup(carrier, hq.city));
-      m.on('click', () => openCarrierDetail(carrier, hq.city));
+      const handleClick = () => {
+        // Toggle is-selected on pins
+        if (selectedPinEl) selectedPinEl.classList.remove('is-selected');
+        const el = m.getElement();
+        const pin = el && el.querySelector('.map-pin');
+        if (pin) {
+          pin.classList.add('is-selected');
+          selectedPinEl = pin;
+        }
+        openCarrierPanel(carrier, hq.city, pin);
+      };
+      m.on('click', handleClick);
       m.on('keypress', (ev) => {
         const key = ev && ev.originalEvent && ev.originalEvent.key;
-        if (key === 'Enter' || key === ' ') openCarrierDetail(carrier, hq.city);
+        if (key === 'Enter' || key === ' ') handleClick();
       });
       carrierLayer.addLayer(m);
       const pinEl = m.getElement();
@@ -675,6 +709,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
 
     function openDetailPanel(contentNode, opener) {
       if (!detail) return;
+      closeCarrierPanel();
       detail.replaceChildren();
       const hdr = document.createElement('div');
       hdr.className = 'map-detail-header';
@@ -761,6 +796,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       const kv = [
         ['ID', carrier.id],
         ['MC', carrier.mc || '—'],
+        ['DOT', carrier.dot || '—'],
         ['HQ', city || 'Unknown'],
         ['Rating', typeof carrier.rating === 'number' ? carrier.rating.toFixed(1) : '—'],
         ['Equipment', (carrier.equipment || []).join(', ') || '—'],
@@ -778,6 +814,170 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       const entry = registry.get(carrier.id);
       const opener = entry && entry.marker ? entry.marker.getElement() : null;
       openDetailPanel(wrap, opener);
+    }
+
+    // --- Carrier detail panel (FlightRadar-style aside) ---
+
+    const carrierPanel = root.querySelector('#carrier-detail-panel');
+    let carrierPanelOpener = null;
+
+    const STATUS_LABEL_CARRIER = {
+      idle: 'Idle',
+      in_transit: 'In transit',
+      delayed: 'Delayed',
+      loading: 'Loading',
+      booked: 'Booked',
+      delivered: 'Delivered'
+    };
+
+    function carrierStatusChipClass(status) {
+      switch (status) {
+        case 'in_transit': return 'chip chip--info';
+        case 'idle':       return 'chip chip--neutral';
+        case 'delayed':    return 'chip chip--danger';
+        case 'loading':    return 'chip chip--warn';
+        case 'booked':     return 'chip chip--neutral';
+        default:           return 'chip chip--neutral';
+      }
+    }
+
+    function openCarrierPanel(carrier, city, openerEl) {
+      if (!carrierPanel) {
+        // Fallback to old drawer if panel markup missing
+        openCarrierDetail(carrier, city);
+        return;
+      }
+
+      closeDetailPanel();
+      carrierPanelOpener = openerEl || null;
+
+      // Image
+      const slug = carrier.imageSlug || 'truck-generic';
+      const imgSrc = `/public/images/carriers/${slug}.webp`;
+      const source = carrierPanel.querySelector('.carrier-panel-hero source');
+      const img = carrierPanel.querySelector('.carrier-panel-img');
+      if (source) source.setAttribute('srcset', imgSrc);
+      if (img) {
+        img.src = imgSrc;
+        img.alt = `${carrier.name} truck`;
+      }
+
+      // Status chip
+      const statusEl = carrierPanel.querySelector('.carrier-panel-status');
+      if (statusEl) {
+        statusEl.className = `chip carrier-panel-status ${carrierStatusChipClass(carrier.status).replace('chip ', '')}`;
+        statusEl.textContent = STATUS_LABEL_CARRIER[carrier.status] || carrier.status || '';
+      }
+
+      // Name + IDs
+      const nameEl = carrierPanel.querySelector('.carrier-panel-name');
+      if (nameEl) nameEl.textContent = carrier.name;
+      const idsEl = carrierPanel.querySelector('.carrier-panel-ids');
+      if (idsEl) idsEl.innerHTML = `<span class="mono">${escapeHtml(carrier.mc)}</span> · DOT <span class="mono">${escapeHtml(carrier.dot || '—')}</span>`;
+
+      // Equipment chips
+      const chipsEl = carrierPanel.querySelector('.carrier-panel-chips');
+      if (chipsEl) {
+        chipsEl.replaceChildren();
+        (carrier.equipment || []).forEach((eq) => {
+          const c = document.createElement('span');
+          c.className = 'chip chip--neutral';
+          c.textContent = eq;
+          chipsEl.appendChild(c);
+        });
+      }
+
+      // Load KV
+      const etaEl = carrierPanel.querySelector('.carrier-panel-eta');
+      const speedEl = carrierPanel.querySelector('.carrier-panel-speed');
+      const headingEl = carrierPanel.querySelector('.carrier-panel-heading');
+      if (etaEl) etaEl.textContent = '—';
+      if (speedEl) speedEl.textContent = carrier.speed != null ? `${carrier.speed} mph` : '—';
+      if (headingEl) headingEl.textContent = carrier.heading != null ? `${carrier.heading}°` : '—';
+
+      // Driver
+      const driverNameEl = carrierPanel.querySelector('.carrier-panel-driver-name');
+      const driverHosEl = carrierPanel.querySelector('.carrier-panel-driver-hos');
+      if (driverNameEl) driverNameEl.textContent = carrier.driver ? carrier.driver.name : '—';
+      if (driverHosEl) driverHosEl.textContent = carrier.driver ? `${carrier.driver.hosRemaining}h` : '—';
+
+      // Show panel
+      carrierPanel.setAttribute('aria-hidden', 'false');
+      // Force a reflow so the visibility/transform transition runs from base state.
+      void carrierPanel.offsetWidth;
+      carrierPanel.classList.add('is-open');
+
+      // Wire close button
+      const closeBtn = carrierPanel.querySelector('.carrier-panel-close');
+      if (closeBtn) {
+        closeBtn.onclick = () => closeCarrierPanel();
+        closeBtn.focus();
+      }
+
+      // Wire action buttons
+      carrierPanel.querySelectorAll('[data-action]').forEach((btn) => {
+        btn.onclick = () => {
+          const action = btn.getAttribute('data-action');
+          // Try tool-registry handlers
+          const toolRegistry = window.__toolRegistry;
+          if (toolRegistry) {
+            if (action === 'call-driver' && typeof toolRegistry.call_carrier === 'function') {
+              toolRegistry.call_carrier({ carrierId: carrier.id });
+              return;
+            }
+            if (action === 'assign-load' && typeof toolRegistry.assign_load === 'function') {
+              toolRegistry.assign_load({ carrierId: carrier.id });
+              return;
+            }
+            if (action === 'track' && typeof toolRegistry.track_carrier === 'function') {
+              toolRegistry.track_carrier({ carrierId: carrier.id });
+              return;
+            }
+          }
+          // Fallback: dispatch custom event
+          window.dispatchEvent(new CustomEvent('carrier-action', {
+            detail: { action, carrierId: carrier.id }
+          }));
+          console.info(`[map-widget] carrier-action: ${action} for ${carrier.id}`);
+        };
+      });
+    }
+
+    function closeCarrierPanel() {
+      if (!carrierPanel) return;
+      carrierPanel.classList.remove('is-open');
+
+      // Deselect pin
+      if (selectedPinEl) {
+        selectedPinEl.classList.remove('is-selected');
+        selectedPinEl = null;
+      }
+
+      const reduced = prefersReducedMotion();
+      const done = () => {
+        carrierPanel.setAttribute('aria-hidden', 'true');
+        carrierPanel.removeEventListener('transitionend', done);
+        pendingTransitionListeners.delete(done);
+      };
+
+      if (reduced) {
+        done();
+      } else {
+        carrierPanel.addEventListener('transitionend', done, { once: true });
+        pendingTransitionListeners.add(done);
+        // Timeout fallback
+        const fallback = setTimeout(() => {
+          flashTimers.delete(fallback);
+          done();
+        }, 250);
+        flashTimers.add(fallback);
+      }
+
+      const opener = carrierPanelOpener;
+      carrierPanelOpener = null;
+      if (opener && typeof opener.focus === 'function') {
+        try { opener.focus(); } catch {}
+      }
     }
 
     // --- pan helpers
@@ -1115,14 +1315,35 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       track(() => { try { listToggleBtn.removeEventListener('click', onListToggle); } catch {} });
     }
 
-    // ESC closes detail panel
+    // ESC closes detail panel or carrier panel
     function onKeydown(ev) {
-      if (ev.key === 'Escape' && detail && detail.classList.contains('is-open')) {
-        closeDetailPanel();
+      if (ev.key === 'Escape') {
+        if (carrierPanel && carrierPanel.classList.contains('is-open')) {
+          closeCarrierPanel();
+          return;
+        }
+        if (detail && detail.classList.contains('is-open')) {
+          closeDetailPanel();
+        }
       }
     }
     document.addEventListener('keydown', onKeydown);
     track(() => document.removeEventListener('keydown', onKeydown));
+
+    // Click outside the carrier panel closes it (desktop + mobile).
+    // Pin clicks open the panel via openCarrierPanel(), so we explicitly
+    // ignore clicks inside the panel itself or on a Leaflet marker.
+    function onDocClickForCarrierPanel(ev) {
+      if (!carrierPanel || !carrierPanel.classList.contains('is-open')) return;
+      const t = ev.target;
+      if (!(t instanceof Node)) return;
+      if (carrierPanel.contains(t)) return;
+      // Don't close when clicking a marker — that path opens a different carrier.
+      if (t instanceof Element && t.closest('.leaflet-marker-icon')) return;
+      closeCarrierPanel();
+    }
+    document.addEventListener('click', onDocClickForCarrierPanel, true);
+    track(() => document.removeEventListener('click', onDocClickForCarrierPanel, true));
 
     // Mobile swipe-down-to-dismiss on the bottom-sheet detail. Attached
     // unconditionally — the `dy > 60 && scrollTop === 0` guard makes them
@@ -1157,6 +1378,19 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       : null;
     if (ro && canvas) ro.observe(canvas);
     track(() => { if (ro) { try { ro.disconnect(); } catch {} } });
+
+    // Click-outside on mobile closes carrier panel
+    if (carrierPanel) {
+      const onCanvasClick = (ev) => {
+        if (!carrierPanel.classList.contains('is-open')) return;
+        if (carrierPanel.contains(ev.target)) return;
+        // Only on narrow screens (bottom-sheet mode)
+        if (window.innerWidth > 640) return;
+        closeCarrierPanel();
+      };
+      if (canvas) canvas.addEventListener('click', onCanvasClick);
+      track(() => { if (canvas) canvas.removeEventListener('click', onCanvasClick); });
+    }
 
     // --- wire public API methods (now that internals exist).
 

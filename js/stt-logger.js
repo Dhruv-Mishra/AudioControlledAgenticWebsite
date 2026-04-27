@@ -93,6 +93,17 @@ export class TranscriptLog {
     }));
   }
 
+  /** Return the text of the last `n` finalized entries. */
+  lastNFinals(n) {
+    const out = [];
+    for (let i = this.lines.length - 1; i >= 0 && out.length < n; i--) {
+      if (this.lines[i].final && this.lines[i].text) {
+        out.push(this.lines[i].text);
+      }
+    }
+    return out;
+  }
+
   /** Restore previously-finalized lines into the DOM. Call BEFORE the WS
    *  re-opens so the user sees continuity immediately. */
   hydrate({ lines }) {

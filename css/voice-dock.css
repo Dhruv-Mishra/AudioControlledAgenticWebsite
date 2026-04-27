@@ -1063,10 +1063,10 @@
 .voice-settings-section-title {
   margin: 0;
   padding: var(--sp-1, 4px) var(--sp-4, 16px) var(--sp-3, 12px);
-  font-family: var(--voice-font-sans);
+  font-family: var(--voice-font-mono);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: var(--tracking-wide, 0.04em);
+  letter-spacing: var(--tracking-caps, 0.08em);
   text-transform: uppercase;
   color: var(--voice-on-surface-variant);
 }
@@ -1355,9 +1355,7 @@
   color: var(--voice-on-surface);
 }
 #voice-settings-body .persona-seg button[aria-pressed="true"],
-#voice-settings-body .persona-seg button[aria-checked="true"],
-.voice-settings-panel .persona-seg button[aria-pressed="true"],
-.voice-settings-panel .persona-seg button[aria-checked="true"] {
+.voice-settings-panel .persona-seg button[aria-pressed="true"] {
   background: var(--voice-secondary-container);
   color: var(--voice-on-secondary-container);
 }
@@ -1374,6 +1372,129 @@
 /* Legacy persona-dot — hidden to prevent any stray colored swatches if
  * old markup is re-rendered from cached state. */
 .persona-dot { display: none !important; }
+
+/* ============ 11b. PERSONA GRID + VOICE TILES ============ */
+
+/* Persona tile grid (replaces .persona-seg for tile layout) */
+.persona-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--sp-2, 8px);
+  padding: 0 var(--sp-4, 16px);
+}
+.persona-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1, 4px);
+  padding: var(--sp-3, 12px) var(--sp-2, 8px);
+  background: var(--md-sys-color-surface-container, var(--voice-surface-body));
+  border: 2px solid var(--color-border, var(--voice-outline-variant));
+  border-radius: var(--radius-md, var(--voice-radius-md));
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast, 120ms) var(--ease-snap, ease),
+    background var(--dur-fast, 120ms) var(--ease-snap, ease);
+}
+.persona-tile:hover {
+  background: var(--md-sys-color-surface-container-high, var(--voice-surface-minimised));
+  border-color: var(--color-border-strong, var(--voice-outline));
+}
+.persona-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring-accent, var(--voice-focus-ring));
+}
+.persona-tile[aria-pressed="true"] {
+  border-color: var(--md-sys-color-primary, var(--voice-primary));
+  background: var(--md-sys-color-primary-container, var(--voice-primary-container));
+}
+.persona-tile[aria-pressed="true"]::after {
+  content: '\2713';
+  position: absolute;
+  top: var(--sp-1, 4px); right: var(--sp-1, 4px);
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--md-sys-color-primary, var(--voice-primary));
+  color: var(--md-sys-color-on-primary, var(--voice-on-primary));
+  font-size: 12px; font-weight: var(--fw-semibold, 600);
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+}
+.persona-tile-label {
+  font-family: var(--font-sans, var(--voice-font-sans));
+  font-size: var(--fs-sm, 14px);
+  font-weight: var(--fw-medium, 500);
+  color: var(--color-text, var(--voice-on-surface));
+}
+.persona-tile-desc {
+  font-size: var(--fs-xs, 12px);
+  color: var(--color-text-muted, var(--voice-on-surface-variant));
+  text-align: center;
+}
+
+/* Voice tile row (horizontal scroll) */
+.voice-tile-row {
+  display: flex; gap: var(--sp-2, 8px);
+  padding: 0 var(--sp-4, 16px);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.voice-tile {
+  flex: 0 0 120px;
+  scroll-snap-align: start;
+  display: flex; flex-direction: column;
+  align-items: center; gap: var(--sp-1, 4px);
+  padding: var(--sp-3, 12px) var(--sp-2, 8px);
+  background: var(--md-sys-color-surface-container, var(--voice-surface-body));
+  border: 2px solid var(--color-border, var(--voice-outline-variant));
+  border-radius: var(--radius-md, var(--voice-radius-md));
+  cursor: pointer;
+  transition: border-color var(--dur-fast, 120ms) var(--ease-snap, ease);
+}
+.voice-tile[aria-checked="true"] {
+  border-color: var(--md-sys-color-primary, var(--voice-primary));
+  background: var(--md-sys-color-primary-container, var(--voice-primary-container));
+}
+.voice-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring-accent, 0 0 0 2px var(--voice-primary));
+}
+.voice-tile-play {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--color-accent-wash, color-mix(in oklab, var(--voice-primary) 12%, transparent));
+  border: 1px solid var(--color-border, var(--voice-outline-variant));
+  color: var(--md-sys-color-primary, var(--voice-primary));
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+}
+.voice-tile-play:hover {
+  background: var(--md-sys-color-primary-container, var(--voice-primary-container));
+}
+.voice-tile-name {
+  font-size: var(--fs-xs, 12px);
+  font-weight: var(--fw-medium, 500);
+  color: var(--color-text, var(--voice-on-surface));
+}
+.voice-tile[disabled],
+.voice-tile-row[data-call-active="true"] .voice-tile {
+  opacity: 0.5; cursor: not-allowed;
+}
+
+/* Section headers (mono, 11px, uppercase) */
+/* Note: .voice-settings-section-title is defined earlier at ~line 1063.
+ * This override applies the mono font per the visual spec §4.3. */
+
+/* Settings footer (Done / Cancel) */
+.voice-settings-footer {
+  flex-shrink: 0;
+  display: flex; justify-content: flex-end; gap: var(--sp-2, 8px);
+  padding: var(--sp-3, 12px) var(--sp-4, 16px);
+  border-top: 1px solid var(--color-border, var(--voice-outline-variant));
+}
 
 .voice-debug-panel {
   padding: 12px 16px 16px;

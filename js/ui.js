@@ -240,10 +240,48 @@ function buildDockMarkup() {
           <div class="voice-settings-row voice-settings-row--segmented">
             <div class="voice-settings-row-text">
               <span class="voice-settings-row-label">Persona</span>
-              <span class="voice-settings-row-helper">Choose the voice Jarvis uses on the call.</span>
+              <span class="voice-settings-row-helper">Choose the personality Jarvis uses on the call.</span>
             </div>
             <div class="voice-settings-row-control">
-              <div class="segmented persona-seg" role="tablist" id="voice-persona-seg"></div>
+              <div class="segmented persona-seg" id="voice-persona-seg"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="voice-settings-section" aria-labelledby="voice-settings-h-voice-picker">
+          <h3 class="voice-settings-section-title" id="voice-settings-h-voice-picker">Voice</h3>
+          <div class="voice-tile-row" id="voice-tile-row" role="radiogroup" aria-label="Voice selection">
+            <div class="voice-tile" role="radio" tabindex="0" data-voice="Kore" aria-checked="true">
+              <span class="voice-tile-name">Kore</span>
+              <button class="voice-tile-play" type="button" aria-label="Preview Kore" title="Preview">&#9654;</button>
+            </div>
+            <div class="voice-tile" role="radio" tabindex="-1" data-voice="Aoede" aria-checked="false">
+              <span class="voice-tile-name">Aoede</span>
+              <button class="voice-tile-play" type="button" aria-label="Preview Aoede" title="Preview">&#9654;</button>
+            </div>
+            <div class="voice-tile" role="radio" tabindex="-1" data-voice="Puck" aria-checked="false">
+              <span class="voice-tile-name">Puck</span>
+              <button class="voice-tile-play" type="button" aria-label="Preview Puck" title="Preview">&#9654;</button>
+            </div>
+            <div class="voice-tile" role="radio" tabindex="-1" data-voice="Charon" aria-checked="false">
+              <span class="voice-tile-name">Charon</span>
+              <button class="voice-tile-play" type="button" aria-label="Preview Charon" title="Preview">&#9654;</button>
+            </div>
+            <div class="voice-tile" role="radio" tabindex="-1" data-voice="Orus" aria-checked="false">
+              <span class="voice-tile-name">Orus</span>
+              <button class="voice-tile-play" type="button" aria-label="Preview Orus" title="Preview">&#9654;</button>
+            </div>
+            <div class="voice-tile" role="radio" tabindex="-1" data-voice="Fenrir" aria-checked="false">
+              <span class="voice-tile-name">Fenrir</span>
+              <button class="voice-tile-play" type="button" aria-label="Preview Fenrir" title="Preview">&#9654;</button>
+            </div>
+            <div class="voice-tile" role="radio" tabindex="-1" data-voice="Leda" aria-checked="false">
+              <span class="voice-tile-name">Leda</span>
+              <button class="voice-tile-play" type="button" aria-label="Preview Leda" title="Preview">&#9654;</button>
+            </div>
+            <div class="voice-tile" role="radio" tabindex="-1" data-voice="Zephyr" aria-checked="false">
+              <span class="voice-tile-name">Zephyr</span>
+              <button class="voice-tile-play" type="button" aria-label="Preview Zephyr" title="Preview">&#9654;</button>
             </div>
           </div>
         </section>
@@ -292,6 +330,9 @@ function buildDockMarkup() {
           <span class="voice-settings-row-label">Debug</span>
           <pre class="debug-metrics mono" id="voice-debug-metrics"></pre>
         </section>
+      </div>
+      <div class="voice-settings-footer">
+        <button class="btn btn--primary btn--sm" id="voice-settings-done" type="button">Done</button>
       </div>
     </aside>
   `;
@@ -601,27 +642,42 @@ function wireVuMeter(agent) {
 }
 
 // --- Persona buttons ---
-// FIX (requirement 9): personas visually match the other segmented pill
-// controls in the dock (mode-seg, transcript-seg, theme-seg). No colored
-// per-persona dots — they made the section feel "too colourful" and out
-// of step with the rest of the UI. Active state = filled secondary
-// container pill. Inactive = transparent outlined pill (same as the mode
-// segmented control). Selection state is driven purely by
-// `aria-pressed="true"`.
+// FIX (Decision 3): persona tiles use a grid layout with `aria-pressed`
+// as the single source of truth. No `aria-checked` anywhere.
+// `selectPersonaTile(id)` is the unified handler used by both initial
+// build and `personas-ready` rebuild.
+
+function selectPersonaTile(id, agent) {
+  if (agent && typeof agent.setPersona === 'function') {
+    agent.setPersona(id);
+  }
+  document.querySelectorAll('[data-persona-id]').forEach((b) => {
+    b.setAttribute('aria-pressed', b.getAttribute('data-persona-id') === id ? 'true' : 'false');
+  });
+}
+
 function buildPersonaButtons(container, personas, current, onSelect) {
   if (!container) return;
   container.innerHTML = '';
+  container.className = 'persona-grid';
+  container.removeAttribute('role');
   personas.forEach((p) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.setAttribute('role', 'tab');
+    btn.className = 'persona-tile';
     btn.setAttribute('aria-pressed', p.id === current ? 'true' : 'false');
-    btn.setAttribute('aria-checked', p.id === current ? 'true' : 'false');
     btn.setAttribute('data-persona-id', p.id);
     btn.setAttribute('data-agent-id', `voice.persona.${p.id}`);
     const label = document.createElement('span');
+    label.className = 'persona-tile-label';
     label.textContent = p.label;
     btn.appendChild(label);
+    if (p.description) {
+      const desc = document.createElement('span');
+      desc.className = 'persona-tile-desc';
+      desc.textContent = p.description;
+      btn.appendChild(desc);
+    }
     btn.addEventListener('click', () => onSelect(p.id));
     container.appendChild(btn);
   });
@@ -712,21 +768,84 @@ export async function bootstrapVoiceShell() {
   // --- Persona
   const personaContainer = $('#voice-persona-seg');
   buildPersonaButtons(personaContainer, agent.getPersonas(), agent.getCurrentPersonaId(), (id) => {
-    agent.setPersona(id);
-    document.querySelectorAll('#voice-persona-seg button').forEach((b) => {
-      const active = b.getAttribute('data-persona-id') === id;
-      b.setAttribute('aria-pressed', active ? 'true' : 'false');
-      b.setAttribute('aria-checked', active ? 'true' : 'false');
-    });
+    selectPersonaTile(id, agent);
   });
   agent.addEventListener('personas-ready', (e) => {
     buildPersonaButtons(personaContainer, e.detail.personas, agent.getCurrentPersonaId(), (id) => {
-      agent.setPersona(id);
-      document.querySelectorAll('#voice-persona-seg button').forEach((b) => {
-        b.setAttribute('aria-pressed', b.getAttribute('data-persona-id') === id ? 'true' : 'false');
-      });
+      selectPersonaTile(id, agent);
     });
   });
+
+  // Sync persona tile visuals when persona changes programmatically
+  window.addEventListener('persona-changed', (e) => {
+    const id = e.detail && (e.detail.personaId || e.detail.id);
+    if (id) selectPersonaTile(id, null);
+  });
+  agent.addEventListener('persona-changed', (e) => {
+    const id = e.detail && (e.detail.personaId || e.detail.id);
+    if (id) selectPersonaTile(id, null);
+  });
+
+  // --- Voice picker tiles
+  const voiceTileRow = $('#voice-tile-row');
+  if (voiceTileRow) {
+    const voiceTiles = voiceTileRow.querySelectorAll('.voice-tile');
+    voiceTiles.forEach((tile) => {
+      tile.addEventListener('click', (ev) => {
+        // Don't select if play button was clicked
+        if (ev.target.closest('.voice-tile-play')) return;
+        // Don't change voice mid-call
+        if (agent.callOpen === true || agent.isInCall()) {
+          return;
+        }
+        const voice = tile.getAttribute('data-voice');
+        voiceTiles.forEach((t) => {
+          const sel = t.getAttribute('data-voice') === voice;
+          // role="radio" → aria-checked is the canonical state attribute.
+          t.setAttribute('aria-checked', sel ? 'true' : 'false');
+          t.setAttribute('tabindex', sel ? '0' : '-1');
+          t.removeAttribute('aria-pressed');
+        });
+        if (typeof agent.setSelectedVoice === 'function') {
+          agent.setSelectedVoice(voice);
+        }
+      });
+      tile.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          tile.click();
+        }
+      });
+    });
+    // Play buttons — no-op / log (no sample audio exists yet)
+    voiceTileRow.querySelectorAll('.voice-tile-play').forEach((playBtn) => {
+      playBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const voice = playBtn.closest('.voice-tile')?.getAttribute('data-voice');
+        console.log(`[ui] Voice preview requested: ${voice} (no sample audio available)`);
+      });
+    });
+    // Grey out tiles mid-call
+    const updateCallActiveState = () => {
+      const inCall = agent.callOpen === true || (typeof agent.isInCall === 'function' && agent.isInCall());
+      voiceTileRow.setAttribute('data-call-active', inCall ? 'true' : 'false');
+      voiceTiles.forEach((t) => {
+        if (inCall) {
+          t.setAttribute('title', 'End call to change voice.');
+        } else {
+          t.removeAttribute('title');
+        }
+      });
+    };
+    agent.addEventListener('state', updateCallActiveState);
+    agent.addEventListener('call-audio-all-stopped', updateCallActiveState);
+  }
+
+  // --- Settings Done button
+  const doneBtn = $('#voice-settings-done');
+  if (doneBtn) {
+    on(doneBtn, 'click', () => closeSettings());
+  }
 
   // --- Single state sink
   agent.addEventListener('state', (e) => {

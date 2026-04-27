@@ -18,6 +18,34 @@
  * 1. Page header — flat row, flex, no decorative underline
  * ============================================================ */
 
+/* Hero band — full-width atmospheric image with luminosity overlay */
+.hero-band {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-bg);
+  margin-bottom: var(--sp-4);
+}
+.hero-band img {
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+  mix-blend-mode: luminosity;
+  opacity: 0.35;
+}
+.hero-band::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    var(--color-bg) 0%,
+    transparent 35%,
+    transparent 65%,
+    var(--color-bg) 100%
+  );
+  pointer-events: none;
+}
+
 .page-header {
   display: flex;
   flex-wrap: wrap;

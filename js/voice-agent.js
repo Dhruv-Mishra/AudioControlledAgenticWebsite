@@ -284,6 +284,20 @@ export class VoiceAgent extends EventTarget {
     // SHOW_TEXT=true; otherwise stays null.
     this.localStt = null;
 
+    // Voice pinning: user-selected voice persists across calls via
+    // localStorage. Locked at call open; the server echoes back the
+    // pinned voice in hello_ack.
+    this.selectedVoice = null;
+    this.pinnedVoice = null;
+    // Transcription dedup: barge-in suppression window.
+    this._suppressUserTxUntil = 0;
+    // Transcription dedup: resume grace period.
+    this._resumeGraceUntil = 0;
+    try {
+      const stored = localStorage.getItem('liveAgent.voice');
+      if (stored && typeof stored === 'string') this.selectedVoice = stored;
+    } catch {}
+
     this.personas = DEFAULT_PERSONAS.slice();
     this.personaId = DEFAULT_PERSONA_ID;
 
@@ -449,11 +463,30 @@ export class VoiceAgent extends EventTarget {
     // listeners can observe tool-call lifecycle events. The original
     // handler is preserved; we just emit bracketing events.
     const origHandle = this.toolRegistry.handleToolCall.bind(this.toolRegistry);
+    // Capture the last tool_result ok status by intercepting the send path.
+    this._lastToolResultOk = true;
+    const origSendJson = this._sendJson.bind(this);
+    const captureToolResult = (m) => {
+      if (m && m.type === 'tool_result' && m.ok === false) {
+        this._lastToolResultOk = false;
+      } else if (m && m.type === 'tool_result') {
+        this._lastToolResultOk = true;
+      }
+      origSendJson(m);
+    };
+    this.toolRegistry.send = captureToolResult;
+    this._toolFailureSilenceTimer = null;
     this.toolRegistry.handleToolCall = async (payload) => {
       const name = (payload && payload.name) || '';
       this._publishEvent('tool-call-start', { name, id: payload && payload.id });
       try {
-        return await origHandle(payload);
+        const result = await origHandle(payload);
+        // Tool-failure silence fallback: if the tool result was ok:false
+        // and the model doesn't speak within 4 s, inject a notice.
+        if (!this._lastToolResultOk) {
+          this._startToolFailureSilenceTimer();
+        }
+        return result;
       } finally {
         this._publishEvent('tool-call-end', { name, id: payload && payload.id });
       }
@@ -1209,6 +1242,21 @@ export class VoiceAgent extends EventTarget {
     this._publishEvent('mode-changed', { mode: m });
   }
 
+  /** Set the preferred voice for future calls. Refuses mid-call. */
+  setSelectedVoice(v) {
+    if (this._callActive) {
+      // eslint-disable-next-line no-console
+      console.warn('[jarvis] setSelectedVoice refused — call is active');
+      return false;
+    }
+    this.selectedVoice = v || null;
+    try {
+      if (v) localStorage.setItem('liveAgent.voice', v);
+      else localStorage.removeItem('liveAgent.voice');
+    } catch {}
+    return true;
+  }
+
   async setPersona(id) {
     if (!this.personas.some((p) => p.id === id)) return;
     if (id === this.personaId) return;
@@ -1402,6 +1450,11 @@ export class VoiceAgent extends EventTarget {
       // hello so the very first agent-audio chunk lands at the right rate
       // — no first-chunk resample cost and no extra round-trip.
       hello.audioPrefs = { phoneLine: !!this.phoneCompression };
+      // Voice pinning: include the user's voice pick so the server locks
+      // it for the session. Only sent when non-null.
+      if (this.selectedVoice) {
+        hello.selectedVoice = this.selectedVoice;
+      }
       // latency-pass: piggyback the greeting inject on `hello` when this WS
       // open is for a fresh placeCall (not a reconnect / persona-switch /
       // mode-switch). Server honours `greet.{page,title}` by injecting the
@@ -1538,6 +1591,13 @@ export class VoiceAgent extends EventTarget {
           this._logPhase('eager_greet_ack', this._phaseTimestamps && this._phaseTimestamps.placeCallAt, typeof performance !== 'undefined' ? performance.now() : Date.now());
           dlog('eager-greet ack received — skipping follow-up call_start');
         }
+        // Voice pinning: stash the server's confirmed voice for display.
+        if (typeof msg.voice === 'string' && msg.voice) {
+          this.pinnedVoice = msg.voice;
+          try {
+            window.dispatchEvent(new CustomEvent('voice-pinned', { detail: { voice: msg.voice } }));
+          } catch {}
+        }
         this._publishEvent('personas-ready', { personas: this.personas });
         return;
       case 'setup_complete':
@@ -1553,6 +1613,7 @@ export class VoiceAgent extends EventTarget {
       case 'session_resumed':
         this.resuming = false;
         this.resumeOutcome = 'ok';
+        this._resumeGraceUntil = Date.now() + 3000;
         if (this.transcript) this.transcript.setPriorRowsDimmed(false);
         this._publishEvent('resume-result', { ok: true });
         return;
@@ -1687,11 +1748,14 @@ export class VoiceAgent extends EventTarget {
         return;
       case 'interrupted':
         if (this.transcript) this.transcript.turnBreak();
+        this._suppressUserTxUntil = Date.now() + 200;
         this.pipeline.flushPlayback();
         this._setState(STATES.LIVE_READY);
         return;
       case 'turn_complete':
         if (this.transcript) this.transcript.turnBreak();
+        // Reset resume grace on first turn_complete after resume.
+        if (this._resumeGraceUntil > 0) this._resumeGraceUntil = 0;
         this._setState(STATES.LIVE_READY);
         this._persistSessionBlob();
         this._publishEvent('turn-complete', {});
@@ -1967,10 +2031,40 @@ export class VoiceAgent extends EventTarget {
     this._tearDownCall();
   }
 
+  /** Start a 4 s silence timer after a failed tool call. If the model
+   *  doesn't speak (no agent transcript_delta) within that window, inject
+   *  a synthetic notice so the user isn't left in dead air. */
+  _startToolFailureSilenceTimer() {
+    clearTimeout(this._toolFailureSilenceTimer);
+    this._toolFailureSilenceTimer = setTimeout(() => {
+      this._toolFailureSilenceTimer = null;
+      if (!this._callActive) return;
+      // Only fire if the model hasn't started speaking.
+      if (this.state === STATES.MODEL_SPEAKING) return;
+      this._announce({ from: 'system', text: 'Something didn\'t work — try asking me again.' });
+    }, 4000);
+  }
+
   _onTranscriptDelta(msg) {
+    const from = msg.from === 'agent' ? 'agent' : 'user';
+    // Cancel tool-failure silence timer on any agent speech.
+    if (from === 'agent' && this._toolFailureSilenceTimer) {
+      clearTimeout(this._toolFailureSilenceTimer);
+      this._toolFailureSilenceTimer = null;
+    }
+    // Barge-in dedup: suppress late-arriving user deltas after interruption.
+    if (from === 'user' && Date.now() < this._suppressUserTxUntil) return;
+    // Resume dedup: drop agent deltas that repeat recently-finalized text.
+    if (from === 'agent' && this._resumeGraceUntil > 0 && Date.now() < this._resumeGraceUntil) {
+      const delta = String(msg.delta || '').trim();
+      if (delta && this.transcript) {
+        const recents = this.transcript.lastNFinals(5);
+        if (recents.some((t) => t.includes(delta))) return;
+      }
+    }
     if (this.transcript) {
       this.transcript.addDelta({
-        from: msg.from === 'agent' ? 'agent' : 'user',
+        from,
         delta: msg.delta,
         finished: !!msg.finished
       });
@@ -2134,6 +2228,7 @@ export class VoiceAgent extends EventTarget {
     } else {
       this.localStt.addEventListener('transcript', (ev) => {
         const { text, finished } = ev.detail || {};
+        if (this.flags.geminiTranscription) return; // server handles user STT
         if (!this.transcript) return;
         this.transcript.addDelta({ from: 'user', delta: text, finished: !!finished });
         if (finished) {
@@ -2175,6 +2270,7 @@ export class VoiceAgent extends EventTarget {
       ctrl.addEventListener('transcript', (ev) => {
         const { text, finished, segmentId } = ev.detail || {};
         if (!text) return;
+        if (this.flags.geminiTranscription) return; // server handles user STT
         // When a new segment starts, close the previous live user row so
         // the next partial starts fresh (prevents the repeat-phrase bug).
         if (this.transcript && segmentId && segmentId !== lastSegmentId) {

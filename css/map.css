@@ -150,6 +150,7 @@
   min-height: 400px;
   background: var(--color-map-bg);
   position: relative;
+  isolation: isolate;
   transition: opacity var(--dur-base) var(--ease-out-expo);
 }
 
@@ -231,61 +232,66 @@
 }
 
 /* ============================================================
- * 6. Pins — 28 px M3 circle, tonal fills
+ * 6. Pins — 28 px truck-chevron SVG, directional, status-colored
  * ============================================================ */
 
 .map-pin {
   width: 28px;
   height: 28px;
-  border-radius: 50%;
-  background: var(--md-sys-color-primary);
-  box-shadow:
-    inset 0 0 0 2px var(--color-map-pin-ring),
-    var(--shadow-pin);
+  color: var(--md-sys-color-primary);
+  filter: var(--shadow-pin, drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3)));
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease-snap);
+  position: relative;
 }
+.map-pin svg { display: block; }
+
+.map-pin--idle       { color: var(--color-state-idle); }
+.map-pin--in_transit { color: var(--color-state-speaking); }
+.map-pin--delayed    { color: var(--color-state-error); }
+.map-pin--booked,
+.map-pin--loading    { color: var(--color-state-tool); }
+.map-pin--delivered  { color: var(--color-text-dim); }
+.map-pin--pending    { color: var(--md-sys-color-warn); }
+
 .map-pin:hover {
-  transform: scale(1.12);
+  transform: scale(1.15);
   outline: none;
 }
-.map-pin:focus-visible {
-  transform: scale(1.20);
-  outline: none;
-  box-shadow:
-    inset 0 0 0 2px var(--color-map-pin-ring),
-    var(--shadow-pin),
-    var(--shadow-focus-ring-accent);
+.map-pin:hover::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-accent);
+  pointer-events: none;
 }
 
-.map-pin--booked     { background: var(--md-sys-color-primary); }
-.map-pin--pending    { background: var(--md-sys-color-warn); }
-.map-pin--delayed {
-  background: var(--md-sys-color-error);
-  animation: map-pin-breath 2000ms ease-in-out infinite;
+.map-pin:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring-accent);
 }
-.map-pin--delivered  { background: var(--color-text-dim); }
-.map-pin--in_transit { background: var(--md-sys-color-tertiary); }
+
+.map-pin.is-selected::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--md-sys-color-primary);
+  animation: pin-pulse 1.6s var(--ease-out-expo) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-pin.is-selected::before { animation: none; opacity: 0.6; }
+}
+
+@keyframes pin-pulse {
+  0%   { transform: scale(1);   opacity: 0.8; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
 
 /* Carrier pins — tertiary tonal, rounded-square silhouette */
 .map-pin--carrier {
-  background: var(--md-sys-color-tertiary);
-  border-radius: var(--radius-sm);
-}
-
-@keyframes map-pin-breath {
-  0%, 100% {
-    box-shadow:
-      inset 0 0 0 2px var(--color-map-pin-ring),
-      var(--shadow-pin),
-      0 0 0 0 color-mix(in oklab, var(--md-sys-color-error) 0%, transparent);
-  }
-  50% {
-    box-shadow:
-      inset 0 0 0 2px var(--color-map-pin-ring),
-      var(--shadow-pin),
-      0 0 0 6px color-mix(in oklab, var(--md-sys-color-error) 28%, transparent);
-  }
+  color: var(--md-sys-color-tertiary);
 }
 
 /* Agent-highlighted pin — lime ring pulse */
@@ -405,7 +411,7 @@
   transition:
     transform var(--dur-slow) var(--md-sys-motion-easing-emphasized),
     box-shadow var(--dur-slow) var(--ease-out-expo);
-  z-index: var(--z-map-ui);
+  z-index: var(--z-map-panel);
   overflow-y: auto;
   padding: var(--sp-5);
 }
@@ -774,7 +780,123 @@
 }
 
 /* ============================================================
- * 17. Reduced-motion
+ * 17. Cluster markers
+ * ============================================================ */
+
+.marker-cluster { background: transparent !important; }
+.marker-cluster div {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--md-sys-color-surface-container-high);
+  border: 2px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+  box-shadow: var(--shadow-pin);
+}
+.marker-cluster--delayed div {
+  border-color: var(--color-state-error);
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+}
+.marker-cluster--transit div {
+  border-color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+/* ============================================================
+ * 18. Carrier detail panel — FlightRadar-style aside
+ * ============================================================ */
+
+.carrier-panel {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  width: 352px;
+  max-height: min(640px, calc(100% - var(--sp-4) * 2));
+  background: var(--color-bg-elev-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--md-sys-elevation-level-3);
+  z-index: var(--z-map-panel);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateX(calc(100% + var(--sp-4)));
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform 180ms var(--ease-out-expo),
+    opacity 180ms var(--ease-out-expo),
+    visibility 0s linear 180ms;
+}
+.carrier-panel.is-open { visibility: visible; pointer-events: auto; transform: translateX(0); opacity: 1; transition: transform 180ms var(--ease-out-expo), opacity 180ms var(--ease-out-expo), visibility 0s linear 0s; }
+
+.carrier-panel-hero { position: relative; aspect-ratio: 16 / 9; overflow: hidden; flex-shrink: 0; background: var(--color-bg-elev-2); }
+.carrier-panel-img { width: 100%; height: 100%; object-fit: cover; }
+.carrier-panel-status { position: absolute; top: var(--sp-2); left: var(--sp-2); }
+.carrier-panel-close {
+  position: absolute; top: var(--sp-2); right: var(--sp-2);
+  background: var(--color-overlay-bg);
+  border-radius: var(--radius-pill);
+  width: 32px; height: 32px;
+}
+.carrier-panel-body { flex: 1 1 auto; overflow-y: auto; padding: var(--sp-4); }
+.carrier-panel-name {
+  font-family: var(--font-sans); font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold); color: var(--color-text);
+  margin: 0 0 var(--sp-1) 0;
+}
+.carrier-panel-ids {
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+  color: var(--color-text-muted); margin: 0 0 var(--sp-4) 0;
+}
+.carrier-panel-section { padding: var(--sp-3) 0; border-top: 1px solid var(--color-border); }
+.carrier-panel-section-title {
+  font-family: var(--font-mono); font-size: 11px;
+  font-weight: var(--fw-semibold); letter-spacing: var(--tracking-caps);
+  text-transform: uppercase; color: var(--color-text-muted);
+  margin: 0 0 var(--sp-2) 0;
+}
+.carrier-panel-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.carrier-panel-route {
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-size: var(--fs-sm); color: var(--color-text); margin: 0 0 var(--sp-2) 0;
+}
+.carrier-panel-kv {
+  display: grid; grid-template-columns: 96px 1fr;
+  gap: var(--sp-1) var(--sp-3); font-size: var(--fs-sm);
+}
+.carrier-panel-kv dt {
+  color: var(--color-text-muted); font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+.carrier-panel-kv dd { margin: 0; color: var(--color-text); }
+.carrier-panel-actions {
+  flex-shrink: 0; display: flex; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--color-border);
+}
+
+@media (max-width: 640px) {
+  .carrier-panel {
+    top: auto; left: 0; right: 0; bottom: 0;
+    width: 100%; max-height: 70dvh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    transform: translateY(100%);
+  }
+  .carrier-panel.is-open { transform: translateY(0); }
+}
+
+/* ============================================================
+ * 19. Reduced-motion
  * ============================================================ */
 
 @media (prefers-reduced-motion: reduce) {
@@ -788,8 +910,11 @@
   .map-pin:hover,
   .map-pin:focus-visible { transform: none; }
   .map-pin--delayed { animation: none; }
+  .map-pin.is-selected::before { animation: none; opacity: 0.6; }
   .map-detail { transition: none; transform: none; }
   .map-detail.is-open { transform: none; }
+  .carrier-panel { transition: none; }
+  .carrier-panel.is-open { visibility: visible; pointer-events: auto; transform: translateX(0); opacity: 1; }
   .map-pin.is-agent-highlighted { animation: none; }
   .map-pin.is-agent-highlighted::before,
   .map-pin.is-agent-highlighted::after { animation: none; display: none; }

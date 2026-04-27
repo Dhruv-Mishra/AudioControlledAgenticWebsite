@@ -374,6 +374,8 @@ export class ToolRegistry {
       // ok:false side of the envelope) for richer context.
       const envelope = { ok: false, error: msg };
       if (err && err.fillFailure) envelope.result = { fill_failure: err.fillFailure };
+      if (err && err.code) envelope.code = err.code;
+      if (err && err.recovery) envelope.recovery = err.recovery;
       reply(envelope);
     }
   }
@@ -507,7 +509,10 @@ export class ToolRegistry {
       default: {
         const handler = this.domainHandlers.get(name);
         if (handler) return await handler(args);
-        throw new Error(`Unknown tool: ${name}`);
+        const err = new Error(`Tool "${name}" is not available on the current page. Navigate to the correct page first.`);
+        err.code = 'tool_not_available';
+        err.recovery = 'Use the navigate tool to go to the page where this tool is registered, then retry.';
+        throw err;
       }
     }
   }
