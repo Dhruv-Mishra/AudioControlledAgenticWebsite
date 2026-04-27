@@ -171,26 +171,95 @@ body > .load-modal {
   border-top: 1px solid var(--color-border, rgba(255,255,255,0.08));
 }
 
-/* Mobile — bottom-sheet (mirrors carrier-panel) */
+/* Mobile — bottom-sheet anchored above the voice-dock (84 px) */
 @media (max-width: 640px) {
   .load-modal {
+    position: fixed;
+    left: var(--sp-3);
+    right: var(--sp-3);
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
     top: auto;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: 100%;
-    max-height: 70dvh;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    transform: translateY(100%);
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px) - var(--sp-6));
+    border-radius: var(--radius-xl);
+    z-index: var(--z-load-modal);
+    transform: translateY(calc(100% + 84px));
+    opacity: 0;
+    transition:
+      transform var(--dur-slow) var(--md-sys-motion-easing-emphasized-accelerate),
+      opacity   var(--dur-slow) var(--md-sys-motion-easing-emphasized-accelerate),
+      visibility 0s linear var(--dur-slow);
+  }
+  /* Override body-portal top/max-height that would fight the bottom-sheet */
+  body > .load-modal {
+    top: auto;
+    max-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px) - var(--sp-6));
   }
   .load-modal.is-open {
     transform: translateY(0);
+    opacity: 1;
+    transition:
+      transform var(--dur-slow) var(--md-sys-motion-easing-emphasized-decelerate),
+      opacity   var(--dur-slow) var(--md-sys-motion-easing-emphasized-decelerate),
+      visibility 0s linear 0s;
   }
-  .load-modal-actions .btn { flex: 1 1 calc(50% - var(--sp-2, 8px)); }
+  .load-modal-close {
+    width: 44px;
+    height: 44px;
+  }
+  .load-modal-actions .btn {
+    min-height: 44px;
+    flex: 1 1 calc(50% - var(--sp-2, 8px));
+  }
+  .load-modal-body {
+    overscroll-behavior-y: contain;
+  }
+  .load-modal-card {
+    contain: layout paint style;
+  }
+  .load-modal-body {
+    contain: layout paint;
+  }
+}
+
+/* Mobile — portrait hero */
+@media (max-width: 640px) and (orientation: portrait) {
+  .load-modal-hero {
+    aspect-ratio: 2 / 1;
+  }
+}
+
+/* Mobile — short viewport: tighter gutter, no hero */
+@media (max-width: 640px) and (max-height: 440px) {
+  .load-modal {
+    max-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px) - var(--sp-3));
+  }
+  body > .load-modal {
+    max-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px) - var(--sp-3));
+  }
+  .load-modal-hero {
+    display: none;
+  }
 }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .load-modal { transition: none; }
-  .load-modal.is-open { visibility: visible; pointer-events: auto; transform: translateX(0); opacity: 1; }
+  .load-modal {
+    transition: none;
+  }
+  .load-modal.is-open {
+    transition: none;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) and (max-width: 640px) {
+  .load-modal.is-open {
+    transition: none;
+    transform: translateY(0);
+    opacity: 1;
+  }
 }

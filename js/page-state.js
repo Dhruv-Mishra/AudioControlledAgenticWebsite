@@ -40,20 +40,20 @@ export function applyDom(root, snap) {
   if (!root || !snap) return false;
   let touched = false;
   const fields = snap.fields || {};
-  Object.keys(fields).forEach((id) => {
-    const el = root.querySelector('#' + (window.CSS && CSS.escape ? CSS.escape(id) : id));
-    if (!el) return;
-    const f = fields[id];
-    if (f && 'checked' in f) {
+  // Single DOM scan: iterate inputs directly instead of Object.keys + querySelector per id.
+  const inputs = root.querySelectorAll('input[id], select[id], textarea[id]');
+  inputs.forEach((el) => {
+    const f = fields[el.id];
+    if (!f) return;
+    if ('checked' in f) {
       if (el.checked !== f.checked) {
         el.checked = !!f.checked;
         el.dispatchEvent(new Event('change', { bubbles: true }));
         touched = true;
       }
-    } else if (f && 'value' in f) {
+    } else if ('value' in f) {
       if (el.value !== f.value) {
         el.value = f.value;
-        // Page filter handlers listen on 'input' and 'change' — fire both.
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
         touched = true;

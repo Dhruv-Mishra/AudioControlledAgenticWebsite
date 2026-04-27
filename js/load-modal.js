@@ -275,6 +275,23 @@ function onKeydown(ev) {
   if (ev.key === 'Escape') { close(); }
 }
 
+// Recompute the body-portal top offset when the viewport crosses the
+// 640 px breakpoint while the modal is open (e.g. device rotation).
+// Without this, rotating portrait→landscape leaves the offset unset and
+// the modal slides under the sticky header. Listener is wired only while
+// the modal is open and removed on close.
+function onResize() {
+  if (!root || !root.classList.contains('is-open')) return;
+  if (root.parentNode !== document.body) return;
+  if (window.innerWidth > 640) {
+    const header = document.querySelector('.app-header');
+    const hh = header ? Math.round(header.getBoundingClientRect().height) : 0;
+    root.style.setProperty('--load-modal-top-offset', hh + 'px');
+  } else {
+    root.style.removeProperty('--load-modal-top-offset');
+  }
+}
+
 export function open(load, opts = {}) {
   if (!load) return;
   const el = ensureRoot();
@@ -284,7 +301,8 @@ export function open(load, opts = {}) {
   // When body-portaled (no #map-root on the page, e.g. dispatch), offset
   // the panel below the sticky app-header so it doesn't overlap. On the
   // map page the panel lives inside #map-root and this is a no-op.
-  if (el.parentNode === document.body) {
+  // Skip on mobile (≤640 px) — bottom-sheet layout doesn't use top offset.
+  if (el.parentNode === document.body && window.innerWidth > 640) {
     const header = document.querySelector('.app-header');
     const hh = header ? Math.round(header.getBoundingClientRect().height) : 0;
     el.style.setProperty('--load-modal-top-offset', hh + 'px');
@@ -308,6 +326,8 @@ export function open(load, opts = {}) {
 
   // ESC listener
   document.addEventListener('keydown', onKeydown);
+  // Resize listener: recompute top-offset when crossing 640 px boundary.
+  window.addEventListener('resize', onResize, { passive: true });
 }
 
 export function close() {
@@ -316,6 +336,7 @@ export function close() {
 
   root.classList.remove('is-open');
   document.removeEventListener('keydown', onKeydown);
+  window.removeEventListener('resize', onResize);
 
   const reduced = prefersReducedMotion();
   const done = () => {
