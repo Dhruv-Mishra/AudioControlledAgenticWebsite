@@ -3,6 +3,7 @@
 // this module only wires its own DOM + domain tools.
 
 import { restoreFiltersFromUrl } from './tool-registry.js';
+import './load-modal.js';
 
 const STATUS_LABEL = {
   in_transit: { label: 'In transit', chip: 'info' },
@@ -116,6 +117,12 @@ function selectLoad(id) {
     if (tr.getAttribute('data-load-id') === id) tr.setAttribute('aria-selected', 'true');
   });
   renderDetail();
+
+  const load = state.loads.find((x) => x.id === id);
+  if (load && window.__loadModal) {
+    const opener = document.querySelector(`tr[data-load-id="${CSS.escape(id)}"]`);
+    window.__loadModal.open(load, { context: 'dispatch', opener });
+  }
 }
 
 function renderDetail() {
@@ -250,6 +257,15 @@ export async function enter(root, { voiceAgent }) {
   state = { loads: [], carriers: [], filter: { q: '', status: 'all', lane: '' }, selectedId: null };
   agentRef = voiceAgent;
   await loadData();
+
+  // Provide data to the load-modal singleton
+  if (window.__loadModal) {
+    window.__loadModalData = { carriers: state.carriers, loads: state.loads };
+    if (typeof window.__loadModal.setData === 'function') {
+      window.__loadModal.setData({ carriers: state.carriers, loads: state.loads });
+    }
+  }
+
   renderSummary();
   renderTable();
   renderDetail();
@@ -279,6 +295,19 @@ export async function enter(root, { voiceAgent }) {
   // the filter inputs have been bound.
   restoreFiltersFromUrl('dispatch');
 
+  // Listen for load-action events from the modal
+  const onLoadAction = (e) => {
+    const { action, loadId } = e.detail || {};
+    if (action === 'assign' && loadId) {
+      const avail = state.carriers.filter((c) => c.available);
+      const pick = avail[0];
+      if (!pick) return;
+      assignCarrierLocal(loadId, pick.id);
+    }
+  };
+  window.addEventListener('load-action', onLoadAction);
+  state._onLoadAction = onLoadAction;
+
   // Register per-page quick-action chips (best-effort — module is dynamic).
   import('./quick-chips.js').then((chips) => {
     chips.registerChips(voiceAgent, [
@@ -295,6 +324,9 @@ export function exit() {
     agentRef.toolRegistry.unregisterDomain('assign_carrier');
     agentRef.toolRegistry.unregisterDomain('submit_quote');
     agentRef.toolRegistry.unregisterDomain('schedule_callback');
+  }
+  if (state && state._onLoadAction) {
+    window.removeEventListener('load-action', state._onLoadAction);
   }
   import('./quick-chips.js').then((chips) => chips.clearChips()).catch(() => {});
   state = null;

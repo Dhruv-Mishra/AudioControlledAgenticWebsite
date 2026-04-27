@@ -506,6 +506,66 @@ export class ToolRegistry {
         else el.submit();
         return { submitted: args.agent_id };
       }
+      case 'read_modal': {
+        const root =
+          document.querySelector('[data-modal-root="load"].is-open') ||
+          document.querySelector('.carrier-panel.is-open') ||
+          document.querySelector('[data-modal-root].is-open');
+        if (!root || !isVisible(root)) return { open: false };
+        const isLoad = root.matches('[data-modal-root="load"]') || !!root.querySelector('[data-modal-field]');
+        const kind = isLoad ? 'load' : 'carrier';
+        let title = '';
+        const titleEl = root.querySelector('[data-modal-field="title"]')
+          || root.querySelector('.carrier-panel-name')
+          || root.querySelector('.load-modal-title');
+        if (titleEl) title = (titleEl.textContent || '').trim();
+        const fields = {};
+        root.querySelectorAll('[data-modal-field]').forEach((el) => {
+          const k = el.getAttribute('data-modal-field');
+          if (!k) return;
+          fields[k] = (el.textContent || '').trim();
+        });
+        // Carrier panel doesn't use data-modal-field — fall back to common selectors.
+        if (kind === 'carrier' && Object.keys(fields).length === 0) {
+          const map = {
+            name: '.carrier-panel-name',
+            ids: '.carrier-panel-ids',
+            status: '.carrier-panel-status',
+            eta: '.carrier-panel-eta',
+            speed: '.carrier-panel-speed',
+            heading: '.carrier-panel-heading',
+            driver_name: '.carrier-panel-driver-name',
+            driver_hos: '.carrier-panel-driver-hos'
+          };
+          Object.entries(map).forEach(([k, sel]) => {
+            const el = root.querySelector(sel);
+            if (el) fields[k] = (el.textContent || '').trim();
+          });
+        }
+        const actions = [];
+        root.querySelectorAll('[data-agent-id*=".action."]').forEach((el) => {
+          if (isVisible(el)) actions.push(el.getAttribute('data-agent-id'));
+        });
+        // Carrier panel uses [data-action] instead of agent-id action verbs.
+        if (kind === 'carrier') {
+          root.querySelectorAll('[data-action]').forEach((el) => {
+            if (isVisible(el)) actions.push(`carrier_panel.action.${el.getAttribute('data-action')}`);
+          });
+        }
+        return { open: true, kind, title, fields, actions };
+      }
+      case 'close_modal': {
+        if (typeof window !== 'undefined' && window.__modals && typeof window.__modals.closeAll === 'function') {
+          window.__modals.closeAll();
+        }
+        // Carrier panel: simulate close-button click if still open.
+        const carrierClose = document.querySelector('.carrier-panel.is-open .carrier-panel-close');
+        if (carrierClose) { try { carrierClose.click(); } catch {} }
+        const anyOpen =
+          document.querySelector('[data-modal-root].is-open') ||
+          document.querySelector('.carrier-panel.is-open');
+        return { closed: !anyOpen };
+      }
       default: {
         const handler = this.domainHandlers.get(name);
         if (handler) return await handler(args);

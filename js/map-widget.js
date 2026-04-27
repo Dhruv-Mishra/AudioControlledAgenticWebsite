@@ -637,7 +637,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
             dotColor: colorForStatus(l.status),
             label: `${l.id}`,
             meta: `${l.pickup || '?'} → ${l.dropoff || '?'}`,
-            onClick: () => focusLoadInternal(l.id)
+            onClick: () => { focusLoadInternal(l.id); if (window.__loadModal) window.__loadModal.open(l, { context: 'map' }); }
           });
         });
       }
@@ -689,6 +689,17 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
         meta.className = 'meta';
         meta.textContent = `${STATUS_LABEL[l.status] || l.status} · ${fmtMiles(l.miles)} · ETA ${fmtEta(l.eta)}`;
         li.appendChild(meta);
+        li.setAttribute('role', 'button');
+        li.setAttribute('tabindex', '0');
+        li.setAttribute('aria-label', `Load ${l.id}, ${l.pickup || ''} to ${l.dropoff || ''}`);
+        const openLoad = () => {
+          focusLoadInternal(l.id);
+          if (window.__loadModal) { try { window.__loadModal.open(l, { context: 'map' }); } catch {} }
+        };
+        li.addEventListener('click', openLoad);
+        li.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openLoad(); }
+        });
         listViewItems.appendChild(li);
       });
       carriers.forEach((c) => {
@@ -762,6 +773,14 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     });
 
     function openLoadDetail(load, side) {
+      const entry = registry.get(load.id);
+      const opener = entry && entry[side] ? entry[side].getElement() : (entry && entry.pickup ? entry.pickup.getElement() : null);
+      if (window.__loadModal) {
+        closeCarrierPanel();
+        window.__loadModal.open(load, { context: 'map', opener });
+        return;
+      }
+      // Fallback: old detail panel
       const wrap = document.createElement('div');
       wrap.dataset.title = `Load ${load.id}`;
       const dl = document.createElement('dl');
@@ -782,9 +801,6 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
         dl.appendChild(dt); dl.appendChild(dd);
       });
       wrap.appendChild(dl);
-
-      const entry = registry.get(load.id);
-      const opener = entry && entry[side] ? entry[side].getElement() : (entry && entry.pickup ? entry.pickup.getElement() : null);
       openDetailPanel(wrap, opener);
     }
 
@@ -849,6 +865,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       }
 
       closeDetailPanel();
+      try { window.__loadModal?.close(); } catch {}
       carrierPanelOpener = openerEl || null;
 
       // Image
@@ -1168,6 +1185,9 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       const m = entry.pickup || entry.dropoff;
       if (m) m.openPopup();
       announceFocus(`load ${loadId}`);
+      if (window.__loadModal && entry.record) {
+        try { window.__loadModal.open(entry.record, { context: 'map' }); } catch {}
+      }
       return {
         load_id: loadId,
         pickup: entry.record && entry.record.pickup,
@@ -1234,6 +1254,19 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     carriers.forEach(addCarrierMarker);
     renderFilterListImmediate();
     renderListView();
+
+    // Wire load-modal data + listen for modal:open to close carrier panel
+    if (window.__loadModal) {
+      window.__loadModalData = { carriers, loads };
+      if (typeof window.__loadModal.setData === 'function') {
+        window.__loadModal.setData({ carriers, loads });
+      }
+    }
+    function onModalOpen(ev) {
+      if (ev.detail && ev.detail.kind === 'load') closeCarrierPanel();
+    }
+    window.addEventListener('modal:open', onModalOpen);
+    track(() => window.removeEventListener('modal:open', onModalOpen));
     updateEmptyState();
 
     // Chip filters

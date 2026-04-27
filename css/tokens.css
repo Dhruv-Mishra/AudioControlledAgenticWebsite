@@ -284,6 +284,7 @@
   --z-overlay:   500;
   --z-skip-link: 1000;
   --z-map-panel: 1100;  /* above Leaflet controls (1000) */
+  --z-load-modal: 1200; /* above map panel + carrier aside */
 }
 
 /* ============================================================

@@ -1,0 +1,178 @@
+/* ==========================================================
+ * Load detail modal — body-portal slide-in panel
+ * Tokens: var(--color-*), var(--sp-*), var(--radius-*)
+ * Mobile ≤640px → bottom-sheet
+ * ========================================================== */
+
+.load-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-load-modal, 1200);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Body scroll-lock while a modal is open (mainly mobile bottom-sheet). */
+body.has-modal-open {
+  overflow: hidden;
+  touch-action: none;
+}
+
+.load-modal[aria-hidden="false"],
+.load-modal.is-open {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* Backdrop */
+.load-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.load-modal.is-open .load-modal-backdrop {
+  opacity: 1;
+}
+
+/* Panel — right-side drawer */
+.load-modal-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: min(420px, 90vw);
+  background: var(--color-surface, var(--color-bg-elev-3));
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  overflow-y: auto;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.3);
+}
+.load-modal.is-open .load-modal-panel {
+  transform: translateX(0);
+}
+
+/* Hero */
+.load-modal-hero {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--color-bg-elev-2);
+}
+.load-modal-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.load-modal-status {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+}
+.load-modal-close {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  background: var(--color-overlay-bg, rgba(0, 0, 0, 0.5));
+  border-radius: var(--radius-pill, 9999px);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  color: #fff;
+  font-size: 1.25rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.load-modal-close:hover,
+.load-modal-close:focus-visible {
+  background: var(--color-overlay-bg-hover, rgba(0, 0, 0, 0.7));
+}
+
+/* Body */
+.load-modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--sp-4);
+}
+.load-modal-title {
+  font-family: var(--font-sans);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+  margin: 0 0 var(--sp-1) 0;
+}
+
+/* Sections */
+.load-modal-section {
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--color-border);
+}
+.load-modal-section-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--sp-2) 0;
+}
+
+/* Key-value grid */
+.load-modal-kv {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.load-modal-kv dt {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+.load-modal-kv dd {
+  margin: 0;
+  color: var(--color-text);
+}
+
+/* Actions row */
+.load-modal-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+/* ---- Mobile: bottom sheet ---- */
+@media (max-width: 640px) {
+  .load-modal-panel {
+    top: auto;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: 80vh;
+    transform: translateY(100%);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+  .load-modal.is-open .load-modal-panel {
+    transform: translateY(0);
+  }
+}
+
+/* ---- Reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  .load-modal *,
+  .load-modal {
+    transition: none !important;
+  }
+}

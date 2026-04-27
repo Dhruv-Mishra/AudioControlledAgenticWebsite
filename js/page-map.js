@@ -57,6 +57,9 @@ export async function enter(root, { voiceAgent }) {
   }
 
   try {
+    // Side-effect import: registers window.__loadModal so the map can open
+    // the unified load-detail modal when a pin/list item/highlightLoad fires.
+    await import('./load-modal.js');
     const { createMap } = await import('./map-widget.js');
     // Capture the partial api as soon as it's constructed (synchronously,
     // before createMap awaits the first tile). If the user navigates away
