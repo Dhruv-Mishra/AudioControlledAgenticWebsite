@@ -171,17 +171,20 @@ body > .load-modal {
   border-top: 1px solid var(--color-border, rgba(255,255,255,0.08));
 }
 
-/* Mobile — bottom-sheet anchored above the voice-dock (84 px) */
+/* Mobile — bottom-sheet anchored above the voice-dock (84 px).
+ * Two mounting modes:
+ *   1. Body-portal (no #map-root on page, e.g. dispatch): position:fixed
+ *      pinned to the viewport bottom above the dock.
+ *   2. Map-root mount (#map-root .load-modal): position:absolute inside
+ *      the map container so the modal NEVER extends above the map's top
+ *      edge (which would put it under the sticky app-header). */
 @media (max-width: 640px) {
+  /* Shared mobile look (visual + animation) */
   .load-modal {
-    position: fixed;
     left: var(--sp-3);
     right: var(--sp-3);
-    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
-    top: auto;
     width: auto;
     max-width: none;
-    max-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px) - var(--sp-6));
     border-radius: var(--radius-xl);
     z-index: var(--z-load-modal);
     transform: translateY(calc(100% + 84px));
@@ -191,10 +194,20 @@ body > .load-modal {
       opacity   var(--dur-slow) var(--md-sys-motion-easing-emphasized-accelerate),
       visibility 0s linear var(--dur-slow);
   }
-  /* Override body-portal top/max-height that would fight the bottom-sheet */
+  /* Body-portal mode: fixed to viewport, anchored above the dock. */
   body > .load-modal {
+    position: fixed;
     top: auto;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
     max-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px) - var(--sp-6));
+  }
+  /* Map-root mode: absolute inside the map container; bounded by it so
+   * the modal cannot bleed into the header strip above the map. */
+  #map-root .load-modal {
+    position: absolute;
+    top: auto;
+    bottom: var(--sp-3);
+    max-height: calc(100% - var(--sp-3) * 2);
   }
   .load-modal.is-open {
     transform: translateY(0);
@@ -232,11 +245,11 @@ body > .load-modal {
 
 /* Mobile — short viewport: tighter gutter, no hero */
 @media (max-width: 640px) and (max-height: 440px) {
-  .load-modal {
-    max-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px) - var(--sp-3));
-  }
   body > .load-modal {
     max-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px) - var(--sp-3));
+  }
+  #map-root .load-modal {
+    max-height: calc(100% - var(--sp-3) * 2);
   }
   .load-modal-hero {
     display: none;
