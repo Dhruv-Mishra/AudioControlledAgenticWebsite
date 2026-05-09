@@ -33,9 +33,17 @@ function int16ToAudioBuffer(ctx, int16, sampleRate) {
 }
 
 // audio-flow: volume constants for the three HTMLAudioElement layers.
-// BACKGROUND_VOLUME is tuned quiet so it sits under Gemini's voice and
-// doesn't force the user to keep turning the OS volume down.
-const BACKGROUND_VOLUME = 0.15;
+// BACKGROUND_VOLUME is the BASE level we hold when the agent is silent —
+// tuned so a quiet office/call-centre ambience sits clearly under the
+// experience without ever masking speech. When Gemini's voice is
+// playing we duck to BACKGROUND_DUCKED_VOLUME so the bed dips a little
+// out of the way; on `agent-playback-drained` we ramp back to base so
+// the room feels alive between turns (real call-centres never go dead-
+// silent). Ramps are short (~120 ms) — fast enough to feel natural,
+// slow enough to avoid clicks.
+const BACKGROUND_VOLUME = 0.22;          // base / silence level (was 0.15)
+const BACKGROUND_DUCKED_VOLUME = 0.12;   // while agent is speaking
+const BACKGROUND_DUCK_RAMP_MS = 120;
 const START_END_VOLUME = 0.85;
 // audio-flow: safety cap on how long we wait for callOpen / callClose
 // clips to finish before we move on. A missing or corrupt file must never
@@ -509,6 +517,11 @@ class CallAudioController {
       }
     }
     try { this.backgroundAudio.currentTime = 0; } catch {}
+    // Reset the duck target latch so the FIRST agent turn of this call
+    // ducks correctly even if the previous call ended mid-duck (left
+    // _bgDuckTarget at the ducked value).
+    this._bgDuckTarget = BACKGROUND_VOLUME;
+    if (this._bgDuckTimer) { try { clearInterval(this._bgDuckTimer); } catch {} this._bgDuckTimer = null; }
 
     const doPlay = (attempt) => {
       let p;
@@ -567,9 +580,42 @@ class CallAudioController {
   isBackgroundEnabled() { return this._backgroundEnabled; }
   isBackgroundPlaying() { return this._backgroundPlaying; }
 
+  /** audio-flow: light ducking. Called by AudioPipeline as agent audio
+   *  starts/ends so the ambience dips out of the way during speech and
+   *  rises back to the base level between turns. Uses a short manual
+   *  ramp (HTMLMediaElement.volume isn't AudioParam-automatable) — 8
+   *  steps over BACKGROUND_DUCK_RAMP_MS feels smooth and avoids clicks
+   *  on every browser we ship to. Idempotent — calling with the same
+   *  state while a ramp is in flight is a no-op. */
+  setBackgroundDuck(on) {
+    const target = on ? BACKGROUND_DUCKED_VOLUME : BACKGROUND_VOLUME;
+    if (!this.backgroundAudio) return;
+    if (this._bgDuckTarget === target) return;
+    this._bgDuckTarget = target;
+    if (this._bgDuckTimer) { clearInterval(this._bgDuckTimer); this._bgDuckTimer = null; }
+    const STEPS = 8;
+    const stepMs = Math.max(8, Math.floor(BACKGROUND_DUCK_RAMP_MS / STEPS));
+    let step = 0;
+    const start = (() => {
+      try { return this.backgroundAudio.volume; } catch { return target; }
+    })();
+    this._bgDuckTimer = setInterval(() => {
+      step += 1;
+      const t = step / STEPS;
+      const v = start + (target - start) * t;
+      try { this.backgroundAudio.volume = Math.max(0, Math.min(1, v)); } catch {}
+      if (step >= STEPS) {
+        clearInterval(this._bgDuckTimer);
+        this._bgDuckTimer = null;
+        try { this.backgroundAudio.volume = target; } catch {}
+      }
+    }, stepMs);
+  }
+
   /** audio-flow: stop everything and detach listeners. Called on full
    *  pipeline close. */
   destroy() {
+    if (this._bgDuckTimer) { try { clearInterval(this._bgDuckTimer); } catch {} this._bgDuckTimer = null; }
     // Background (HTMLAudioElement) — pause + unload.
     try { this.backgroundAudio.pause(); } catch {}
     try { this.backgroundAudio.removeAttribute('src'); this.backgroundAudio.load(); } catch {}
@@ -885,11 +931,20 @@ export class AudioPipeline extends EventTarget {
     const t = Math.max(this.ctx.currentTime, this.nextStartTime);
     src.start(t);
     this.nextStartTime = t + buffer.duration;
+    // Light background ducking: dip the call-centre ambience while the
+    // agent is speaking. Idempotent — only the first source in a turn
+    // triggers the ramp, and the controller no-ops on repeat targets.
+    if (this.activePlaybackSources.size === 0) {
+      try { this.callAudio.setBackgroundDuck(true); } catch {}
+    }
     this.activePlaybackSources.add(src);
     src.onended = () => {
       try { src.disconnect(); } catch {}
       this.activePlaybackSources.delete(src);
       if (this.activePlaybackSources.size === 0) {
+        // Restore ambience to base level — the room sounds alive
+        // between turns instead of going dead-silent.
+        try { this.callAudio.setBackgroundDuck(false); } catch {}
         try { this.dispatchEvent(new CustomEvent('agent-playback-drained')); } catch {}
       }
     };

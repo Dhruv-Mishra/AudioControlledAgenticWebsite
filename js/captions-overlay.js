@@ -17,6 +17,10 @@ let root = null;
 let textEl = null;
 let fadeTimer = null;
 let currentText = '';
+// Set when `onTurnComplete` fires; the next non-empty delta starts a
+// fresh caption (prevents the new turn's text from concatenating onto
+// the previous turn during the 3 s fade window).
+let turnEnded = false;
 
 function ensureMount() {
   if (root) return root;
@@ -74,12 +78,19 @@ export function appendAgentDelta(delta, { finished = false } = {}) {
     if (finished) scheduleFade();
     return;
   }
+  // First delta after a turn break starts a fresh caption — don't
+  // bleed the previous turn's text into the new one.
+  if (turnEnded) {
+    turnEnded = false;
+    currentText = '';
+  }
   setText(currentText + delta);
   show();
   if (finished) scheduleFade();
 }
 
 export function onTurnComplete() {
+  turnEnded = true;
   scheduleFade();
 }
 
@@ -108,6 +119,20 @@ export function setEnabled(enabled) {
 export function reset() {
   clearFade();
   currentText = '';
+  turnEnded = false;
+  if (textEl) textEl.textContent = '';
+  hide();
+}
+
+/** Soft reset on route change — clears any in-flight caption text so a
+ *  new page doesn't inherit half a sentence from the previous page, and
+ *  cancels any pending fade. Keeps the overlay element mounted; the
+ *  next agent-delta will re-show it. Distinct from `reset()` which is
+ *  also intended for end-of-call. */
+export function resetForRouteChange() {
+  clearFade();
+  currentText = '';
+  turnEnded = false;
   if (textEl) textEl.textContent = '';
   hide();
 }
@@ -125,6 +150,16 @@ export function init(voiceAgent) {
   });
   voiceAgent.addEventListener('turn-complete', () => onTurnComplete());
   voiceAgent.addEventListener('call-ended', () => reset());
+  // Cross-page: clear stale captions when the SPA router swaps the
+  // page underneath us. Without this, the next turn's deltas would
+  // concatenate onto whatever was already on screen.
+  if (typeof window !== 'undefined' && window.__router && typeof window.__router.addEventListener === 'function') {
+    window.__router.addEventListener('route-change', () => resetForRouteChange());
+  } else if (typeof window !== 'undefined') {
+    // Router may not yet be attached at init time; fall back to the
+    // history event so we still cover popstate.
+    window.addEventListener('popstate', () => resetForRouteChange());
+  }
 }
 
 export function mount() { return ensureMount(); }

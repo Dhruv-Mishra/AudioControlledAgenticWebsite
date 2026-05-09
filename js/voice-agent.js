@@ -55,6 +55,7 @@ import { TranscriptLog } from './stt-logger.js';
 import { ToolRegistry, scanAgentElements } from './tool-registry.js';
 import { DEFAULT_PERSONAS, DEFAULT_PERSONA_ID } from './personas.js';
 import { LocalStt } from './local-stt.js';
+import { PendingActionQueue } from './pending-action-queue.js';
 
 // latency-pass: first retry drops 1000ms → 300ms. Transient WS blips (a WAN
 // hiccup, a load-balancer restart) used to cost a full second of dead-air
@@ -258,6 +259,17 @@ export class VoiceAgent extends EventTarget {
   constructor({ transcriptEl, onNavigate } = {}) {
     super();
     this.pipeline = new AudioPipeline();
+    // Persistent listener: every time the agent's audio queue empties
+    // (i.e. the model has finished speaking aloud), try to drain the
+    // pending-action queue. This is one half of the dual-gate; the
+    // other half (turn_complete) is the explicit `case 'turn_complete'`
+    // handler in `_onServerMessage`. Whichever fires last triggers
+    // the drain — `_maybeDrainPendingActions` is idempotent.
+    this.pipeline.addEventListener('agent-playback-drained', () => {
+      // Note: `_pendingActions` is created later in the constructor;
+      // guard against the early init order.
+      if (this._pendingActions) this._maybeDrainPendingActions('audio_drained');
+    });
     this.transcript = transcriptEl ? new TranscriptLog(transcriptEl) : null;
     // Round-8 test hook: if URL has `?r8hook=1`, stash this instance on
     // `window.__r8Agent` so the Playwright end-call harness can fire
@@ -451,8 +463,25 @@ export class VoiceAgent extends EventTarget {
       callsPlaced: 0
     };
 
+    // Deferred-action queue: page navigations and other visually
+    // disruptive tool effects are queued here and flushed only after
+    // the model's current speech turn has fully drained (turn_complete
+    // + agent-playback-drained). Prevents the "switching to… [cut] …
+    // page now" mid-sentence chop. See js/pending-action-queue.js.
+    this._pendingActions = new PendingActionQueue({
+      logger: (m) => dlog('pending-actions: ' + m)
+    });
+    // Safety-net: if the model never produces audio for a turn (e.g. a
+    // text-only chain) we still want the queue to drain. We arm a
+    // bounded timer the moment something is enqueued and clear it once
+    // both gates close.
+    this._pendingActionsTimer = null;
+    this._PENDING_ACTIONS_MAX_WAIT_MS = 8000;
+
     this.toolRegistry = new ToolRegistry({
       sendTextMessage: (m) => this._sendJson(m),
+      // The agent-driven navigate path now defers — see _onAgentNavigate.
+      // External overrides (e.g. tests) keep the immediate path.
       onNavigate: onNavigate || ((p) => { this._onAgentNavigate(p); }),
       onToolNote: (s) => this._logTool(s),
       // Live getter so the flag change after init() takes effect without
@@ -880,6 +909,14 @@ export class VoiceAgent extends EventTarget {
       return;
     }
     this._endingCall = true;
+    // Drop any deferred page-nav / disruptive tool effects queued
+    // during the now-ending turn. Without this, the 8s safety timer
+    // (or a late `turn_complete`) could fire `window.__router.navigate`
+    // AFTER the user has hung up — teleporting them off whatever page
+    // they navigated to post-call. Mirrors the cleanup in
+    // `_tearDownCall` for the graceful path which doesn't go through it.
+    if (this._pendingActions) this._pendingActions.clear('graceful_end:' + reason);
+    this._clearPendingActionsTimer();
     // Round-6 fix 2: cancel any armed deterministic-end-call wait.
     // If the user clicked End Call while we were waiting for
     // turn_complete + agent-playback-drained, skip the wait and kill.
@@ -1027,6 +1064,11 @@ export class VoiceAgent extends EventTarget {
     clearInterval(this.liveIdleTimer); this.liveIdleTimer = null;
     // Round-6 fix 2: cancel any armed deterministic end-call wait.
     this._cancelAgentEndingWait('_tearDownCall');
+    // Drop any deferred page-nav / disruptive tool effects — the call
+    // is dead, the user does NOT want to be teleported to a page
+    // queued before hangup.
+    if (this._pendingActions) this._pendingActions.clear('teardown');
+    this._clearPendingActionsTimer();
     if (this.localStt) this.localStt.stop();
     if (this._sttController) {
       try { this._sttController.stop(); } catch {}
@@ -1774,6 +1816,13 @@ export class VoiceAgent extends EventTarget {
         if (this.transcript) this.transcript.turnBreak();
         this._suppressUserTxUntil = Date.now() + 200;
         this.pipeline.flushPlayback();
+        // Barge-in: discard pending deferred actions queued during the
+        // interrupted turn — the user's intent has changed; the model
+        // will issue new tool calls if still relevant.
+        if (this._pendingActions) {
+          this._pendingActions.clear('interrupted');
+          this._clearPendingActionsTimer();
+        }
         this._setState(STATES.LIVE_READY);
         return;
       case 'turn_complete':
@@ -1783,6 +1832,11 @@ export class VoiceAgent extends EventTarget {
         this._setState(STATES.LIVE_READY);
         this._persistSessionBlob();
         this._publishEvent('turn-complete', {});
+        // Dual-gate trigger for deferred page navigations / disruptive
+        // tool effects. Drains immediately if no audio is still in
+        // flight; otherwise the agent-playback-drained listener will
+        // pick it up.
+        if (this._pendingActions) this._maybeDrainPendingActions('turn_complete');
         return;
       case 'error':
         this._onServerError(msg);
@@ -2010,11 +2064,86 @@ export class VoiceAgent extends EventTarget {
       sessionStorage.setItem('jarvis.lastNavNote', `Navigated here by Jarvis (${new Date().toLocaleTimeString()}).`);
     } catch {}
     this._persistSessionBlob();
-    if (typeof window !== 'undefined' && window.__router && typeof window.__router.navigate === 'function') {
-      window.__router.navigate(path);
-    } else {
-      location.href = path;
+
+    const doNavigate = () => {
+      if (typeof window !== 'undefined' && window.__router && typeof window.__router.navigate === 'function') {
+        window.__router.navigate(path);
+      } else {
+        location.href = path;
+      }
+    };
+
+    // If the model is mid-turn (still speaking, or a turn is in flight
+    // before turn_complete), defer the navigation until the current
+    // utterance has fully drained. This prevents the "switching to the
+    // carriers page now" line from being sliced as the DOM swaps
+    // underneath the audio. The dual-gate listener below drains the
+    // queue exactly when the model goes silent.
+    //
+    // If the call is not active OR no turn is in flight, run immediately
+    // — there is no speech to protect.
+    const turnInFlight = this._callActive && (
+      this.state === STATES.MODEL_SPEAKING ||
+      this.state === STATES.MODEL_THINKING ||
+      this.state === STATES.TOOL_EXECUTING ||
+      this.pipeline.isAgentAudioPlaying()
+    );
+    if (!turnInFlight) {
+      doNavigate();
+      return;
     }
+    this._pendingActions.enqueue(doNavigate, {
+      label: 'navigate:' + path,
+      reason: 'turn_in_flight',
+      // Collapse rapid double-navigates to the same path.
+      dedupeKey: 'navigate:' + path
+    });
+    this._armPendingActionsTimer();
+  }
+
+  /** Arm a safety timer that drains the pending-action queue if the
+   *  speech-end gates somehow never close (e.g. a model-only text turn
+   *  with no audio at all). 8s is well over the longest realistic
+   *  natural utterance the agent will produce given the one-or-two
+   *  sentence rule. */
+  _armPendingActionsTimer() {
+    if (this._pendingActionsTimer || this._pendingActions.isEmpty) return;
+    this._pendingActionsTimer = setTimeout(() => {
+      this._pendingActionsTimer = null;
+      if (this._pendingActions.isEmpty) return;
+      // eslint-disable-next-line no-console
+      console.warn('[jarvis] pending-actions timeout — draining anyway');
+      this._pendingActions.drain('timeout');
+    }, this._PENDING_ACTIONS_MAX_WAIT_MS);
+  }
+
+  _clearPendingActionsTimer() {
+    if (this._pendingActionsTimer) {
+      clearTimeout(this._pendingActionsTimer);
+      this._pendingActionsTimer = null;
+    }
+  }
+
+  /** Drain the pending-action queue if the speech end-gates have both
+   *  closed (turn_complete AND agent audio drained). Called from both
+   *  the turn_complete handler and the agent-playback-drained event so
+   *  whichever fires last is the trigger. Idempotent. */
+  _maybeDrainPendingActions(via) {
+    if (this._pendingActions.isEmpty) return;
+    // Call is ending or already gone — drop the queue rather than
+    // running deferred navigations after the user has hung up.
+    if (!this._callActive || this.state === STATES.CLOSING || this._endingCall) {
+      this._pendingActions.clear('not_active:' + via);
+      this._clearPendingActionsTimer();
+      return;
+    }
+    // No turn in flight ⇒ both gates are effectively closed.
+    const speaking = this.pipeline.isAgentAudioPlaying() ||
+      this.state === STATES.MODEL_SPEAKING ||
+      this.state === STATES.MODEL_THINKING;
+    if (speaking) return;
+    this._clearPendingActionsTimer();
+    this._pendingActions.drain('speech_end:' + via);
   }
 
   _tryInjectPageContext() {

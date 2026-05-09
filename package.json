@@ -29,7 +29,8 @@
     "smoke:bundle-budget": "node evals/bundle-budget-smoke.js",
     "smoke:ws-nonce": "node evals/ws-nonce-smoke.js",
     "smoke:audio-prefs": "node evals/audio-prefs-smoke.js",
-    "smoke:expressive-prompt": "node evals/expressive-prompt-smoke.js"
+    "smoke:expressive-prompt": "node evals/expressive-prompt-smoke.js",
+    "smoke:pending-action-queue": "node evals/pending-action-queue-smoke.js"
   },
   "engines": {
     "node": ">=20"
