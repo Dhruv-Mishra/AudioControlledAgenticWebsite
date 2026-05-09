@@ -15,6 +15,27 @@
 import { getLoadProgress } from './load-progress.js';
 import * as pageState from './page-state.js';
 
+const CARRIER_HQ_CITY = {
+  'C-088': 'Newark, NJ',
+  'C-118': 'Atlanta, GA',
+  'C-204': 'Chicago, IL',
+  'C-302': 'Seattle, WA',
+  'C-410': 'Memphis, TN',
+  'C-511': 'Minneapolis, MN',
+  'C-722': 'Houston, TX',
+  'C-845': 'Los Angeles, CA'
+};
+const CITY_LATLNG = {
+  'Newark, NJ':       { lat: 40.7357, lng: -74.1724 },
+  'Atlanta, GA':      { lat: 33.7490, lng: -84.3880 },
+  'Chicago, IL':      { lat: 41.8781, lng: -87.6298 },
+  'Seattle, WA':      { lat: 47.6062, lng: -122.3321 },
+  'Memphis, TN':      { lat: 35.1495, lng: -90.0490 },
+  'Minneapolis, MN':  { lat: 44.9778, lng: -93.2650 },
+  'Houston, TX':      { lat: 29.7604, lng: -95.3698 },
+  'Los Angeles, CA':  { lat: 34.0522, lng: -118.2437 }
+};
+
 const TRUCK_GLYPH =
   '<svg viewBox="0 0 32 20" width="22" height="14" aria-hidden="true">' +
   // Cab
@@ -38,7 +59,7 @@ function isMovable(load) {
   return !!load;
 }
 
-export function mountOverlay({ widgetApi, root, loads }) {
+export function mountOverlay({ widgetApi, root, loads, carriers }) {
   if (!widgetApi || typeof widgetApi._getLeafletMap !== 'function') {
     return () => {};
   }
@@ -76,6 +97,7 @@ export function mountOverlay({ widgetApi, root, loads }) {
   host.appendChild(overlay);
 
   const truckEls = new Map(); // load.id -> { el, load }
+  const carrierEls = new Map(); // carrier.id -> { el, latLng }
   let driftTimer = null;
   let listPaintTimer = null;
   let mutObs = null;
@@ -132,6 +154,34 @@ export function mountOverlay({ widgetApi, root, loads }) {
         entry.load = l;
       }
     });
+    // Stationary carrier sprites at HQ.
+    carrierEls.forEach((entry) => {
+      let pt;
+      try { pt = map.latLngToLayerPoint([entry.latLng.lat, entry.latLng.lng]); } catch { return; }
+      entry.el.style.transform =
+        `translate3d(${Math.round(pt.x)}px, ${Math.round(pt.y)}px, 0) ` +
+        `translate(-50%, -50%)`;
+    });
+  }
+
+  function ensureCarrierSprite(carrier) {
+    if (carrierEls.has(carrier.id)) return;
+    const city = CARRIER_HQ_CITY[carrier.id];
+    const ll = city && CITY_LATLNG[city];
+    if (!ll) return;
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'map-overlay-truck map-overlay-truck--carrier';
+    el.setAttribute('data-carrier-id', carrier.id);
+    el.setAttribute('aria-label', `Carrier ${carrier.name || carrier.id} at ${city}`);
+    el.title = `${carrier.id}  ·  ${carrier.name || ''}  ·  ${city}`;
+    el.innerHTML = TRUCK_GLYPH;
+    overlay.appendChild(el);
+    carrierEls.set(carrier.id, { el, latLng: ll });
+  }
+
+  if (Array.isArray(carriers)) {
+    carriers.forEach(ensureCarrierSprite);
   }
 
   // Recompute layer-point positions when Leaflet resets the layer origin
@@ -258,6 +308,8 @@ export function mountOverlay({ widgetApi, root, loads }) {
     try { unsubSelection(); } catch {}
     truckEls.forEach((entry) => { try { entry.el.remove(); } catch {} });
     truckEls.clear();
+    carrierEls.forEach((entry) => { try { entry.el.remove(); } catch {} });
+    carrierEls.clear();
     try { overlay.remove(); } catch {}
   };
 }

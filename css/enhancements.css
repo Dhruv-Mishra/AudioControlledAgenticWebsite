@@ -69,6 +69,11 @@
   border-color: var(--color-accent, #f6c177);
   color: var(--color-accent, #f6c177);
 }
+.map-overlay-truck--carrier {
+  border-color: #c084fc;
+  color: #c084fc;
+  box-shadow: 0 0 0 4px rgba(192,132,252,0.18);
+}
 .map-overlay-truck svg { display: block; }
 
 /* --- Live ticker (header right rail) --- */

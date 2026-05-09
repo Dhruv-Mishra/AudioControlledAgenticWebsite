@@ -76,7 +76,7 @@ export async function enter(root, { voiceAgent }) {
       const { mountOverlay } = await import('./map-overlay.js');
       const widgetApi = instance && instance.api;
       if (widgetApi) {
-        const destroyOverlay = mountOverlay({ widgetApi, root: mapRoot, loads: data.loads });
+        const destroyOverlay = mountOverlay({ widgetApi, root: mapRoot, loads: data.loads, carriers: data.carriers });
         if (instance && typeof destroyOverlay === 'function') {
           const origDestroy = instance.destroy;
           instance.destroy = () => {
