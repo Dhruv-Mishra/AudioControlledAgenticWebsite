@@ -46,7 +46,7 @@ jobs:
             if (!target.host || typeof target.host !== 'string') {
               throw new Error('Each target requires a non-empty host value.');
             }
-            if (target.host.includes('example.com')) {
+            if (target.host.includes('example.com') || target.host.includes('replace-with-your-vm-public-ip')) {
               throw new Error('Replace placeholder hosts in deploy/targets.json before running production deploys.');
             }
           }
@@ -142,11 +142,24 @@ jobs:
 
       - name: Configure SSH
         shell: bash
+        env:
+          TARGET_HOST: ${{ matrix.target.host }}
+          TARGET_PORT: ${{ matrix.target.port }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' '${{ secrets.PROD_SSH_PRIVATE_KEY }}' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' '${{ secrets.PROD_SSH_KNOWN_HOSTS }}' > ~/.ssh/known_hosts
+          : > ~/.ssh/known_hosts
+          if [[ -n "$SSH_KNOWN_HOSTS" ]]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H -p "$TARGET_PORT" "$TARGET_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+            [[ -s ~/.ssh/known_hosts ]] || {
+              echo "Failed to resolve SSH host key for $TARGET_HOST:$TARGET_PORT" >&2
+              exit 1
+            }
+          fi
           chmod 644 ~/.ssh/known_hosts
 
       - name: Copy deploy files to target

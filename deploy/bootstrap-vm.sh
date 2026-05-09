@@ -219,8 +219,8 @@ Files created:
 Do this next:
   1. Edit $APP_DIR/.env and fill the real secrets.
   2. Add your GitHub Actions SSH public key to ${APP_OWNER}'s ~/.ssh/authorized_keys.
-  3. In the repo, update deploy/targets.json with this machine's host/user/path.
-  4. In GitHub, create PROD_SSH_PRIVATE_KEY and PROD_SSH_KNOWN_HOSTS.
+  3. In the repo, replace the host placeholder in deploy/targets.json with this machine's public IP. Change user or paths only if you are not using the defaults.
+  4. In GitHub, create PROD_SSH_PRIVATE_KEY. PROD_SSH_KNOWN_HOSTS is optional if you want pinned SSH host keys.
   5. Push to master to trigger the production workflow.
 
 Notes:

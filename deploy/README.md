@@ -130,7 +130,7 @@ If you keep it private, create a read-only GHCR token and store it in GitHub sec
 
 ### 3. Fill in the VM inventory
 
-Edit `deploy/targets.json` in the repo. Replace the placeholder host and add one object per VM.
+Edit `deploy/targets.json` in the repo. In the default case you only replace the placeholder host with the VM public IP or a DNS-only deploy hostname.
 
 Example:
 
@@ -138,7 +138,7 @@ Example:
 [
    {
       "name": "prod-1",
-      "host": "app-1.example.com",
+      "host": "92.4.78.70",
       "port": 22,
       "user": "deploy",
       "appDir": "/opt/jarvis-freightops",
@@ -159,18 +159,27 @@ In the GitHub repository settings, add:
 | Secret | Required | Purpose |
 |---|---|---|
 | `PROD_SSH_PRIVATE_KEY` | yes | Private key for the deploy user on the VM(s). |
-| `PROD_SSH_KNOWN_HOSTS` | yes | Output of `ssh-keyscan` for each VM. Prevents MITM on deploy. |
+| `PROD_SSH_KNOWN_HOSTS` | optional | Pinned `known_hosts` entries for each VM. If omitted, the workflow runs `ssh-keyscan` against the target host at deploy time. |
 | `GHCR_PULL_USERNAME` | only for private GHCR images | Read-only GHCR username. |
 | `GHCR_PULL_TOKEN` | only for private GHCR images | Read-only GHCR token. |
 
-How to generate `PROD_SSH_KNOWN_HOSTS`:
+Minimum required setup for the SSH path:
+
+1. Put the VM public IP in `deploy/targets.json`.
+2. Create `PROD_SSH_PRIVATE_KEY`.
+
+That is enough for the workflow to connect because it will auto-discover the host key from the target IP.
+
+If you want stricter SSH pinning, also create `PROD_SSH_KNOWN_HOSTS`.
+
+How to generate `PROD_SSH_KNOWN_HOSTS` manually:
 
 ```bash
-ssh-keyscan -H app-1.example.com
-ssh-keyscan -H app-2.example.com
+ssh-keyscan -H 92.4.78.70
+ssh-keyscan -H deploy.example.com
 ```
 
-Paste the combined output into the secret.
+Paste the combined output into the secret. The host on the left side must match the `host` value in `deploy/targets.json`.
 
 ### 5. Push to `master`
 
