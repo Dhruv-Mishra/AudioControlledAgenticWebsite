@@ -3,7 +3,7 @@
     "name": "prod-1",
     "host": "replace-with-your-vm-public-ip",
     "port": 22,
-    "user": "deploy",
+    "user": "replace-with-your-vm-ssh-user",
     "appDir": "/opt/jarvis-freightops",
     "systemEnvFile": "/opt/jarvis-freightops/deploy/system.env.local",
     "appEnvFile": "/opt/jarvis-freightops/.env",

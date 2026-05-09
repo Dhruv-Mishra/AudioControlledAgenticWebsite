@@ -142,7 +142,7 @@ Example:
       "name": "prod-1",
       "host": "92.4.78.70",
       "port": 22,
-      "user": "deploy",
+   "user": "ubuntu",
       "appDir": "/opt/jarvis-freightops",
       "systemEnvFile": "/opt/jarvis-freightops/deploy/system.env.local",
       "appEnvFile": "/opt/jarvis-freightops/.env",
@@ -154,6 +154,8 @@ Example:
 
 The workflow rolls targets serially with `max-parallel: 1`, which is the correct default before you introduce a load balancer.
 
+The `user` value must be the actual SSH login for the VM and it should usually own the app directory. If you ran `sudo bash deploy/bootstrap-vm.sh` without `--owner`, this is normally the user who invoked `sudo`, not automatically `deploy`.
+
 ### 4. Add GitHub secrets
 
 In the GitHub repository settings, add:
@@ -163,13 +165,15 @@ In the GitHub repository settings, add:
 | `PROD_SSH_PRIVATE_KEY` | yes | Private key for the deploy user on the VM(s). |
 | `PROD_SSH_KNOWN_HOSTS` | optional | Pinned `known_hosts` entries for each VM. If omitted, the workflow runs `ssh-keyscan` against the target host at deploy time. |
 | `PROD_VM_HOST` | optional | VM public IP or SSH hostname when you want GitHub to supply the host instead of committing it in `deploy/targets.json`. Prefer a repository variable for this; a secret also works. |
+| `PROD_VM_USER` | optional | VM SSH login when you want GitHub to supply the user instead of committing it in `deploy/targets.json`. Prefer a repository variable for this; a secret also works. |
 | `GHCR_PULL_USERNAME` | only for private GHCR images | Read-only GHCR username. |
 | `GHCR_PULL_TOKEN` | only for private GHCR images | Read-only GHCR token. |
 
 Minimum required setup for the SSH path:
 
 1. Put the VM public IP in `deploy/targets.json`.
-2. Create `PROD_SSH_PRIVATE_KEY`.
+2. Put the VM SSH user in `deploy/targets.json`.
+3. Create `PROD_SSH_PRIVATE_KEY`.
 
 That is enough for the workflow to connect because it will auto-discover the host key from the target IP.
 
@@ -177,7 +181,10 @@ Alternative if you do not want the host committed in the repo:
 
 1. Leave `deploy/targets.json` with the placeholder host.
 2. Create a repository variable named `PROD_VM_HOST` with the VM public IP or deploy hostname.
-3. Create `PROD_SSH_PRIVATE_KEY`.
+3. Create a repository variable named `PROD_VM_USER` with the VM SSH login.
+4. Create `PROD_SSH_PRIVATE_KEY`.
+
+If your workflow reaches the SSH copy step and then fails, the most common cause is that the `user` does not match the actual SSH login or does not own `appDir`.
 
 If you want stricter SSH pinning, also create `PROD_SSH_KNOWN_HOSTS`.
 

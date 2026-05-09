@@ -34,6 +34,8 @@ jobs:
         env:
           OVERRIDE_TARGET_HOST: ${{ vars.PROD_VM_HOST }}
           SECRET_TARGET_HOST: ${{ secrets.PROD_VM_HOST }}
+          OVERRIDE_TARGET_USER: ${{ vars.PROD_VM_USER }}
+          SECRET_TARGET_USER: ${{ secrets.PROD_VM_USER }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
@@ -43,7 +45,9 @@ jobs:
           const raw = fs.readFileSync(filePath, 'utf8');
           const parsed = JSON.parse(raw);
           const placeholderHost = 'replace-with-your-vm-public-ip';
+          const placeholderUser = 'replace-with-your-vm-ssh-user';
           const hostOverride = process.env.OVERRIDE_TARGET_HOST || process.env.SECRET_TARGET_HOST || '';
+          const userOverride = process.env.OVERRIDE_TARGET_USER || process.env.SECRET_TARGET_USER || '';
           if (!Array.isArray(parsed) || parsed.length === 0) {
             throw new Error('deploy/targets.json must contain at least one target.');
           }
@@ -51,11 +55,17 @@ jobs:
             if (!target.host || typeof target.host !== 'string') {
               throw new Error('Each target requires a non-empty host value.');
             }
+            if (!target.user || typeof target.user !== 'string') {
+              throw new Error('Each target requires a non-empty user value.');
+            }
             if (target.host.includes('example.com')) {
               throw new Error('Replace placeholder hosts in deploy/targets.json before running production deploys.');
             }
             if (target.host.includes(placeholderHost) && !hostOverride) {
               throw new Error('Replace the placeholder host in deploy/targets.json or create PROD_VM_HOST as a repository variable or secret.');
+            }
+            if (target.user.includes(placeholderUser) && !userOverride) {
+              throw new Error('Replace the placeholder user in deploy/targets.json or create PROD_VM_USER as a repository variable or secret.');
             }
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(parsed)}\n`);
@@ -146,24 +156,36 @@ jobs:
         target: ${{ fromJSON(needs.targets.outputs.matrix) }}
     env:
       MATRIX_TARGET_HOST: ${{ matrix.target.host }}
+      MATRIX_TARGET_USER: ${{ matrix.target.user }}
       OVERRIDE_TARGET_HOST: ${{ vars.PROD_VM_HOST }}
       SECRET_TARGET_HOST: ${{ secrets.PROD_VM_HOST }}
+      OVERRIDE_TARGET_USER: ${{ vars.PROD_VM_USER }}
+      SECRET_TARGET_USER: ${{ secrets.PROD_VM_USER }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Resolve target host
+      - name: Resolve target connection
         shell: bash
         run: |
           target_host="$MATRIX_TARGET_HOST"
           if [[ "$target_host" == 'replace-with-your-vm-public-ip' ]]; then
             target_host="${OVERRIDE_TARGET_HOST:-$SECRET_TARGET_HOST}"
           fi
+          target_user="$MATRIX_TARGET_USER"
+          if [[ "$target_user" == 'replace-with-your-vm-ssh-user' ]]; then
+            target_user="${OVERRIDE_TARGET_USER:-$SECRET_TARGET_USER}"
+          fi
           [[ -n "$target_host" ]] || {
             echo 'No deployment host was resolved.' >&2
             exit 1
           }
+          [[ -n "$target_user" ]] || {
+            echo 'No deployment user was resolved.' >&2
+            exit 1
+          }
           printf 'TARGET_HOST=%s\n' "$target_host" >> "$GITHUB_ENV"
+          printf 'TARGET_USER=%s\n' "$target_user" >> "$GITHUB_ENV"
 
       - name: Configure SSH
         shell: bash
@@ -186,14 +208,20 @@ jobs:
           fi
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Verify SSH access
+        shell: bash
+        env:
+          TARGET_PORT: ${{ matrix.target.port }}
+          TARGET_APP_DIR: ${{ matrix.target.appDir }}
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -p "$TARGET_PORT" "$TARGET_USER@$TARGET_HOST" "mkdir -p '$TARGET_APP_DIR/deploy' && printf 'SSH OK (%s)\n' \"\$(whoami)\""
+
       - name: Copy deploy files to target
         shell: bash
         env:
           TARGET_PORT: ${{ matrix.target.port }}
-          TARGET_USER: ${{ matrix.target.user }}
           TARGET_APP_DIR: ${{ matrix.target.appDir }}
         run: |
-          ssh -p "$TARGET_PORT" "$TARGET_USER@$TARGET_HOST" "mkdir -p '$TARGET_APP_DIR/deploy'"
           scp -P "$TARGET_PORT" compose.yaml "$TARGET_USER@$TARGET_HOST:$TARGET_APP_DIR/compose.yaml"
           scp -P "$TARGET_PORT" deploy/remote-deploy.sh "$TARGET_USER@$TARGET_HOST:$TARGET_APP_DIR/deploy/remote-deploy.sh"
           ssh -p "$TARGET_PORT" "$TARGET_USER@$TARGET_HOST" "chmod 755 '$TARGET_APP_DIR/deploy/remote-deploy.sh'"
@@ -202,7 +230,6 @@ jobs:
         shell: bash
         env:
           TARGET_PORT: ${{ matrix.target.port }}
-          TARGET_USER: ${{ matrix.target.user }}
           TARGET_APP_DIR: ${{ matrix.target.appDir }}
           TARGET_SYSTEM_ENV: ${{ matrix.target.systemEnvFile }}
           TARGET_APP_ENV: ${{ matrix.target.appEnvFile }}
