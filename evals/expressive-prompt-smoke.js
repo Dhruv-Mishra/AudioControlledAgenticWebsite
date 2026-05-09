@@ -1,21 +1,8 @@
 // Smoke — expressive-agent prompt contract.
 //
-// Asserts the v2.2 expressive-delivery block exists in the system prompt
-// and is LAST (preserving the prompt cache prefix). The block is short
-// (≤ 30 tokens) and instructs the model to use up to one vocal burst per
-// turn when emotionally warranted.
-//
-// Checks performed without hitting Gemini:
-//
-//   1. The skeleton contains the header "Expressive delivery".
-//   2. The skeleton mentions at least TWO vocal-burst tokens:
-//      *sighs*, *laughs*, *hmm*, breath. (Case-insensitive.)
-//   3. The expressive block is the LAST section of the skeleton — any
-//      prior section (rules, map-tool usage) appears BEFORE it.
-//   4. The skeleton length stays under a soft cap so the prompt-cache
-//      prefix is not bloated. 8000 chars is generous headroom.
-//   5. `buildSystemInstruction` still emits the skeleton verbatim at the
-//      top of the output (no reordering).
+// The agent may sound human, but stage directions must never leak into
+// spoken output, transcripts, or captions. Checks are static and do not hit
+// Gemini.
 //
 // Usage:
 //   node evals/expressive-prompt-smoke.js
@@ -31,40 +18,38 @@ function assert(cond, msg) {
   else      { console.error('FAIL  ' + msg); FAIL += 1; }
 }
 
-// 1. Header present.
+// 1. Human delivery is still requested.
 assert(
-  /Expressive delivery/i.test(SYSTEM_PROMPT_SKELETON),
-  'skeleton contains "Expressive delivery" header'
+  /real phone line/i.test(SYSTEM_PROMPT_SKELETON),
+  'skeleton asks for natural phone-line delivery'
 );
 
-// 2. At least two vocal-burst tokens mentioned.
-const bursts = ['*sighs*', '*laughs*', '*hmm*', 'breath', 'burst'];
-const found = bursts.filter((b) => SYSTEM_PROMPT_SKELETON.toLowerCase().includes(b.toLowerCase()));
+// 2. Stage directions are explicitly forbidden from text/audio narration.
 assert(
-  found.length >= 2,
-  'at least 2 burst tokens mentioned — found: ' + JSON.stringify(found)
+  /Never output, spell, caption, or say stage directions/i.test(SYSTEM_PROMPT_SKELETON),
+  'skeleton forbids stage directions in spoken/caption text'
 );
 
-// 3. Expressive block is LAST. Find the header position and assert no
-//    other major section header comes after it.
-const expIdx = SYSTEM_PROMPT_SKELETON.search(/Expressive delivery/i);
-const mapIdx = SYSTEM_PROMPT_SKELETON.search(/Map-tool usage/i);
-assert(expIdx > mapIdx && expIdx > 0, 'Expressive block comes AFTER Map-tool usage');
+// 3. The old marker-producing instruction must not return.
+assert(
+  !/Use\s+`?\*action\*`?\s+markers/i.test(SYSTEM_PROMPT_SKELETON),
+  'skeleton does not instruct the model to emit *action* markers'
+);
 
-// 4. Soft length cap preserves cache prefix.
+// 4. The prompt carries concrete forbidden examples so the model knows
+//    exactly what to avoid.
+const forbiddenExamples = ['*sighs*', '*soft breath*', '[laughs]', '(pause)'];
+const foundForbidden = forbiddenExamples.filter((example) => SYSTEM_PROMPT_SKELETON.includes(example));
+assert(foundForbidden.length >= 3, 'forbidden marker examples present — found: ' + JSON.stringify(foundForbidden));
+
+// 5. Soft length cap preserves cache prefix.
 assert(SYSTEM_PROMPT_SKELETON.length <= 8000, 'skeleton length ' + SYSTEM_PROMPT_SKELETON.length + ' ≤ 8000 chars');
 
-// 5. buildSystemInstruction preserves skeleton verbatim at the top.
+// 6. buildSystemInstruction preserves skeleton verbatim at the top.
 const built = buildSystemInstruction({ personaFragment: 'PERSONA_STUB', pageName: '/' });
 assert(
   built.startsWith(SYSTEM_PROMPT_SKELETON),
   'buildSystemInstruction emits skeleton verbatim at the top'
-);
-
-// 6. Narrate-emotion-in-brackets is explicitly discouraged.
-assert(
-  /Do NOT narrate emotion in brackets/i.test(SYSTEM_PROMPT_SKELETON),
-  'skeleton discourages "[surprised]" style bracket narration'
 );
 
 if (FAIL === 0) {

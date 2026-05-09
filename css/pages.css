@@ -640,13 +640,13 @@
 }
 
 @media (min-width: 1100px) {
-  .negotiate-grid {
+  body:has(.voice-dock.is-collapsed) .negotiate-grid {
     grid-template-columns: minmax(0, 720px) minmax(0, 440px);
     max-width: 1180px;
     gap: var(--sp-5);
     align-items: start;
   }
-  .negotiate-grid > aside {
+  body:has(.voice-dock.is-collapsed) .negotiate-grid > aside {
     position: sticky;
     top: calc(var(--sp-7) + var(--app-header-height, 64px));
     max-height: calc(100dvh - 120px);

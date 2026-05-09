@@ -10,6 +10,8 @@
 //   set_captions({enabled}) → flips transcript mode to 'captions' or 'off'
 //   (unless 'full' is active — leaves 'full' alone).
 
+import { sanitizeAgentSpeechText } from './speech-text.js';
+
 const AUTO_FADE_MS = 3000;
 const MAX_CHARS = 300;
 
@@ -84,7 +86,7 @@ export function appendAgentDelta(delta, { finished = false } = {}) {
     turnEnded = false;
     currentText = '';
   }
-  setText(currentText + delta);
+  setText(sanitizeAgentSpeechText(currentText + delta));
   show();
   if (finished) scheduleFade();
 }

@@ -9,8 +9,10 @@ import {
   initDataStore,
   listCarriers,
   listLoads,
-  subscribe
+  subscribe,
+  updateLoad
 } from './data-store.js';
+import { notify, showActionDialog } from './action-feedback.js';
 import {
   formatEta,
   formatLoadStatus,
@@ -176,16 +178,22 @@ function renderDetail() {
   if (btn) btn.addEventListener('click', () => {
     const avail = currentCarriers().filter((c) => c.available);
     const pick = avail[0];
-    if (!pick) { window.alert('No carriers available.'); return; }
+    if (!pick) { notify('No carriers available for this load.', { kind: 'warn' }); return; }
     assignCarrierLocal(l.id, pick.id, 'dispatch');
   });
+  const requestBtn = panel.querySelector('[data-agent-id="dispatch.detail.request_status"]');
+  if (requestBtn) requestBtn.addEventListener('click', () => requestStatusForLoad(l.id));
+  const escalateBtn = panel.querySelector('[data-agent-id="dispatch.detail.escalate"]');
+  if (escalateBtn) escalateBtn.addEventListener('click', () => escalateLoad(l.id));
 }
 
 function assignCarrierLocal(loadId, carrierId, source = 'dispatch') {
   try {
-    const { load } = assignCarrierToLoad(loadId, carrierId, { source });
+    const { load, carrier } = assignCarrierToLoad(loadId, carrierId, { source });
+    notify(`${carrier.name} assigned to ${load.id}.`, { kind: 'ok' });
     return { ok: true, load };
   } catch (err) {
+    notify(err && err.message || 'Could not assign carrier.', { kind: 'danger' });
     return { ok: false, error: err && err.message || String(err) };
   }
 }
@@ -459,10 +467,108 @@ function bindFilters() {
   ln.addEventListener('input', () => { state.filter.lane = ln.value; renderTable(); });
 }
 
+function bindToolbarActions() {
+  const newLoad = document.querySelector('[data-agent-id="dispatch.action.new_load"]');
+  const exportBtn = document.querySelector('[data-agent-id="dispatch.action.export"]');
+  if (newLoad) newLoad.addEventListener('click', openNewLoadDialog);
+  if (exportBtn) exportBtn.addEventListener('click', exportLoadsCsv);
+}
+
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[ch]));
+}
+
+function csvCell(value) {
+  const text = String(value == null ? '' : value);
+  const safe = /^[\s]*[=+\-@]/.test(text) || /^[\t\r]/.test(text) ? `'${text}` : text;
+  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
+function exportLoadsCsv() {
+  const rows = filterLoads();
+  const header = ['Load ID', 'Pickup', 'Dropoff', 'Carrier', 'Status', 'Miles', 'Rate', 'ETA'];
+  const lines = [header, ...rows.map((load) => [
+    load.id,
+    load.pickup,
+    load.dropoff,
+    load.carrier || '',
+    load.status || '',
+    load.miles || '',
+    load.rate || '',
+    load.eta || ''
+  ])].map((line) => line.map(csvCell).join(','));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `dispatch-loads-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  notify(`Exported ${rows.length} load${rows.length === 1 ? '' : 's'} to CSV.`, { kind: 'ok' });
+}
+
+function openNewLoadDialog() {
+  const id = `LD-${Math.floor(10000 + Math.random() * 89999)}`;
+  showActionDialog({
+    title: 'Stage new load',
+    description: 'Create a dispatch draft for Jarvis or a dispatcher to complete.',
+    primaryLabel: 'Stage load',
+    fields: [
+      { name: 'load_id', label: 'Load ID', value: id, required: true },
+      { name: 'pickup', label: 'Pickup', placeholder: 'Chicago, IL', required: true },
+      { name: 'dropoff', label: 'Dropoff', placeholder: 'Dallas, TX', required: true },
+      { name: 'commodity', label: 'Commodity', placeholder: 'Dry goods' },
+      { name: 'rate', label: 'Target rate', type: 'number', placeholder: '1850' }
+    ],
+    onSubmit(values) {
+      const loadId = String(values.load_id || id).trim() || id;
+      notify(`Draft ${loadId} staged: ${values.pickup || 'pickup'} to ${values.dropoff || 'dropoff'}.`, { kind: 'ok' });
+      if (state && Array.isArray(state._activityEvents)) {
+        state._activityEvents.unshift({ kind: 'pending', when: Date.now(), loadId: state.selectedId || (listLoads()[0] && listLoads()[0].id) });
+        paintActivityFeed();
+      }
+    }
+  });
+}
+
+function requestStatusForLoad(loadId) {
+  const load = getLoad(loadId);
+  if (!load) {
+    notify('Select a load before requesting status.', { kind: 'warn' });
+    return;
+  }
+  notify(load.carrier
+    ? `Status request queued for ${load.carrier} on ${load.id}.`
+    : `Status request queued for ${load.id}; no carrier assigned yet.`, { kind: load.carrier ? 'ok' : 'warn' });
+}
+
+function escalateLoad(loadId) {
+  const load = getLoad(loadId);
+  if (!load) {
+    notify('Select a load before escalating.', { kind: 'warn' });
+    return;
+  }
+  showActionDialog({
+    title: `Escalate ${load.id}`,
+    description: 'Page a senior dispatcher and mark the load as delayed for visibility.',
+    primaryLabel: 'Escalate',
+    fields: [
+      { name: 'reason', label: 'Reason', type: 'textarea', rows: 3, value: load.status === 'delayed' ? 'Already delayed - needs senior review.' : 'Carrier needs immediate follow-up.' }
+    ],
+    onSubmit(values) {
+      try {
+        updateLoad(load.id, { status: 'delayed' }, { source: 'dispatch-escalation' });
+        notify(`Escalated ${load.id}: ${values.reason || 'senior dispatcher paged'}.`, { kind: 'ok' });
+      } catch (err) {
+        notify(err && err.message || 'Could not escalate this load.', { kind: 'danger' });
+      }
+    }
+  });
 }
 
 // ---------- module lifecycle for the router ----------
@@ -480,6 +586,7 @@ export async function enter(root, { voiceAgent }) {
   renderActivityFeed();
   bindMapCard();
   bindFilters();
+  bindToolbarActions();
 
   // Live timer: refresh "X min ago" labels every 30s. New feed events
   // come from store mutations so every live surface shares one source.

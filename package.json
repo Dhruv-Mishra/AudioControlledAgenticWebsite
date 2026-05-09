@@ -32,6 +32,7 @@
     "smoke:expressive-prompt": "node evals/expressive-prompt-smoke.js",
     "smoke:pending-action-queue": "node evals/pending-action-queue-smoke.js",
     "smoke:negotiation-context": "node evals/negotiation-context-smoke.js",
+    "smoke:negotiator-response-trigger": "node evals/negotiator-response-trigger-smoke.js",
     "smoke:greeting-non-default-page": "node evals/greeting-non-default-page-smoke.js",
     "smoke:data-store": "node evals/data-store-smoke.js",
     "smoke:live-tick": "node evals/live-tick-smoke.js",

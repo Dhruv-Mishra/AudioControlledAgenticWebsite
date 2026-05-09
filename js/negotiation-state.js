@@ -4,6 +4,7 @@
 //   idle → drafting → submitting → countered → drafting (loop)
 //                                 → accepted   (terminal)
 //                                 → rejected   (terminal)
+//                                 → walked_away (terminal)
 //                                 → expired    (terminal)
 //
 // Invariants:
@@ -13,15 +14,15 @@
 //   - Pure logic; UI lives in page-negotiate.js.
 
 const STORAGE_KEY = (loadId) => `negotiation:${loadId}`;
-// Only `accepted` and `expired` are truly terminal. `rejected` is recoverable
-// via `reopen()` so the dispatcher can craft a new counter-offer.
+// `accepted`, `walked_away`, and `expired` are terminal. `rejected` is
+// recoverable via `reopen()` so the dispatcher can craft a new counter-offer.
 // (`expired` is currently unused but reserved for a future timeout path.)
-const TERMINAL = new Set(['accepted', 'expired']);
+const TERMINAL = new Set(['accepted', 'walked_away', 'expired']);
 
 const VALID = {
   idle:       new Set(['drafting']),
   drafting:   new Set(['submitting']),
-  submitting: new Set(['countered', 'accepted', 'rejected', 'drafting' /* on failure */]),
+  submitting: new Set(['countered', 'accepted', 'rejected', 'walked_away', 'drafting' /* on failure */]),
   countered:  new Set(['drafting', 'submitting' /* immediate accept on counter */, 'accepted', 'rejected']),
   rejected:   new Set(['drafting'] /* via reopen() */)
 };
@@ -95,22 +96,10 @@ export function reopen(state) {
 
 /** Validate an offer. Returns { ok, error?, value? }. */
 export function validateOffer(amount, suggested, opts = {}) {
-  const { tolerance = 0.25, step = 25 } = opts;
   const n = Number(amount);
   if (!Number.isFinite(n)) return { ok: false, error: 'Enter a number.' };
   if (n <= 0) return { ok: false, error: 'Offer must be greater than zero.' };
-  if (suggested && Number.isFinite(suggested)) {
-    const lo = suggested * (1 - tolerance);
-    const hi = suggested * (1 + tolerance);
-    if (n < lo || n > hi) {
-      return {
-        ok: false,
-        error: `Offer must be within ±${Math.round(tolerance * 100)}% of suggested ($${Math.round(lo)}–$${Math.round(hi)}).`
-      };
-    }
-  }
-  const rounded = Math.round(n / step) * step;
-  return { ok: true, value: rounded };
+  return { ok: true, value: Number(n.toFixed(2)) };
 }
 
 /** Mark a submission as in-flight. Returns false if locked. */
@@ -142,6 +131,10 @@ export function resolveSubmit(state, lockId, outcome) {
   } else if (kind === 'reject') {
     appendHistory(state, { actor: 'carrier', type: 'reject', note });
     transition(state, 'rejected');
+  } else if (kind === 'walkaway') {
+    appendHistory(state, { actor: 'carrier', type: 'walkaway', amount, note });
+    state.latestOffer = amount ? { amount, by: 'carrier' } : state.latestOffer;
+    transition(state, 'walked_away');
   } else {
     transition(state, 'drafting');
   }

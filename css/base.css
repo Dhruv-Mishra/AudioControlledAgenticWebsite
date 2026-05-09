@@ -369,7 +369,7 @@ code, pre, .mono, .mono-id {
     padding-right: calc(420px + var(--sp-6) + var(--sp-4));
     transition: padding-right var(--dur-base) var(--ease-snap);
   }
-  .app-shell:has(.voice-dock.is-collapsed) .app-main {
+  body:has(.voice-dock.is-collapsed) .app-main {
     padding-right: var(--sp-6);
   }
   .app-main.app-main--map {

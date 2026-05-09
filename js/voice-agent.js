@@ -2312,6 +2312,20 @@ export class VoiceAgent extends EventTarget {
     this._sendJson({ type: 'elements', page: this._currentPathname || location.pathname, elements });
   }
 
+  sendAppEvent(name, detail = {}) {
+    const eventName = String(name || '').trim().slice(0, 80);
+    if (!eventName || !this._callActive || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
+      return false;
+    }
+    this._sendJson({
+      type: 'app_event',
+      name: eventName,
+      page: this._currentPathname || location.pathname,
+      detail
+    });
+    return true;
+  }
+
   // ---------- wake word (advanced opt-in only) ----------
   _bootWakeWord() {
     this.wake = new WakeWordEngine({

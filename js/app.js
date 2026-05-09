@@ -12,13 +12,15 @@
 
 import { bootstrapVoiceShell } from './ui.js';
 import { Router } from './router.js';
-import { initDataStore } from './data-store.js';
+import { assignCarrierToLoad, getCarrier, getLoad, initDataStore, listLoads } from './data-store.js';
 import { bindKpis } from './kpi-binder.js';
 import { startLiveTick } from './live-tick.js';
 import { applyDispatchFilters, applyCarrierFilters } from './tool-registry.js';
 import { setActivityNote } from './activity-indicator.js';
 import { startLiveUi, getLiveState } from './live-ui.js';
 import { autoApplyTypewriter } from './typewriter.js';
+import { notify } from './action-feedback.js';
+import { initOnboarding } from './onboarding-modal.js';
 import {
   getSelection, recordFormInput, recordFormFocus, getFormDraft, getFocusedField
 } from './page-state.js';
@@ -30,6 +32,60 @@ function onIdle(fn) {
   } else {
     setTimeout(run, 120);
   }
+}
+
+function bindGlobalCarrierActions(router) {
+  window.addEventListener('carrier-action', async (event) => {
+    const detail = event.detail || {};
+    const action = String(detail.action || '').trim();
+    if (!action) return;
+    try { await initDataStore(); } catch {}
+    const load = detail.loadId ? getLoad(detail.loadId) : null;
+    const carrier = detail.carrierId ? getCarrier(detail.carrierId) : (load && load.carrierId ? getCarrier(load.carrierId) : null);
+    if (action === 'call-driver') {
+      notify(carrier
+        ? `Call prepared for ${carrier.name}: ${carrier.phone || 'phone unavailable'}.`
+        : load && load.carrier
+          ? `Call prepared for ${load.carrier} on ${load.id}.`
+          : 'Driver call prepared. Carrier details were not available.', { kind: carrier || load ? 'ok' : 'warn' });
+      return;
+    }
+    if (action === 'request-status') {
+      notify(load
+        ? `Status ping queued for ${load.id}${load.carrier ? ` with ${load.carrier}` : ''}.`
+        : 'Status ping queued for the selected carrier.', { kind: 'ok' });
+      return;
+    }
+    if (action === 'assign-load') {
+      if (!carrier) {
+        notify('Choose a carrier before assigning a load.', { kind: 'warn' });
+        return;
+      }
+      const pending = listLoads().find((row) => row.status === 'pending' && !row.carrierId) || listLoads().find((row) => !row.carrierId);
+      if (!pending) {
+        notify(`No unassigned loads are ready for ${carrier.name}.`, { kind: 'warn' });
+        return;
+      }
+      try {
+        const result = assignCarrierToLoad(pending.id, carrier.id, { source: 'carrier-panel' });
+        notify(`${carrier.name} assigned to ${result.load.id}.`, { kind: 'ok' });
+      } catch (err) {
+        notify(err && err.message || 'Could not assign that carrier.', { kind: 'danger' });
+      }
+      return;
+    }
+    if (action === 'track') {
+      if (router && typeof router.navigate === 'function' && location.pathname !== '/map.html') {
+        await router.navigate('/map.html');
+      }
+      const map = window.__mapWidget;
+      if (map && typeof map.focusTarget === 'function') {
+        try { await map.ready; } catch {}
+        await map.focusTarget(detail.carrierId || detail.loadId || 'carriers');
+      }
+      notify(carrier ? `Tracking ${carrier.name} on the map.` : 'Tracking view opened on the map.', { kind: 'ok' });
+    }
+  });
 }
 
 async function main() {
@@ -59,6 +115,8 @@ async function main() {
     }
   });
   window.__router = router;
+  initOnboarding({ router });
+  bindGlobalCarrierActions(router);
 
   // Re-bind KPIs on EVERY route change — including back/forward
   // (popstate). The router suppresses `onRouteChange` for popstate

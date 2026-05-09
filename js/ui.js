@@ -813,12 +813,25 @@ export async function bootstrapVoiceShell() {
         }
       });
     });
-    // Play buttons — no-op / log (no sample audio exists yet)
+    // Play buttons — browser-side preview using SpeechSynthesis when available.
     voiceTileRow.querySelectorAll('.voice-tile-play').forEach((playBtn) => {
       playBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const voice = playBtn.closest('.voice-tile')?.getAttribute('data-voice');
-        console.log(`[ui] Voice preview requested: ${voice} (no sample audio available)`);
+        const sample = `Previewing ${voice || 'this voice'} for Jarvis.`;
+        if ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
+          try {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(sample);
+            utterance.rate = 1;
+            utterance.pitch = 1;
+            window.speechSynthesis.speak(utterance);
+          } catch {
+            console.log(`[ui] Voice preview: ${sample}`);
+          }
+        } else {
+          console.log(`[ui] Voice preview: ${sample}`);
+        }
       });
     });
     // Grey out tiles mid-call

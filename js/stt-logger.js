@@ -24,6 +24,8 @@
 // fragment, not a running total. Prior implementation overwrote the row's
 // textContent with each delta — looked like erasure. This version accumulates.
 
+import { sanitizeAgentSpeechText } from './speech-text.js';
+
 const BATCH_MS = 500;
 
 export class TranscriptLog {
@@ -51,6 +53,7 @@ export class TranscriptLog {
       this.root.appendChild(row.el);
     }
     row.buffer += text;
+    if (from === 'agent') row.buffer = sanitizeAgentSpeechText(row.buffer);
     row.textEl.textContent = row.buffer;
     this._scrollBottom();
     if (finished) {

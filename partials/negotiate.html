@@ -39,7 +39,7 @@
         </div>
       </div>
 
-      <p class="negotiate-suggested-line muted">Suggested for this lane: <strong id="negotiate-suggested" class="mono">—</strong> &middot; offers within ±25% accepted.</p>
+      <p class="negotiate-suggested-line muted">Suggested for this lane: <strong id="negotiate-suggested" class="mono">—</strong> &middot; any positive dollar amount is allowed.</p>
       <p id="negotiate-hint" class="negotiate-hint" role="status" aria-live="polite"></p>
       <span id="negotiate-live" class="sr-only" role="status" aria-live="polite"></span>
 
@@ -62,11 +62,25 @@
         </div>
         <div class="field">
           <label class="field-label" for="field-target-rate">Target rate (USD)</label>
-          <input id="field-target-rate" name="target_rate" class="input" type="number" min="0" step="25" placeholder="1850" data-agent-id="negotiate.form.target_rate" />
+          <input id="field-target-rate" name="target_rate" class="input" type="number" min="0" step="0.01" placeholder="1850" data-agent-id="negotiate.form.target_rate" />
         </div>
         <div class="field">
           <label class="field-label" for="field-note">Note for carrier</label>
           <input id="field-note" name="note" class="input" type="text" placeholder="Optional context" data-agent-id="negotiate.form.note" />
+        </div>
+        <div class="field--wide negotiator-agent-controls" aria-label="Agent negotiation controls">
+          <label class="negotiate-checkline" for="field-agent-delegate">
+            <input id="field-agent-delegate" type="checkbox" data-agent-id="negotiate.form.agent_delegate" />
+            <span>Let Jarvis act on my behalf</span>
+          </label>
+          <label class="field-label negotiator-max" for="field-agent-max-rate">
+            Max rate
+            <input id="field-agent-max-rate" class="input" type="number" min="0" step="0.01" placeholder="No ceiling" data-agent-id="negotiate.form.agent_max_rate" disabled />
+          </label>
+          <div class="negotiator-agent-buttons">
+            <button class="btn btn--outlined" type="button" id="negotiate-agent-propose" data-agent-id="negotiate.agent.propose">Jarvis propose</button>
+            <button class="btn" type="button" id="negotiate-agent-run" data-agent-id="negotiate.agent.take_turn">Jarvis take turn</button>
+          </div>
         </div>
         <div class="field--wide">
           <div class="row" role="group" aria-label="Negotiation actions">
@@ -85,6 +99,7 @@
       <span class="muted">Newest first</span>
     </header>
     <div class="panel-body">
+      <div id="negotiator-read" class="negotiator-read" data-agent-id="negotiate.negotiator_read"></div>
       <ol id="negotiate-history" class="negotiate-history" data-agent-id="negotiate.log"></ol>
     </div>
   </aside>

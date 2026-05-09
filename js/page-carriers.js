@@ -3,6 +3,7 @@
 import { restoreFiltersFromUrl } from './tool-registry.js';
 import { assignCarrierToLoad, getLoad, initDataStore, listCarriers, subscribe } from './data-store.js';
 import { formatCarrierAvailability } from './formatters.js';
+import { notify, showActionDialog } from './action-feedback.js';
 
 let state = null;
 let agentRef = null;
@@ -21,13 +22,27 @@ function chipForTone(tone) {
   return 'neutral';
 }
 
+function readShortlist() {
+  try {
+    const raw = localStorage.getItem('jarvis.carrier.shortlist.v1');
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch { return new Set(); }
+}
+
+function saveShortlist(list) {
+  try { localStorage.setItem('jarvis.carrier.shortlist.v1', JSON.stringify(Array.from(list))); } catch {}
+}
+
 function filtered() {
   const { q, eq, available } = state.filter;
   const qq = (q || '').trim().toLowerCase();
+  const shortlistOnly = qq === 'shortlisted';
   return listCarriers({
     available: available !== 'all' ? available === 'yes' : undefined,
-    search: qq,
+    search: shortlistOnly ? '' : qq,
     predicate: (c) => {
+      if (shortlistOnly && !state.shortlist.has(c.id)) return false;
       if (eq !== 'all' && !c.equipment.map((e) => e.toLowerCase()).includes(eq)) return false;
       return true;
     }
@@ -45,9 +60,11 @@ function renderGrid() {
   }
   rows.forEach((c) => {
     const availability = formatCarrierAvailability(c);
+    const shortlisted = state.shortlist && state.shortlist.has(c.id);
     const card = document.createElement('article');
     card.className = 'carrier-card';
     card.setAttribute('data-agent-id', `carriers.card.${c.id}`);
+    card.setAttribute('data-carrier-id', c.id);
     // Thumbnail: every carrier in data/carriers.json carries an `imageSlug`
     // pointing to a WebP under /public/images/carriers/. Falls back to the
     // generic truck silhouette so a missing slug doesn't 404.
@@ -68,17 +85,126 @@ function renderGrid() {
           <div class="name">${escapeHtml(c.name)}</div>
           <span class="chip chip--${chipForTone(availability.tone)}">${availability.label}</span>
         </div>
-        <div class="meta"><span class="mono">${c.id}</span> · ${escapeHtml(c.mc)} · <span class="hero-numeral carrier-rating">${c.rating.toFixed(1)}</span><span class="muted"> ★</span></div>
+        <div class="meta"><span class="mono">${c.id}</span> · ${escapeHtml(c.mc)} · <span class="hero-numeral carrier-rating">${c.rating.toFixed(1)}</span><span class="muted"> ★</span>${shortlisted ? ' · Shortlisted' : ''}</div>
         <div class="meta">Lanes: ${c.lanes.map(escapeHtml).join(', ')}</div>
         <div class="meta">Equipment: ${c.equipment.map(escapeHtml).join(', ')}</div>
         <div class="row-actions">
           <a class="btn btn--sm" href="tel:${encodeURIComponent(c.phone)}" data-agent-id="carriers.card.${c.id}.call" data-external>Call</a>
           <button class="btn btn--sm" data-agent-id="carriers.card.${c.id}.message">Message</button>
-          <button class="btn btn--sm btn--primary" data-agent-id="carriers.card.${c.id}.shortlist">Shortlist</button>
+          <button class="btn btn--sm ${shortlisted ? 'btn--outlined' : 'btn--primary'}" data-agent-id="carriers.card.${c.id}.shortlist" aria-pressed="${shortlisted ? 'true' : 'false'}">${shortlisted ? 'Shortlisted' : 'Shortlist'}</button>
         </div>
       </div>
     `;
     root.appendChild(card);
+  });
+}
+
+function carrierFromEventTarget(target) {
+  const card = target && target.closest && target.closest('[data-carrier-id]');
+  const id = card && card.getAttribute('data-carrier-id');
+  return id ? listCarriers().find((carrier) => carrier.id === id) : null;
+}
+
+async function openCarrierOnMap(carrier) {
+  if (!carrier) return;
+  if (window.__router && typeof window.__router.navigate === 'function') {
+    await window.__router.navigate('/map.html');
+  } else {
+    location.href = '/map.html';
+    return;
+  }
+  const map = window.__mapWidget;
+  if (map && typeof map.focusTarget === 'function') {
+    try { await map.ready; } catch {}
+    await map.focusTarget(carrier.id);
+  }
+  notify(`Opened ${carrier.name} on the map.`, { kind: 'ok' });
+}
+
+function openMessageDialog(carrier) {
+  if (!carrier) return;
+  showActionDialog({
+    title: `Message ${carrier.name}`,
+    description: 'Queue a dispatcher message with lane context.',
+    primaryLabel: 'Queue message',
+    fields: [
+      { name: 'channel', label: 'Channel', value: carrier.phone || carrier.email || carrier.id, required: true },
+      { name: 'message', label: 'Message', type: 'textarea', rows: 4, value: `Can you confirm availability for your next ${carrier.equipment[0] || 'truck'} lane?`, required: true }
+    ],
+    onSubmit(values) {
+      notify(`Message queued to ${carrier.name}: ${String(values.message || '').slice(0, 80)}`, { kind: 'ok' });
+    }
+  });
+}
+
+function toggleShortlist(carrier) {
+  if (!carrier) return;
+  if (state.shortlist.has(carrier.id)) {
+    state.shortlist.delete(carrier.id);
+    notify(`${carrier.name} removed from shortlist.`, { kind: 'warn' });
+  } else {
+    state.shortlist.add(carrier.id);
+    notify(`${carrier.name} added to shortlist.`, { kind: 'ok' });
+  }
+  saveShortlist(state.shortlist);
+  renderGrid();
+}
+
+function bindCarrierActions() {
+  const root = document.getElementById('carrier-grid');
+  if (!root) return;
+  root.addEventListener('click', (event) => {
+    const carrier = carrierFromEventTarget(event.target);
+    if (!carrier) return;
+    if (event.target.closest('[data-agent-id$=".thumb"]')) {
+      event.preventDefault();
+      void openCarrierOnMap(carrier);
+      return;
+    }
+    if (event.target.closest('[data-agent-id$=".message"]')) {
+      event.preventDefault();
+      openMessageDialog(carrier);
+      return;
+    }
+    if (event.target.closest('[data-agent-id$=".shortlist"]')) {
+      event.preventDefault();
+      toggleShortlist(carrier);
+    }
+  });
+}
+
+function bindToolbarActions() {
+  const importBtn = document.querySelector('[data-agent-id="carriers.action.import"]');
+  const addBtn = document.querySelector('[data-agent-id="carriers.action.new"]');
+  if (importBtn) importBtn.addEventListener('click', () => {
+    showActionDialog({
+      title: 'Import carriers',
+      description: 'Stage a CSV import for review.',
+      primaryLabel: 'Stage import',
+      fields: [
+        { name: 'source', label: 'Source', value: 'carrier-roster.csv', required: true },
+        { name: 'notes', label: 'Notes', type: 'textarea', rows: 3, placeholder: 'Equipment, lanes, or compliance notes' }
+      ],
+      onSubmit(values) {
+        notify(`Import staged from ${values.source || 'carrier roster'}.`, { kind: 'ok' });
+      }
+    });
+  });
+  if (addBtn) addBtn.addEventListener('click', () => {
+    showActionDialog({
+      title: 'Add carrier',
+      description: 'Create a carrier intake draft for Jarvis to complete.',
+      primaryLabel: 'Create draft',
+      fields: [
+        { name: 'name', label: 'Carrier name', required: true },
+        { name: 'equipment', label: 'Equipment', placeholder: 'Dry van, reefer' },
+        { name: 'lane', label: 'Primary lane', placeholder: 'Chicago to Dallas' },
+        { name: 'phone', label: 'Phone', type: 'tel' }
+      ],
+      onSubmit(values) {
+        notify(`Carrier draft created for ${values.name || 'new carrier'}.`, { kind: 'ok' });
+      }
+    });
   });
 }
 
@@ -93,7 +219,7 @@ function bindFilters() {
 }
 
 export async function enter(root, { voiceAgent }) {
-  state = { filter: { q: '', eq: 'all', available: 'all' } };
+  state = { filter: { q: '', eq: 'all', available: 'all' }, shortlist: readShortlist() };
   agentRef = voiceAgent;
   await initDataStore();
 
@@ -116,6 +242,8 @@ export async function enter(root, { voiceAgent }) {
 
   renderGrid();
   bindFilters();
+  bindCarrierActions();
+  bindToolbarActions();
   state._unsubscribeStore = subscribe('carrier:updated', () => { if (state) renderGrid(); });
 
   if (voiceAgent && voiceAgent.toolRegistry) {
