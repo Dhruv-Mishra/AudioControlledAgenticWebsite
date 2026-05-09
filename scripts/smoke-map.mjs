@@ -16,7 +16,7 @@ const CSP =
   "default-src 'self'; " +
   "script-src 'self' https://static.cloudflareinsights.com; " +
   "style-src 'self' 'unsafe-inline'; " +
-  "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; " +
+  "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; " +
   "font-src 'self'; " +
   "connect-src 'self' wss: https://cloudflareinsights.com; " +
   "media-src 'self'; " +
@@ -64,7 +64,7 @@ await page.addInitScript(() => {
 
 page.on('response', (res) => {
   const url = res.url();
-  if (/tile\.openstreetmap\.org/.test(url)) {
+  if (/tile\.openstreetmap\.org|basemaps\.cartocdn\.com/.test(url)) {
     tileResponses.push({ url, status: res.status() });
   }
 });

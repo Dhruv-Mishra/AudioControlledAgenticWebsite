@@ -524,13 +524,16 @@
   margin-bottom: var(--sp-2);
 }
 .summary-card .value {
-  font-family: var(--font-sans);
-  font-size: var(--fs-2xl);
-  font-weight: var(--fw-medium);
-  line-height: 1;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(40px, 2.4rem + 1.5vw, 56px);
+  font-weight: 400;
+  line-height: 0.95;
   letter-spacing: var(--tracking-tight);
   color: var(--md-sys-color-on-surface);
-  font-variant-numeric: tabular-nums slashed-zero;
+  /* Lining figures (proportional) read better than tabular at this size,
+   * but the serif's italic numerals are already proportional by design. */
+  font-variant-numeric: lining-nums;
 }
 .summary-card .delta {
   display: inline-flex;

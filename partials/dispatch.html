@@ -7,11 +7,28 @@
          loading="eager" fetchpriority="high"
          decoding="async" />
   </picture>
+  <!-- Editorial overlay: gives the hero a job. The eyebrow + KPI strip is
+       data-driven (page-dispatch.js writes into #hero-kpi-*), so the
+       voice agent can read the same numbers it sees on screen. -->
+  <div class="hero-overlay" data-agent-id="dispatch.hero.overlay">
+    <p class="eyebrow">Dispatch, May 9 &middot; <span class="mono" data-agent-id="dispatch.hero.timestamp">live</span></p>
+    <h1 class="hero-title">
+      Every load on every lane,<br/>
+      <em>orchestrated by voice.</em>
+    </h1>
+    <p class="hero-sub">Talk to Jarvis to assign carriers, counter rates, or chase delayed freight &mdash; he sees what you see and clicks the same buttons you would.</p>
+    <ul class="hero-kpi-strip" aria-label="Network at a glance">
+      <li><span class="kpi-num hero-numeral" id="hero-kpi-active" data-agent-id="dispatch.hero.kpi.active">&mdash;</span><span class="kpi-lbl">active</span></li>
+      <li><span class="kpi-num hero-numeral" id="hero-kpi-miles" data-agent-id="dispatch.hero.kpi.miles">&mdash;</span><span class="kpi-lbl">miles in motion</span></li>
+      <li><span class="kpi-num hero-numeral" id="hero-kpi-rev" data-agent-id="dispatch.hero.kpi.revenue">&mdash;</span><span class="kpi-lbl">booked today</span></li>
+    </ul>
+  </div>
 </div>
 
 <section class="page-header">
   <div class="page-header-text">
-    <h1 class="page-title">Dispatch board</h1>
+    <p class="eyebrow">The board</p>
+    <h1 class="page-title">Dispatch</h1>
     <p class="page-subtitle muted">Live view of active loads. Click any row or ask Jarvis to take an action.</p>
   </div>
   <div class="toolbar" role="toolbar" aria-label="Dispatch actions">
@@ -77,3 +94,139 @@
     <ul class="dispatch-map-lanes" id="dispatch-map-lanes" data-agent-id="dispatch.map_lanes" aria-label="Active lanes"></ul>
   </section>
 </div>
+
+<!-- ============================================================
+     Network section &mdash; 3 image cards. Each card carries a visible
+     caption AND a `data-agent-description` attribute so the voice agent
+     can describe the imagery to a caller without OCR. The images are the
+     same WebP carrier portraits already on disk &mdash; no new bytes.
+     ============================================================ -->
+<section class="page-section" aria-labelledby="network-h">
+  <header class="section-head">
+    <p class="eyebrow">The network</p>
+    <h2 class="section-title" id="network-h">Three lanes, one console</h2>
+    <p class="section-sub muted">A snapshot of where the freight actually is right now &mdash; ask Jarvis about any of these and he&rsquo;ll open the map.</p>
+  </header>
+
+  <ul class="lane-card-grid" data-agent-id="dispatch.network.cards">
+    <li class="lane-card" data-agent-id="dispatch.network.card.midwest">
+      <figure>
+        <img src="/public/images/carriers/peterbilt-579.webp"
+             alt="Red Peterbilt 579 on a Midwestern interstate at sunset"
+             loading="lazy" decoding="async" width="480" height="320"
+             data-agent-description="A Peterbilt 579 sleeper-cab tractor pulling a dry van trailer along I-80 through the Midwest at golden hour." />
+        <figcaption>
+          <span class="lane-tag">I-80 corridor</span>
+          <strong>Chicago &rarr; Dallas</strong>
+          <span class="lane-meta">12 active loads &middot; <span class="hero-numeral">$2.41</span>/mi avg</span>
+        </figcaption>
+      </figure>
+    </li>
+    <li class="lane-card" data-agent-id="dispatch.network.card.southeast">
+      <figure>
+        <img src="/public/images/carriers/freightliner-cascadia.webp"
+             alt="Freightliner Cascadia leaving a Southeastern distribution dock"
+             loading="lazy" decoding="async" width="480" height="320"
+             data-agent-description="A Freightliner Cascadia day-cab tractor pulling away from a distribution-center dock door in the Southeast." />
+        <figcaption>
+          <span class="lane-tag">I-95 spine</span>
+          <strong>Atlanta &rarr; Newark</strong>
+          <span class="lane-meta">8 active loads &middot; <span class="hero-numeral">$2.86</span>/mi avg</span>
+        </figcaption>
+      </figure>
+    </li>
+    <li class="lane-card" data-agent-id="dispatch.network.card.westcoast">
+      <figure>
+        <img src="/public/images/carriers/kenworth-w990.webp"
+             alt="Kenworth W990 on a coastal highway"
+             loading="lazy" decoding="async" width="480" height="320"
+             data-agent-description="A long-hood Kenworth W990 tractor pulling a reefer trailer along a Pacific coastal highway." />
+        <figcaption>
+          <span class="lane-tag">I-5 reefer</span>
+          <strong>Los Angeles &rarr; Seattle</strong>
+          <span class="lane-meta">6 active loads &middot; <span class="hero-numeral">$3.12</span>/mi avg</span>
+        </figcaption>
+      </figure>
+    </li>
+  </ul>
+</section>
+
+<!-- ============================================================
+     Equipment section &mdash; reuses the 8 existing carrier portraits
+     as a tactile catalogue. Functions as a quick "show me a carrier"
+     surface; clicking a tile filters the carriers page (router will
+     pick that up via standard <a href> navigation).
+     ============================================================ -->
+<section class="page-section" aria-labelledby="equipment-h">
+  <header class="section-head">
+    <p class="eyebrow">In service</p>
+    <h2 class="section-title" id="equipment-h">Equipment running today</h2>
+    <p class="section-sub muted">Tap any rig to jump to the carrier directory filtered to that equipment type.</p>
+  </header>
+
+  <ul class="equipment-grid" data-agent-id="dispatch.equipment.grid">
+    <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.dry_van"
+           data-agent-description="Dry van tractor-trailer fleet, the workhorse 53-ft enclosed trailer used for general freight.">
+      <img src="/public/images/carriers/peterbilt-579.webp" alt="Peterbilt 579 dry-van tractor" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Dry van</span><span class="eq-count">14 rigs</span></a></li>
+    <li><a class="equipment-tile" href="/carriers.html?eq=reefer" data-agent-id="dispatch.equipment.reefer"
+           data-agent-description="Refrigerated trailer fleet, used for temperature-controlled freight like produce and pharma.">
+      <img src="/public/images/carriers/kenworth-w990.webp" alt="Kenworth W990 reefer tractor" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Reefer</span><span class="eq-count">9 rigs</span></a></li>
+    <li><a class="equipment-tile" href="/carriers.html?eq=flatbed" data-agent-id="dispatch.equipment.flatbed"
+           data-agent-description="Flatbed steel-deck trailer, used for steel coils, machinery, and oversized freight.">
+      <img src="/public/images/carriers/flatbed-steel.webp" alt="Flatbed steel-deck trailer" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Flatbed</span><span class="eq-count">7 rigs</span></a></li>
+    <li><a class="equipment-tile" href="/carriers.html?eq=tanker" data-agent-id="dispatch.equipment.tanker"
+           data-agent-description="Liquid tanker trailer, used for fuel, chemicals, and food-grade liquids.">
+      <img src="/public/images/carriers/tanker-fuel.webp" alt="Fuel tanker trailer" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Tanker</span><span class="eq-count">4 rigs</span></a></li>
+    <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.cascadia"
+           data-agent-description="Freightliner Cascadia day-cab tractor, the most common fleet truck in North America.">
+      <img src="/public/images/carriers/freightliner-cascadia.webp" alt="Freightliner Cascadia day cab" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Day cab</span><span class="eq-count">11 rigs</span></a></li>
+    <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.dock"
+           data-agent-description="Loading-dock door at a distribution center where dry vans pick up palletised freight.">
+      <img src="/public/images/carriers/dry-van-dock.webp" alt="Dry van at a loading dock" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">At dock</span><span class="eq-count">3 loading</span></a></li>
+    <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.vnl"
+           data-agent-description="Volvo VNL sleeper tractor, common on long-haul over-the-road runs.">
+      <img src="/public/images/carriers/volvo-vnl.webp" alt="Volvo VNL sleeper tractor" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Sleeper</span><span class="eq-count">8 rigs</span></a></li>
+    <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.t680"
+           data-agent-description="Kenworth T680 mid-roof tractor, optimised for fuel economy on regional lanes.">
+      <img src="/public/images/carriers/kenworth-t680.webp" alt="Kenworth T680 tractor" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Regional</span><span class="eq-count">6 rigs</span></a></li>
+  </ul>
+</section>
+
+<!-- ============================================================
+     Activity feed &mdash; populated by page-dispatch.js from the loads
+     dataset. Lives on the homepage so the voice agent has a chronology
+     of recent dispatch events to refer back to.
+     ============================================================ -->
+<section class="page-section page-section--split" aria-labelledby="activity-h">
+  <header class="section-head">
+    <p class="eyebrow">Pulse</p>
+    <h2 class="section-title" id="activity-h">Recent activity</h2>
+    <p class="section-sub muted">Last twelve dispatch events, newest first. Ask Jarvis &ldquo;what just happened?&rdquo;</p>
+  </header>
+
+  <div class="activity-grid">
+    <ul class="activity-feed" id="activity-feed" data-agent-id="dispatch.activity.feed" aria-live="polite"></ul>
+
+    <aside class="activity-sidecar panel" aria-label="Yard image">
+      <picture>
+        <source srcset="/public/images/ambient/loading-dock.webp" type="image/webp" />
+        <img src="/public/images/ambient/loading-dock.webp"
+             alt="Loading dock with stacked pallets at first light"
+             loading="lazy" decoding="async" width="600" height="400"
+             data-agent-description="A wide-angle photo of a freight loading dock at first light, with pallets staged for outbound and dock plates extended." />
+      </picture>
+      <div class="sidecar-caption">
+        <p class="eyebrow">First light</p>
+        <p>Outbound staging at the Indianapolis cross-dock &mdash; <span class="mono">06:14</span> CT.</p>
+      </div>
+    </aside>
+  </div>
+</section>

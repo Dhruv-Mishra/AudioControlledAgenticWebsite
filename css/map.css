@@ -162,6 +162,16 @@
   filter: saturate(0.95) brightness(1.02);
 }
 
+/* Tile fade-in tuning. Leaflet's default `fadeAnimation` ramps each tile's
+ * opacity 0 → 1 over ~200 ms, which on slow networks reads as flicker /
+ * tiling against the previous-zoom backdrop. We cut it to a 90 ms ease so
+ * loaded tiles snap in cleanly while still hiding the raw paint. */
+.map-canvas .leaflet-tile {
+  transition: opacity 90ms linear !important;
+  will-change: opacity;
+}
+.map-canvas .leaflet-tile-loaded { opacity: 1 !important; }
+
 .map-canvas[aria-hidden="true"] {
   opacity: 0;
   visibility: visible;
@@ -334,22 +344,40 @@
 }
 
 /* ============================================================
- * 7. Lane polylines — lime active, warn pending, 3 px round
+ * 7. Lane polylines — animated traveling dash on active routes.
+ * The pending lanes use the warn token + a wider static dash; active
+ * lanes ride a 12 px stroke-dashoffset loop so the route reads as
+ * "freight in motion" instead of a static highlight. SVG `pathLength`
+ * is irrelevant here — Leaflet doesn't expose it — so we lean on a
+ * simple dasharray + animated offset, which the GPU compositor handles
+ * cheaply. Reduced-motion freezes the dash entirely.
  * ============================================================ */
+
+@keyframes map-lane-flow {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -24; }
+}
 
 .leaflet-interactive.map-lane {
   stroke: var(--color-map-polyline);
   stroke-width: 3px;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: none;
+  stroke-dasharray: 14 10;
+  animation: map-lane-flow 1400ms linear infinite;
 }
 .leaflet-interactive.map-lane--pending {
   stroke: var(--color-map-polyline-pending);
   stroke-width: 3px;
-  stroke-dasharray: 6 5;
+  stroke-dasharray: 6 6;
+  animation-duration: 2200ms;
 }
 .leaflet-interactive.map-lane:hover { stroke-width: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .leaflet-interactive.map-lane,
+  .leaflet-interactive.map-lane--pending { animation: none; }
+}
 
 /* ============================================================
  * 8. Popups — M3 tonal container

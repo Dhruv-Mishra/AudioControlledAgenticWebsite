@@ -8,11 +8,31 @@
 //     Promise so agent tool handlers can `await` it before calling the
 //     widget. No document-event bridge.
 
-const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-// For a production deploy with real traffic, swap to Stadia's free tier
-// by setting STADIA_API_KEY in .env and using:
-//   https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key=...
-const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
+// Basemap — CARTO Voyager (light) + Dark Matter (dark) replace the
+// default OSM raster. Both ride on top of OSM data and require
+// attribution. CARTO’s free tier permits hot-linking; we add the
+// `*.basemaps.cartocdn.com` host to the production CSP `img-src`
+// allow-list (deploy/nginx/jarvis.whoisdhruv.com.conf) and to the two
+// Playwright smoke scripts that mirror that CSP.
+//
+// `{r}` is Leaflet’s retina suffix — it expands to `@2x` on hi-DPI
+// screens, which CARTO supports across both styles.
+const TILE_URL_LIGHT = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+const TILE_URL_DARK  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+const TILE_SUBDOMAINS = 'abcd';
+const TILE_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &middot; ' +
+  '&copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
+
+// Pick a basemap based on the current document theme. Defaults to dark
+// because that’s the project’s default, but recomputes on every mount
+// so a /map.html navigation after a theme switch picks the right tiles.
+function resolveTileUrl() {
+  try {
+    const t = document.documentElement.getAttribute('data-theme');
+    return t === 'light' ? TILE_URL_LIGHT : TILE_URL_DARK;
+  } catch { return TILE_URL_DARK; }
+}
 
 const DEFAULT_VIEW = { lat: 39.5, lng: -98.35, zoom: 4 };
 
@@ -366,16 +386,36 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     map.createPane('carriers-pane'); map.getPane('carriers-pane').style.zIndex = '420';
     map.createPane('lanes-pane');    map.getPane('lanes-pane').style.zIndex    = '405';
 
-    const tileLayer = L.tileLayer(TILE_URL, {
+    const tileLayer = L.tileLayer(resolveTileUrl(), {
       attribution: TILE_ATTRIBUTION,
-      maxZoom: 18,
+      subdomains: TILE_SUBDOMAINS,
+      maxZoom: 19,
       minZoom: ABSOLUTE_MIN_ZOOM,
       // The single most important option for the wrap fix: do NOT request
       // tiles outside [-180, 180]. Without this Leaflet happily renders
       // x = -1, x = nTiles, etc., which is what produced the repeating
       // world-strip the user reported.
       noWrap: true,
-      bounds: WORLD_BOUNDS
+      bounds: WORLD_BOUNDS,
+      crossOrigin: true,
+      // ---- Perf tuning (user reported "slow / tiling" on zoom-in) ----
+      // Default keepBuffer is 2 — raising it to 4 keeps a wider apron of
+      // tiles in the DOM around the viewport, so panning + small zoom
+      // steps reuse the cache instead of re-requesting. Costs ~3× the
+      // memory of the visible viewport, which is fine on every device
+      // we target.
+      keepBuffer: 4,
+      // Don’t request mid-gesture tiles — wait until the zoom animation
+      // settles. This eliminates the "flicker / half-loaded strip" the
+      // user saw, because Leaflet was firing requests for every
+      // intermediate zoom level during the wheel scroll.
+      updateWhenZooming: false,
+      // On mobile pan, batch tile requests until the user lifts their
+      // finger. Saves a flood of cancelled requests during a flick.
+      updateWhenIdle: true,
+      // Custom class so the CSS in map.css can override Leaflet’s default
+      // per-tile fade (which adds a noticeable flicker on fast scrolls).
+      className: 'map-tile-layer'
     });
     tileLayer.addTo(map);
 
@@ -461,7 +501,12 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       osm.target = '_blank';
       osm.rel = 'noopener';
       osm.textContent = 'OpenStreetMap';
-      attribution.append(osm, ' contributors');
+      const carto = document.createElement('a');
+      carto.href = 'https://carto.com/attributions';
+      carto.target = '_blank';
+      carto.rel = 'noopener';
+      carto.textContent = 'CARTO';
+      attribution.append(osm, ' contributors · © ', carto);
     }
 
     // --- layers (plain layerGroups on dedicated panes — no clustering)

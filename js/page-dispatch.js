@@ -177,6 +177,8 @@ function assignCarrierLocal(loadId, carrierId) {
   renderTable();
   renderDetail();
   renderSummary();
+  renderHeroKpi();
+  renderActivityFeed();
   return { ok: true, load };
 }
 
@@ -236,6 +238,100 @@ function bindMapCard() {
   });
 }
 
+// ---- Hero KPI strip + Activity feed (homepage v3 sections) ----------
+//
+// Both surfaces are data-driven from the same `state.loads` snapshot the
+// table reads, so the voice agent (which scans data-agent-id nodes) sees
+// the same numbers a sighted user does.
+
+function renderHeroKpi() {
+  const loads = state.loads || [];
+  const active = loads.filter((l) => l.status === 'in_transit' || l.status === 'booked').length;
+  const milesInMotion = loads
+    .filter((l) => l.status === 'in_transit')
+    .reduce((acc, l) => acc + (l.miles || 0), 0);
+  const bookedToday = loads
+    .filter((l) => l.status === 'booked' || l.status === 'in_transit')
+    .reduce((acc, l) => acc + (l.rate || 0), 0);
+
+  const setText = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  setText('hero-kpi-active', active.toLocaleString('en-US'));
+  setText('hero-kpi-miles', milesInMotion.toLocaleString('en-US'));
+  setText('hero-kpi-rev', '$' + bookedToday.toLocaleString('en-US'));
+
+  const ts = document.getElementById('dispatch-hero-ts') ||
+             document.querySelector('[data-agent-id="dispatch.hero.timestamp"]');
+  if (ts) {
+    const d = new Date();
+    ts.textContent = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+}
+
+function renderActivityFeed() {
+  const ul = document.getElementById('activity-feed');
+  if (!ul) return;
+  const loads = state.loads || [];
+  // Synthesize a chronological event stream from the load snapshot.
+  const events = [];
+  loads.forEach((l) => {
+    if (l.status === 'in_transit') {
+      events.push({ kind: 'transit', when: l.eta ? new Date(l.eta).getTime() - 1000 * 60 * 60 * 6 : Date.now(), load: l });
+    } else if (l.status === 'delayed') {
+      events.push({ kind: 'delayed', when: Date.now() - Math.random() * 1000 * 60 * 90, load: l });
+    } else if (l.status === 'booked') {
+      events.push({ kind: 'booked', when: Date.now() - Math.random() * 1000 * 60 * 240, load: l });
+    } else if (l.status === 'delivered') {
+      events.push({ kind: 'delivered', when: Date.now() - Math.random() * 1000 * 60 * 60 * 18, load: l });
+    } else if (l.status === 'pending') {
+      events.push({ kind: 'pending', when: Date.now() - Math.random() * 1000 * 60 * 30, load: l });
+    }
+  });
+  events.sort((a, b) => b.when - a.when);
+  const fmtRel = (ts) => {
+    const mins = Math.max(0, Math.round((Date.now() - ts) / 60000));
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    return Math.round(hrs / 24) + 'd ago';
+  };
+  const labels = {
+    transit:   { dot: 'info',    text: 'Picked up' },
+    delayed:   { dot: 'danger',  text: 'Delayed' },
+    booked:    { dot: 'ok',      text: 'Carrier booked' },
+    delivered: { dot: 'neutral', text: 'Delivered' },
+    pending:   { dot: 'warn',    text: 'Posted' }
+  };
+  ul.replaceChildren();
+  events.slice(0, 12).forEach((ev) => {
+    const meta = labels[ev.kind] || labels.pending;
+    const li = document.createElement('li');
+    li.className = 'activity-item';
+    li.setAttribute('data-agent-id', `dispatch.activity.${ev.load.id}`);
+    li.setAttribute('data-event', ev.kind);
+    li.innerHTML = `
+      <span class="activity-dot chip--${meta.dot}" aria-hidden="true"></span>
+      <div class="activity-body">
+        <div class="activity-line">
+          <strong>${escapeHtml(meta.text)}</strong>
+          <span class="mono">${escapeHtml(ev.load.id)}</span>
+          <span class="muted">${escapeHtml(ev.load.pickup)} &rarr; ${escapeHtml(ev.load.dropoff)}</span>
+        </div>
+        <div class="activity-meta muted">
+          ${escapeHtml(ev.load.carrier || 'Unassigned')} &middot;
+          ${ev.load.rate ? '$' + ev.load.rate.toLocaleString('en-US') : '—'} &middot;
+          <time datetime="${new Date(ev.when).toISOString()}">${fmtRel(ev.when)}</time>
+        </div>
+      </div>
+    `;
+    li.addEventListener('click', () => selectLoad(ev.load.id));
+    ul.appendChild(li);
+  });
+}
+
 function bindFilters() {
   const q = document.getElementById('filter-q');
   const st = document.getElementById('filter-status');
@@ -270,6 +366,8 @@ export async function enter(root, { voiceAgent }) {
   renderTable();
   renderDetail();
   renderMapCard();
+  renderHeroKpi();
+  renderActivityFeed();
   bindMapCard();
   bindFilters();
 

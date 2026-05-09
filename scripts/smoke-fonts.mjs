@@ -11,7 +11,7 @@ const CSP =
   "default-src 'self'; " +
   "script-src 'self' https://static.cloudflareinsights.com; " +
   "style-src 'self' 'unsafe-inline'; " +
-  "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; " +
+  "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; " +
   "font-src 'self'; " +
   "connect-src 'self' wss: https://cloudflareinsights.com; " +
   "media-src 'self'; " +

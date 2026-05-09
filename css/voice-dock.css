@@ -94,8 +94,8 @@
   --voice-ease-emphasized:   var(--md-sys-motion-easing-emphasized, var(--ease-snap, cubic-bezier(0.2, 0, 0, 1)));
 
   /* Type */
-  --voice-font-sans:         var(--font-sans, "Geist", ui-sans-serif, -apple-system, "Segoe UI Variable", "Helvetica Neue", sans-serif);
-  --voice-font-mono:         var(--font-mono, "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace);
+  --voice-font-sans:         var(--font-sans, "Bricolage Grotesque", ui-sans-serif, -apple-system, "Segoe UI Variable", "Helvetica Neue", sans-serif);
+  --voice-font-mono:         var(--font-mono, "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace);
 
   /* Focus */
   --voice-focus-ring:        var(--shadow-focus-ring-accent,

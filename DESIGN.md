@@ -46,7 +46,15 @@ Carrier portraits remain in `public/images/carriers/*.webp`. No new hero photogr
 
 ## Map UX
 
-The Leaflet map widget had a critical bug — the user could zoom out far enough that the world tiled into a repeating strip — and was otherwise functional but visually bland. v3 fixes the bug. A deeper visual overhaul of the map UX (basemap swap, custom marker SVG language, mobile bottom-sheet) is scoped as a follow-up.
+The Leaflet map widget had a critical bug — the user could zoom out far enough that the world tiled into a repeating strip — and was otherwise functional but visually bland. v3 fixes the bug and upgrades the basemap, attribution, and lane treatment. Deeper interaction work (custom marker SVG language, marker clustering, mobile bottom-sheet snap-points) remains scoped as a follow-up.
+
+### Basemap
+
+OpenStreetMap raw raster has been swapped for **CARTO Voyager** (light theme) and **CARTO Dark Matter** (dark theme), selected at mount time via `data-theme` on `<html>`. CARTO's free tier permits hot-linking with the attribution `© OpenStreetMap contributors · © CARTO`, which the widget renders into the existing `#map-attribution` chip. The CSP `img-src` allow-list now includes `https://*.basemaps.cartocdn.com` in [`deploy/nginx/jarvis.whoisdhruv.com.conf`](deploy/nginx/jarvis.whoisdhruv.com.conf) and the three Playwright smoke scripts under `scripts/`.
+
+### Lane animation
+
+Active routes use a lime stroke with a 14/10 dasharray and a 1.4 s linear `stroke-dashoffset` animation — the line reads as freight in motion. Pending lanes use the warn token, a 6/6 dash, and a slower 2.2 s loop. `prefers-reduced-motion` freezes both.
 
 ### Bug — repeating world strip on zoom out
 
