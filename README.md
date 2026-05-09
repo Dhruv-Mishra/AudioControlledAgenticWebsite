@@ -33,17 +33,41 @@ cp .env.example .env
 
 # 3. run
 npm start       # or: node server.js
-# → http://localhost:3001
+# → http://localhost:3011
 ```
 
-Open http://localhost:3001 in Chrome, Edge, or any recent Chromium browser. Safari/iOS works for Place Call mode; Wake Word is disabled on Safari because `SpeechRecognition` is flaky there. Click the big green **Place Call** button to start — the dock will ask for mic permission on first use, then Jarvis will greet you.
+Open http://localhost:3011 in Chrome, Edge, or any recent Chromium browser. Safari/iOS works for Place Call mode; Wake Word is disabled on Safari because `SpeechRecognition` is flaky there. Click the big green **Place Call** button to start — the dock will ask for mic permission on first use, then Jarvis will greet you.
 
 ### Verify the plumbing
 
 ```bash
-curl -s http://localhost:3001/api/health
+curl -s http://localhost:3011/api/health
 # → {"ok":true,"uptime":...,"model":"gemini-3.1-flash-live-preview","hasApiKey":true,...}
 ```
+
+## Deploy anywhere
+
+There are now two deployment paths:
+
+1. local or one-off machine deploys with `deploy/deploy.mjs`, including `npm run deploy:sync-up` when you want to fast-forward a clone to `origin/master` and deploy it,
+2. production deploys with GitHub Actions, where GitHub builds one Docker image, pushes it to GHCR, and deploys that exact image to one or more VMs.
+
+For a local-only container deploy:
+
+1. Copy `.env.example` to `.env`.
+2. Set `GEMINI_API_KEY`, `WS_NONCE_SECRET`, and `ALLOWED_ORIGINS`.
+3. For a local-only container, `ALLOWED_ORIGINS=http://localhost:3011,http://127.0.0.1:3011` is enough.
+4. Copy `deploy/system.env.example` to `deploy/system.env.local`.
+5. Run `npm run deploy`.
+6. Verify with `npm run deploy:health`.
+
+For a fresh Linux VM that you want to prepare for GitHub Actions deploys, the shortest path is:
+
+```bash
+sudo bash deploy/bootstrap-vm.sh
+```
+
+For the full GitHub Actions production flow, including VM bootstrap and multi-VM rollout, see [deploy/README.md](deploy/README.md).
 
 ### Run the text-mode eval
 
@@ -143,7 +167,7 @@ iOS-specific:
 - `AudioContext` unlocks synchronously on the Place Call click so iOS 15+ autoplay policy honours it.
 - `viewport-fit=cover` is already on the shell; safe-area insets on the dock mean the End Call button sits above the home indicator.
 
-Verify with Chrome DevTools device mode or any mobile browser pointed at `http://<your-host>:3001`.
+Verify with Chrome DevTools device mode or any mobile browser pointed at `http://<your-host>:3011`.
 
 ## 60-second demo script
 
@@ -216,7 +240,7 @@ Whenever the voice flow misbehaves, run the server with `DEBUG=1` and append `?d
 ```bash
 DEBUG=1 npm start
 # browser:
-# http://localhost:3001/?debug=1
+# http://localhost:3011/?debug=1
 ```
 You'll get per-frame logs on both sides.
 
@@ -224,7 +248,7 @@ You'll get per-frame logs on both sides.
 Server stdout:
 ```
 [server] GEMINI_API_KEY detected (len=39)
-Dhruv FreightOps listening on http://localhost:3001
+Dhruv FreightOps listening on http://localhost:3011
 [live <sid>] attach complete — awaiting hello
 [live <sid>] hello persona=professional page=/ elements=57
 [live <sid>] upstream connect requested model=gemini-3.1-flash-live-preview voice=Kore persona=professional

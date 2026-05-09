@@ -1,0 +1,13 @@
+[
+  {
+    "name": "prod-1",
+    "host": "replace-with-your-vm.example.com",
+    "port": 22,
+    "user": "deploy",
+    "appDir": "/opt/jarvis-freightops",
+    "systemEnvFile": "/opt/jarvis-freightops/deploy/system.env.local",
+    "appEnvFile": "/opt/jarvis-freightops/.env",
+    "healthUrl": "http://127.0.0.1:3011/api/health",
+    "healthTimeoutSeconds": 90
+  }
+]

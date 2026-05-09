@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.git/
+.gitignore
+.env
+.env.local
+deploy/
+tmp/
+test-results/
+.playwright-mcp/
+*.log
+Thumbs.db
+.DS_Store

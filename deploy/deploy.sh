@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy.sh — idempotent installer for Dhruv FreightOps "Jarvis" demo.
+# deploy.sh — Linux-only bare-metal installer for Dhruv FreightOps "Jarvis".
 #
 # Tested on: Ubuntu 22.04/24.04, Debian 12, Oracle Linux 9, on ARM64.
 # Hardware: 4 vCPU / 24 GB RAM, aarch64.
@@ -170,8 +170,9 @@ export PATH="$NODE_DIR:$PATH"
 
 (
   cd "$TARGET_DIR"
-  run_as_jarvis "cd $TARGET_DIR && PATH=$NODE_DIR:\$PATH npm ci --omit=dev"
+  run_as_jarvis "cd $TARGET_DIR && PATH=$NODE_DIR:\$PATH npm ci"
   run_as_jarvis "cd $TARGET_DIR && PATH=$NODE_DIR:\$PATH npm run build"
+  run_as_jarvis "cd $TARGET_DIR && PATH=$NODE_DIR:\$PATH npm prune --omit=dev"
 )
 ok "Dependencies installed + dist/ built"
 

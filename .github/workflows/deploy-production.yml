@@ -1,0 +1,192 @@
+name: Build And Deploy Production
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: Optional existing image ref to deploy, for example ghcr.io/owner/repo@sha256:...
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Load deploy targets
+        id: targets
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const filePath = path.join(process.cwd(), 'deploy', 'targets.json');
+          const raw = fs.readFileSync(filePath, 'utf8');
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed) || parsed.length === 0) {
+            throw new Error('deploy/targets.json must contain at least one target.');
+          }
+          for (const target of parsed) {
+            if (!target.host || typeof target.host !== 'string') {
+              throw new Error('Each target requires a non-empty host value.');
+            }
+            if (target.host.includes('example.com')) {
+              throw new Error('Replace placeholder hosts in deploy/targets.json before running production deploys.');
+            }
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(parsed)}\n`);
+          NODE
+
+  build:
+    if: github.event_name == 'push' || github.event.inputs.image_ref == ''
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.meta.outputs.image_name }}
+      image_ref: ${{ steps.publish.outputs.image_ref }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Compute image name
+        id: meta
+        shell: bash
+        run: |
+          owner_lc="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          repo_lc="$(printf '%s' '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')"
+          image_name="ghcr.io/${owner_lc}/${repo_lc}"
+          printf 'image_name=%s\n' "$image_name" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        id: docker_build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_name }}:master
+            ${{ steps.meta.outputs.image_name }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Publish build outputs
+        id: publish
+        shell: bash
+        run: |
+          printf 'image_ref=%s@%s\n' '${{ steps.meta.outputs.image_name }}' '${{ steps.docker_build.outputs.digest }}' >> "$GITHUB_OUTPUT"
+
+  resolve:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    outputs:
+      image_ref: ${{ steps.resolve.outputs.image_ref }}
+      git_ref: ${{ steps.resolve.outputs.git_ref }}
+    steps:
+      - name: Resolve deployment artifact
+        id: resolve
+        shell: bash
+        run: |
+          image_ref=''
+          if [[ '${{ github.event.inputs.image_ref || '' }}' != '' ]]; then
+            image_ref='${{ github.event.inputs.image_ref }}'
+          else
+            image_ref='${{ needs.build.outputs.image_ref }}'
+          fi
+          if [[ -z "$image_ref" ]]; then
+            echo 'No deployable image reference was resolved.' >&2
+            exit 1
+          fi
+          printf 'image_ref=%s\n' "$image_ref" >> "$GITHUB_OUTPUT"
+          printf 'git_ref=%s\n' '${{ github.sha }}' >> "$GITHUB_OUTPUT"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs:
+      - targets
+      - resolve
+    strategy:
+      max-parallel: 1
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' '${{ secrets.PROD_SSH_PRIVATE_KEY }}' > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' '${{ secrets.PROD_SSH_KNOWN_HOSTS }}' > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Copy deploy files to target
+        shell: bash
+        env:
+          TARGET_HOST: ${{ matrix.target.host }}
+          TARGET_PORT: ${{ matrix.target.port }}
+          TARGET_USER: ${{ matrix.target.user }}
+          TARGET_APP_DIR: ${{ matrix.target.appDir }}
+        run: |
+          ssh -p "$TARGET_PORT" "$TARGET_USER@$TARGET_HOST" "mkdir -p '$TARGET_APP_DIR/deploy'"
+          scp -P "$TARGET_PORT" compose.yaml "$TARGET_USER@$TARGET_HOST:$TARGET_APP_DIR/compose.yaml"
+          scp -P "$TARGET_PORT" deploy/remote-deploy.sh "$TARGET_USER@$TARGET_HOST:$TARGET_APP_DIR/deploy/remote-deploy.sh"
+          ssh -p "$TARGET_PORT" "$TARGET_USER@$TARGET_HOST" "chmod 755 '$TARGET_APP_DIR/deploy/remote-deploy.sh'"
+
+      - name: Deploy target
+        shell: bash
+        env:
+          TARGET_HOST: ${{ matrix.target.host }}
+          TARGET_PORT: ${{ matrix.target.port }}
+          TARGET_USER: ${{ matrix.target.user }}
+          TARGET_APP_DIR: ${{ matrix.target.appDir }}
+          TARGET_SYSTEM_ENV: ${{ matrix.target.systemEnvFile }}
+          TARGET_APP_ENV: ${{ matrix.target.appEnvFile }}
+          TARGET_HEALTH_URL: ${{ matrix.target.healthUrl }}
+          TARGET_HEALTH_TIMEOUT: ${{ matrix.target.healthTimeoutSeconds }}
+          IMAGE_REF: ${{ needs.resolve.outputs.image_ref }}
+          GHCR_PULL_USERNAME: ${{ secrets.GHCR_PULL_USERNAME }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          ssh -p "$TARGET_PORT" "$TARGET_USER@$TARGET_HOST" /bin/bash <<EOF
+          set -euo pipefail
+          export APP_DIR='${TARGET_APP_DIR}'
+          export COMPOSE_FILE_PATH='${TARGET_APP_DIR}/compose.yaml'
+          export SYSTEM_ENV_FILE='${TARGET_SYSTEM_ENV}'
+          export APP_ENV_FILE='${TARGET_APP_ENV}'
+          export HEALTHCHECK_URL='${TARGET_HEALTH_URL}'
+          export HEALTHCHECK_TIMEOUT_SECONDS='${TARGET_HEALTH_TIMEOUT}'
+          export IMAGE_REF='${IMAGE_REF}'
+          export GHCR_USERNAME='${GHCR_PULL_USERNAME}'
+          export GHCR_TOKEN='${GHCR_PULL_TOKEN}'
+          '${TARGET_APP_DIR}/deploy/remote-deploy.sh'
+          EOF

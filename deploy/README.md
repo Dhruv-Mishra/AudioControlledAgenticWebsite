@@ -1,287 +1,227 @@
-# Deploying Dhruv FreightOps (Jarvis)
+# Deployment
 
-One-click Linux deploy for the voice agent demo at `jarvis.whoisdhruv.com`.
+The production path is now:
 
-Target: Ubuntu 22.04/24.04, Debian 12, or Oracle Linux 9 on ARM64 (aarch64),
-4 vCPU / 24 GB RAM, with nginx already installed and hosting two other
-sites. The deploy script **never touches** the existing sites.
+1. GitHub Actions builds one immutable Docker image on every `master` push.
+2. GitHub pushes that image to GHCR.
+3. GitHub deploys that exact image digest to one or more VMs over SSH.
+4. Each VM keeps only machine-local config and secrets.
 
----
+That is the better long-term design than rebuilding on each VM. It gives you one artifact per commit, straightforward multi-VM fan-out, and clean rollback by image digest.
 
-## Prerequisites
+## Fastest VM setup
 
-Before running the deploy script:
-
-1. **DNS.** Point `jarvis.whoisdhruv.com` at the target box. You need BOTH:
-   - `A    jarvis.whoisdhruv.com -> <IPv4 of the box>`
-   - `AAAA jarvis.whoisdhruv.com -> <IPv6 of the box>` (optional but
-     recommended — nginx listens on both).
-   Verify with `dig +short jarvis.whoisdhruv.com` and
-   `dig +short AAAA jarvis.whoisdhruv.com`.
-2. **Repo on the box.** SSH in and clone:
-   ```bash
-   sudo mkdir -p /opt
-   sudo git clone <repo-url> /opt/jarvis-freightops
-   cd /opt/jarvis-freightops
-   ```
-3. **Cert email.** You need a contact email for Let's Encrypt (ACME requires
-   it). Set `CERT_EMAIL` when you run the script.
-4. **Port 80/443.** The box's firewall should already permit both (you have
-   two other nginx sites on it). Port 3011 stays **localhost-only** — the
-   Node service binds `127.0.0.1:3011`, nginx proxies.
-
----
-
-## One-line install
+If you want the shortest possible machine setup, do this on the VM after cloning the repo:
 
 ```bash
-sudo CERT_EMAIL=you@example.com bash /opt/jarvis-freightops/deploy/deploy.sh
+sudo bash deploy/bootstrap-vm.sh
 ```
 
-What this does (in order):
+That one script will:
 
-1. Detects the OS + arch. Installs `nginx`, `certbot`, `jq`, `curl` if missing.
-2. Installs Node 20 via NodeSource if your host has `node < 20`.
-3. Creates the `jarvis` system user (no login shell). Chowns the repo.
-4. Runs `npm ci --omit=dev` and `npm run build` as the `jarvis` user.
-5. Creates `.env` from `.env.example` if missing (with a 0600 perm + warning).
-6. Writes `/etc/systemd/system/jarvis-freightops.service`, enables it,
-   starts it.
-7. Waits for `http://127.0.0.1:3011/api/health` to return 200.
-8. Copies `deploy/nginx/jarvis.whoisdhruv.com.conf` into
-   `sites-available/`, symlinks from `sites-enabled/`, runs `nginx -t`,
-   reloads.
-9. Runs `certbot --nginx` for `jarvis.whoisdhruv.com` (only if the cert
-   doesn't exist yet — idempotent).
-10. Verifies `https://jarvis.whoisdhruv.com/api/health` returns 200.
-11. Prints a summary with journalctl and edit-env reminders.
+1. install Docker Engine and the Docker Compose plugin if missing,
+2. enable and start Docker,
+3. create `/opt/jarvis-freightops`,
+4. copy `compose.yaml` and `deploy/remote-deploy.sh` there,
+5. create `/opt/jarvis-freightops/.env` from `.env.example`,
+6. create `/opt/jarvis-freightops/deploy/system.env.local` from defaults.
 
-Safe to re-run: every step is a no-op on a fully-applied host.
+After that, you only need to fill the real secrets in `/opt/jarvis-freightops/.env`, add your SSH key for GitHub Actions, and complete the GitHub-side configuration.
 
-### Script options
+## Two modes
 
-```
---target <dir>   Installation directory (default: /opt/jarvis-freightops)
---domain <host>  Nginx server_name       (default: jarvis.whoisdhruv.com)
-```
+### Manual machine deploy
 
-### What if I don't have CERT_EMAIL yet?
-
-The script installs the HTTP block + the Node service, but leaves TLS off.
-The site runs on port 80 (no HTTPS). Once DNS is ready and you have an
-email, run:
+Use this when you are on a cloned checkout and want to deploy locally or on a non-production machine.
 
 ```bash
-sudo certbot --nginx -d jarvis.whoisdhruv.com \
-    --non-interactive --agree-tos -m you@example.com --redirect
+npm run deploy              # build locally and run with Docker Compose
+npm run deploy:sync-master  # fast-forward this checkout to origin/master
+npm run deploy:sync-up      # fast-forward to origin/master, then deploy
 ```
 
-Then re-run `deploy.sh` so the `:443` server block is restored from the
-template.
+### Production deploy
 
----
+Use GitHub Actions for real production. Build once on GitHub, then ship the same image to every VM.
 
-## Env var cheat sheet
-
-Edit `/opt/jarvis-freightops/.env` (created by the script). All are optional
-except `GEMINI_API_KEY`.
-
-| Var | Default | What it does |
-|---|---|---|
-| `GEMINI_API_KEY` | *(unset — FAIL)* | Google Gemini API key with Live API access. |
-| `PORT` | `3011` | TCP port the Node service binds on 127.0.0.1. |
-| `NODE_ENV` | `development` | `production` serves minified `dist/` with long `Cache-Control`. |
-| `DEBUG` | *(unset)* | Set to `1` for per-session bridge logs. |
-| `GEMINI_TRANSCRIPTION` | `false` | Include server-side transcription in Live config. `false` saves STT credits; browser uses local Web Speech for user side. |
-| `SHOW_TEXT` | `true` | Render transcript panel + tool args in UI + server logs. `false` shows tool NAMES only in the activity log; transcript panel hidden; server redacts text from logs. |
-| `ALLOWED_ORIGINS` | *(empty = localhost-only)* | Comma-separated HTTPS origins allowed for WS upgrade. Set once you have a custom front-end hitting this service. |
-| `GEMINI_LIVE_MODEL` | `gemini-3.1-flash-live-preview` | Pin a Live model. |
-| `GEMINI_EVAL_MODEL` | `gemini-2.5-flash` | Model for `/api/eval`. |
-| `SOURCEMAPS` | *(unset)* | Set `true` to emit source maps in `npm run build`. |
-
-After editing `.env`, `sudo systemctl restart jarvis-freightops`. The Node
-process reads env once at startup.
-
-### Flag behaviour matrix
-
-| `GEMINI_TRANSCRIPTION` | `SHOW_TEXT` | Transcript shown | Source | Server logs text |
-|---|---|---|---|---|
-| `false` | `true` | yes, user only | local Web Speech API | yes |
-| `false` | `false` | no | — | no |
-| `true` | `true` | yes, both sides | Gemini | yes |
-| `true` | `false` | no | — | no |
-
-When `GEMINI_TRANSCRIPTION=false` AND `SHOW_TEXT=true`, a subtle hint appears
-under the transcript: "Agent speech not transcribed (configured to save
-credits)."
-
----
-
-## Operating the service
-
-### Live log tail
-```bash
-sudo journalctl -u jarvis-freightops -f --output=short
-```
-
-### Health check
-```bash
-curl -s http://127.0.0.1:3011/api/health            # behind nginx
-curl -s https://jarvis.whoisdhruv.com/api/health    # public
-```
-
-### Restart after env change
-```bash
-sudo systemctl restart jarvis-freightops
-```
-
-### Update nginx config (after editing `deploy/nginx/*.conf` in the repo)
-```bash
-sudo cp /opt/jarvis-freightops/deploy/nginx/jarvis.whoisdhruv.com.conf \
-       /etc/nginx/sites-available/jarvis.whoisdhruv.com.conf
-sudo nginx -t && sudo systemctl reload nginx
-```
-
----
-
-## Updating the application
-
-### Routine update (pull + restart)
-```bash
-cd /opt/jarvis-freightops
-sudo -u jarvis git pull
-sudo -u jarvis npm ci --omit=dev      # only if package-lock changed
-sudo -u jarvis npm run build          # only if js/ or css/ changed
-sudo systemctl restart jarvis-freightops
-```
-
-### Full redeploy
-```bash
-cd /opt/jarvis-freightops && sudo -u jarvis git pull
-sudo CERT_EMAIL=you@example.com bash deploy/deploy.sh
-```
-
----
-
-## Rollback
-
-### To the previous git revision
-```bash
-cd /opt/jarvis-freightops
-sudo -u jarvis git log --oneline -n 10               # find the commit
-sudo -u jarvis git checkout <sha>
-sudo -u jarvis npm ci --omit=dev
-sudo -u jarvis npm run build
-sudo systemctl restart jarvis-freightops
-```
-
-### To stop the service (so nginx returns 502 without running Node)
-```bash
-sudo systemctl stop jarvis-freightops
-sudo systemctl disable jarvis-freightops
-```
-
-### Uninstall completely
-```bash
-sudo systemctl disable --now jarvis-freightops
-sudo rm /etc/systemd/system/jarvis-freightops.service
-sudo rm /etc/nginx/sites-enabled/jarvis.whoisdhruv.com.conf
-sudo rm /etc/nginx/sites-available/jarvis.whoisdhruv.com.conf
-sudo systemctl daemon-reload
-sudo nginx -t && sudo systemctl reload nginx
-sudo userdel jarvis                                  # optional
-sudo rm -rf /opt/jarvis-freightops                   # optional
-```
-
-Cert files under `/etc/letsencrypt/live/jarvis.whoisdhruv.com/` are kept by
-certbot; delete with `sudo certbot delete --cert-name jarvis.whoisdhruv.com`
-if you want a clean slate.
-
----
-
-## Troubleshooting
-
-### `502 Bad Gateway` in the browser
-The Node service isn't running, or crashed.
-```bash
-sudo systemctl status jarvis-freightops
-sudo journalctl -u jarvis-freightops -n 100 --output=short
-```
-
-### `websocket connection closed abnormally` in DevTools
-Usually a cert issue (WebSocket on a mixed http/https page) or nginx's
-`proxy_read_timeout` is shorter than your call. The provided config sets
-`3600s`. Double-check `/etc/nginx/sites-available/jarvis.whoisdhruv.com.conf`
-still has `proxy_set_header Upgrade $http_upgrade;` on `/api/live`.
-
-### `No audio playback` in Safari/Chrome
-The browser's autoplay policy blocked `AudioContext.resume()` because the
-user hasn't gestured yet. Click **Place Call** — it triggers the sync
-unlock path. If the in-dock hint "Enable audio" appears, click it.
-
-### `Gemini rejected the API key`
-`GEMINI_API_KEY` in `/opt/jarvis-freightops/.env` is wrong or unset. Edit
-and `sudo systemctl restart jarvis-freightops`.
-
-### `429 Too Many Requests` on the WS upgrade
-The per-IP rate limiter (see `api/rate-limit.js`) hit its cap (60
-sessions/hour, 1 concurrent). Normal for a noisy dev session — wait a
-minute.
-
-### Certbot asks to renew my other sites
-That's fine — certbot renews ALL certs on the box. It's cron-scheduled by
-default; no action needed.
-
-### CSP violations in the browser console after a deploy
-The nginx config in `deploy/nginx/jarvis.whoisdhruv.com.conf` ships a
-locked-down `Content-Security-Policy` header that allows exactly the
-hosts the app touches at runtime:
-
-| Directive | Why |
-|---|---|
-| `img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org` | OSM tile servers for `/map.html`. The `*.` covers a/b/c subdomains. |
-| `script-src 'self' https://static.cloudflareinsights.com` | Cloudflare Web Analytics auto-injects `/beacon.min.js` when CF Analytics is enabled on the zone. |
-| `connect-src 'self' wss: https://cloudflareinsights.com` | Same beacon's POST target + the Gemini Live WebSocket. |
-| `font-src 'self'` | Geist + Geist Mono are self-hosted under `/public/fonts/` — no Google Fonts CDN. |
-| `style-src 'self' 'unsafe-inline'` | Leaflet injects `style="..."` on every tile and pin. Required. |
-
-If you add a new third-party (analytics, embeds, image CDN, etc.) extend
-the matching directive and reload nginx (see "Update nginx config" above).
-**Never** add `'unsafe-inline'` to `script-src` — it negates CSP. Use an
-external file in `js/` instead and add the path to `index.html`.
-
-#### Cloudflare Web Analytics — optional cleanup
-If you don't need Web Analytics for this zone, disabling it in the
-Cloudflare dashboard removes the auto-injected beacon entirely and lets
-you tighten CSP further:
-
-1. Cloudflare dashboard → select the zone (`whoisdhruv.com`).
-2. **Analytics & Logs** → **Web Analytics** → **Manage site**.
-3. Click **Disable** (or remove the site from the Web Analytics list).
-4. After the change propagates (a few minutes), drop these from the CSP
-   in `deploy/nginx/jarvis.whoisdhruv.com.conf`:
-   - `https://static.cloudflareinsights.com` from `script-src`
-   - `https://cloudflareinsights.com` from `connect-src`
-5. `sudo nginx -t && sudo systemctl reload nginx`.
-
-The current shipped CSP keeps both whitelisted so the deploy works
-end-to-end without touching the dashboard. Tightening it later is
-optional, not required.
-
----
-
-## What's in `deploy/`
+## What lives where
 
 | File | Purpose |
 |---|---|
-| `deploy.sh` | Idempotent installer (this is the one you run). |
-| `nginx/jarvis.whoisdhruv.com.conf` | Site config; 80→443 redirect + TLS 1.2/1.3 + HTTP/2 + CSP + HSTS + WS upgrade for `/api/live`. |
-| `README.md` | This file. |
+| `Dockerfile` | Multi-stage production image build. |
+| `compose.yaml` | Runtime contract for both local Docker Compose and VM deploys. |
+| `deploy/deploy.mjs` | Cross-platform local deploy runner. Supports local build mode and `sync-up`. |
+| `deploy/remote-deploy.sh` | Linux VM deploy script used by GitHub Actions. Pulls a pinned image and restarts the service. |
+| `deploy/system.env.example` | Template for machine-local deploy settings. |
+| `deploy/targets.json` | VM inventory for GitHub Actions rollouts. Add one object per VM. |
+| `.github/workflows/deploy-production.yml` | Build-and-deploy workflow triggered by `master` pushes. |
+| `deploy/nginx/jarvis.whoisdhruv.com.conf` | Example reverse proxy config when you want HTTPS in front of the VM. |
 
-The `systemd` unit (`jarvis-freightops.service`) is **generated by**
-`deploy.sh` so it can interpolate paths/user, and written to
-`/etc/systemd/system/`. If you want to template it separately, copy it out
-after the first run:
+## End-to-end setup
+
+### 1. Prepare the VM once
+
+On each production VM:
+
+The easy path is to run:
+
 ```bash
-sudo cat /etc/systemd/system/jarvis-freightops.service
+sudo bash deploy/bootstrap-vm.sh
 ```
+
+If you prefer to do it manually, the bootstrap script is just automating these steps:
+
+1. Install Docker Engine and the Docker Compose plugin.
+2. Install `curl`.
+3. Create the app directory.
+4. Create `.env` with the app secrets.
+5. Create `deploy/system.env.local` with machine-specific settings.
+
+Example layout on the VM:
+
+```text
+/opt/jarvis-freightops/
+   .env
+   compose.yaml                  # copied by GitHub Actions on each deploy
+   deploy/
+      remote-deploy.sh            # copied by GitHub Actions on each deploy
+      system.env.local            # created once on the VM
+```
+
+Minimal `.env` on the VM:
+
+```dotenv
+GEMINI_API_KEY=...
+WS_NONCE_SECRET=...
+ALLOWED_ORIGINS=https://your-domain.example.com
+```
+
+Minimal `deploy/system.env.local` on the VM:
+
+```dotenv
+COMPOSE_PROJECT_NAME=freightops
+HOST_BIND=127.0.0.1
+HOST_PORT=3011
+CONTAINER_PORT=3011
+APP_ENV_FILE=/opt/jarvis-freightops/.env
+HEALTHCHECK_PROTOCOL=http
+HEALTHCHECK_HOST=127.0.0.1
+HEALTHCHECK_PORT=3011
+HEALTHCHECK_PATH=/api/health
+HEALTHCHECK_TIMEOUT_MS=60000
+```
+
+Keep `HOST_BIND=127.0.0.1` when nginx, Caddy, or Traefik will proxy to the container.
+
+The bootstrap script supports a custom target directory and owner too:
+
+```bash
+sudo bash deploy/bootstrap-vm.sh --app-dir /srv/jarvis --owner deploy
+```
+
+### 2. Decide whether the GHCR image is public or private
+
+You have two options:
+
+1. Make the GHCR package public. This is the simplest path. The VM can pull images without a registry token.
+2. Keep the GHCR package private. Then GitHub Actions must send a pull-only GHCR username and token to the VM during deployment.
+
+If you keep it private, create a read-only GHCR token and store it in GitHub secrets as `GHCR_PULL_USERNAME` and `GHCR_PULL_TOKEN`.
+
+### 3. Fill in the VM inventory
+
+Edit `deploy/targets.json` in the repo. Replace the placeholder host and add one object per VM.
+
+Example:
+
+```json
+[
+   {
+      "name": "prod-1",
+      "host": "app-1.example.com",
+      "port": 22,
+      "user": "deploy",
+      "appDir": "/opt/jarvis-freightops",
+      "systemEnvFile": "/opt/jarvis-freightops/deploy/system.env.local",
+      "appEnvFile": "/opt/jarvis-freightops/.env",
+      "healthUrl": "http://127.0.0.1:3011/api/health",
+      "healthTimeoutSeconds": 90
+   }
+]
+```
+
+The workflow rolls targets serially with `max-parallel: 1`, which is the correct default before you introduce a load balancer.
+
+### 4. Add GitHub secrets
+
+In the GitHub repository settings, add:
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `PROD_SSH_PRIVATE_KEY` | yes | Private key for the deploy user on the VM(s). |
+| `PROD_SSH_KNOWN_HOSTS` | yes | Output of `ssh-keyscan` for each VM. Prevents MITM on deploy. |
+| `GHCR_PULL_USERNAME` | only for private GHCR images | Read-only GHCR username. |
+| `GHCR_PULL_TOKEN` | only for private GHCR images | Read-only GHCR token. |
+
+How to generate `PROD_SSH_KNOWN_HOSTS`:
+
+```bash
+ssh-keyscan -H app-1.example.com
+ssh-keyscan -H app-2.example.com
+```
+
+Paste the combined output into the secret.
+
+### 5. Push to `master`
+
+On every push to `master`, `.github/workflows/deploy-production.yml` will:
+
+1. build the Docker image,
+2. push it to GHCR with `master` and `sha-<commit>` tags,
+3. resolve the immutable image digest,
+4. copy `compose.yaml` and `deploy/remote-deploy.sh` to each VM,
+5. tell each VM to pull that digest and restart the app,
+6. wait for `/api/health`.
+
+### 6. Verify production
+
+After a deploy:
+
+1. Open the GitHub Actions run and confirm every target passed.
+2. Hit the public site or the VM-local health endpoint.
+3. If you use a reverse proxy, verify the public domain and WebSocket path both work.
+
+## Rollback
+
+The workflow also supports manual deploys via `workflow_dispatch` with an `image_ref` input. That is your rollback mechanism.
+
+To roll back:
+
+1. Find the old image digest in GHCR or a prior Actions run.
+2. Open the `Build And Deploy Production` workflow in GitHub.
+3. Click `Run workflow`.
+4. Paste the old `ghcr.io/...@sha256:...` image ref into `image_ref`.
+5. Run the workflow.
+
+That redeploys the previous artifact without rebuilding anything.
+
+## Reverse proxy and TLS
+
+The app container should usually stay bound to `127.0.0.1:3011`. Put nginx, Caddy, or Traefik in front of it for:
+
+1. HTTPS certificates,
+2. `80/443` public exposure,
+3. WebSocket proxying,
+4. headers and rate limiting.
+
+The existing nginx example in `deploy/nginx/jarvis.whoisdhruv.com.conf` is still the starting point for that layer.
+
+## If you insist on VM-side git pull
+
+For non-production machines or a dedicated source checkout, `npm run deploy:sync-up` now does a safe fast-forward to `origin/master` and then deploys locally.
+
+That is acceptable for a dev box or a one-off internal VM. It is not the preferred production model because production should deploy a pinned image, not rebuild from whatever the VM has locally.
+
+## Linux bare-metal path
+
+`deploy/deploy.sh` still exists for the older Linux-only model where the repo also manages systemd, nginx, and certbot. Keep using it only if you explicitly want host provisioning from the repo itself.
