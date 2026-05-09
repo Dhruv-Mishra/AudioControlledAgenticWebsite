@@ -125,8 +125,10 @@
    * `--font-display` is aliased to `--font-sans` so existing rules that
    * referenced the Fraunces stack keep compiling.
    * ============================================================ */
-  --font-sans:    "Geist", ui-sans-serif, -apple-system, "Segoe UI Variable", "Helvetica Neue", sans-serif;
-  --font-mono:    "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans:    "Bricolage Grotesque", ui-sans-serif, -apple-system, "Segoe UI Variable", "Helvetica Neue", sans-serif;
+  --font-mono:    "DM Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* Editorial accent — used sparingly on hero numerals + section eyebrows. */
+  --font-serif:   "Instrument Serif", ui-serif, "Iowan Old Style", "Apple Garamond", "Baskerville", "Times New Roman", serif;
   --font-display: var(--font-sans);
 
   /* Fluid type scale — tightened from v1, Geist x-height runs hotter. */

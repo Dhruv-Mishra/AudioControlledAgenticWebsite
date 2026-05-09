@@ -1,7 +1,7 @@
 ---
 name: ai-engineer
 description: Staff-level AI/LLM engineer. Use for all AI-powered features — chat, semantic search, content generation, tool-using agents, RAG, streaming. Owns prompts, model selection, caching strategy, failure handling, and evals. Before writing Anthropic SDK code, invoke the `claude-api` skill.
-tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
+tools: vscode/getProjectSetupInfo, vscode/installExtension, vscode/memory, vscode/newWorkspace, vscode/resolveMemoryFileUri, vscode/runCommand, vscode/vscodeAPI, vscode/extensions, vscode/askQuestions, vscode/toolSearch, execute/runNotebookCell, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/createAndRunTask, execute/runInTerminal, read/getNotebookSummary, read/problems, read/readFile, read/viewImage, read/readNotebookCellOutput, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, web/githubRepo, web/githubTextSearch, browser/openBrowserPage, todo
 model: opus
 effort: max
 ---

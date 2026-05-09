@@ -28,7 +28,17 @@ html {
 
 html[data-theme="light"] { color-scheme: light; }
 
-/* ===== Body — flat M3 surface, no atmosphere ================= */
+/* ===== Body — atmospheric M3 surface =========================
+ * v3 ("Yard Operator") restores a deliberately light atmosphere layer
+ * that v2 stripped out: two pinned radial washes (warm amber lamp,
+ * cool primary glow) and a faint engineering-paper grid. The whole
+ * stack lives on `body::before` / `body::after` so no markup changes
+ * and `body { background: var(--color-bg) }` still resolves on first
+ * paint before the pseudo-elements composite. The grid is stamped via
+ * a single repeating linear-gradient pair — no SVG asset, no extra
+ * request — and the radial washes use `color-mix()` against the
+ * accent / cyan tokens, so a theme switch updates them automatically.
+ */
 body {
   font-family: var(--font-sans);
   font-size: var(--fs-base);
@@ -38,16 +48,72 @@ body {
   background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: "ss01" 1, "ss02" 1, "cv11" 1, "zero" 1;
   font-variant-numeric: tabular-nums slashed-zero;
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
 }
 
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      120vmax 80vmax at 92% -10%,
+      color-mix(in oklab, var(--md-sys-color-primary) 14%, transparent) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      90vmax 70vmax at -10% 110%,
+      color-mix(in oklab, var(--md-sys-color-tertiary) 12%, transparent) 0%,
+      transparent 55%
+    ),
+    var(--color-bg);
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* 32 px engineering-paper grid, hairlined at 8 % outline-variant. The
+   * mask fades it out toward the edges so the corners don't read like a
+   * spreadsheet. */
+  background-image:
+    linear-gradient(to right,  color-mix(in oklab, var(--md-sys-color-outline-variant) 18%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--md-sys-color-outline-variant) 18%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px, 32px 32px;
+  background-position: -1px -1px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, #000 40%, transparent 100%);
+          mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, #000 40%, transparent 100%);
+  opacity: 0.55;
+}
+
+[data-theme="light"] body::before {
+  background:
+    radial-gradient(
+      120vmax 80vmax at 92% -10%,
+      color-mix(in oklab, var(--md-sys-color-primary) 9%, transparent) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      90vmax 70vmax at -10% 110%,
+      color-mix(in oklab, var(--md-sys-color-tertiary) 7%, transparent) 0%,
+      transparent 55%
+    ),
+    var(--color-bg);
+}
+[data-theme="light"] body::after { opacity: 0.4; }
+
 /* ===== Typography bootstrap ==================================
- * Headings use Geist medium, not Fraunces. No font-variation-settings
- * (Fraunces `opsz` / `SOFT` / `WONK` axes are gone).
+ * Headings ride the Bricolage Grotesque variable axis. Where the page
+ * exposes a real hero numeral (load rate, total mileage, response
+ * latency) we reach for `.hero-numeral` instead, which switches to
+ * Instrument Serif italic — the only place the serif appears.
  */
 h1, h2, h3, h4, h5, h6 {
   margin: 0;
@@ -55,7 +121,6 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  font-feature-settings: "ss01" 1, "ss02" 1, "cv11" 1, "zero" 1;
   font-variant-numeric: tabular-nums slashed-zero;
 }
 
@@ -319,3 +384,52 @@ code, pre, .mono, .mono-id {
   box-shadow: var(--shadow-focus-ring-accent);
   border-radius: var(--radius-xs);
 }
+
+/* ===== Editorial accents — Instrument Serif =================
+ * The serif is reserved for two things and two things only: hero
+ * numerals (rate, mileage, latency, ETA) and a single italic eyebrow
+ * above section titles. Anything else stays in the grotesque so the
+ * serif keeps its punch.
+ */
+.hero-numeral {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: var(--tracking-tight);
+  line-height: 0.95;
+  font-feature-settings: "lnum" 1, "tnum" 0;
+}
+.eyebrow {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--fs-md);
+  color: var(--color-text-muted);
+  letter-spacing: var(--tracking-normal);
+}
+
+/* ===== Page-load reveal =====================================
+ * One orchestrated entrance per route mount. Children of #route-target
+ * up to the first six rows fade + lift in at staggered delays. The
+ * effect is single-fire (no infinite loops) and lives entirely in CSS
+ * — no JS pause to coordinate. Reduced-motion users get the end state
+ * instantly via the global override above.
+ *
+ * The selector is intentionally shallow (`> *`) so partial markup that
+ * already animates internal sections doesn't double-stage.
+ */
+@keyframes route-stage-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+#route-target > * {
+  animation: route-stage-in 420ms var(--ease-out-expo) both;
+}
+#route-target > *:nth-child(1) { animation-delay:  20ms; }
+#route-target > *:nth-child(2) { animation-delay:  80ms; }
+#route-target > *:nth-child(3) { animation-delay: 140ms; }
+#route-target > *:nth-child(4) { animation-delay: 200ms; }
+#route-target > *:nth-child(5) { animation-delay: 260ms; }
+#route-target > *:nth-child(6) { animation-delay: 320ms; }
+/* The map partial owns its own surface and shouldn't slide. */
+.app-main--map #route-target > * { animation: none; }

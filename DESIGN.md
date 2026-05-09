@@ -1,187 +1,83 @@
-# DESIGN.md — Dhruv FreightOps
+﻿# DESIGN.md — Dhruv FreightOps
 
 Active design system. All tokens are CSS custom properties defined in `css/tokens.css`. No hardcoded hex, radius, or spacing values in component styles.
 
-## Primary inspiration
+## Direction — "Yard Operator" v3
 
-**Linear + Retool + Vercel (dark mode default).** Dispatch software lives in a console — dense data, clear hierarchies, zero visual noise. The voice agent UI borrows from operator-console aesthetics (Tailscale admin, Fly.io dashboard) for the status pill and comms panel.
-
-- **Type precision** from Linear (IBM Plex-grade monospace for IDs, tight sans for UI).
-- **Data density** from Retool (row-based tables, compact padding).
-- **Motion restraint** from Vercel (easeOutExpo, 160 ms max, no bouncy springs).
-- **Voice status pill** from operator consoles (Grafana/Datadog indicators).
-
-## Secondary influences
-
-- **Form patterns:** Stripe dashboard.
-- **Chip/tag components:** GitHub.
-- **Live-call noise toggles:** inspired by Zoom's "Original sound" selector — compact, technical, revealing.
-
-## Color tokens (dark-first)
-
-All colors via CSS custom properties. No hex in component styles.
-
-```
---color-bg            : #0B0D10  (canvas)
---color-bg-elev-1     : #11151A  (panels)
---color-bg-elev-2     : #171C23  (cards, hovered rows)
---color-bg-elev-3     : #1E2530  (modals, popovers)
---color-border        : #232933  (default hairline)
---color-border-strong : #2E3542  (focused inputs)
-
---color-text          : #E7ECF3  (primary)
---color-text-muted    : #9AA3B2  (secondary)
---color-text-dim      : #5D6573  (tertiary / placeholders)
---color-text-inverse  : #0B0D10  (on accents)
-
---color-accent        : #6EE7B7  (call-center green — signal positive, live, active)
---color-accent-strong : #34D399
---color-accent-soft   : #064E3B  (accent bg tint)
-
---color-warn          : #FBBF24
---color-warn-soft     : #3B2F0E
---color-danger        : #F87171
---color-danger-soft   : #3A1E1E
---color-info          : #60A5FA
---color-info-soft     : #0F2A4A
-
-/* Live-agent status colors */
---color-state-idle      : #5D6573
---color-state-listening : #6EE7B7
---color-state-thinking  : #C084FC
---color-state-speaking  : #60A5FA
---color-state-tool      : #FBBF24
---color-state-error     : #F87171
-```
-
-Light mode overrides are in `tokens.css` under `[data-theme="light"]` but dark is the default for a dispatch-console feel.
-
-### Contrast
-Body text `#E7ECF3` on `#0B0D10` = 16.2:1. Muted `#9AA3B2` on `#0B0D10` = 9.9:1. Accent green `#6EE7B7` on `#0B0D10` = 11.1:1. All comfortably above WCAG AA.
+The page is a dispatch console for a freight brokerage with a live voice agent. Earlier iterations leaned on Linear / Vercel / Geist defaults; the result read as a generic AI dashboard. v3 corrects course toward an operator aesthetic that could plausibly belong on a yard manager's second monitor at 2 a.m. — engineering paper, signal lamps, mechanical type, with one editorial italic for warmth.
 
 ## Typography
 
-```
---font-sans  : "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
---font-mono  : "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+| Role | Family | Why this and not the obvious choice |
+|---|---|---|
+| Sans / display | **Bricolage Grotesque** (variable, opsz 12–96, wght 400–800) | Industrial grotesque with a real optical-size axis — surgical at 13 px row text, cast-iron at 64 px display. Wide apertures and a slightly mechanical 'g' / 'a' read like industrial signage. Avoids the Inter / Geist / Space Grotesk / Manrope cluster every AI-generated dashboard converges on. |
+| Mono | **DM Mono** (400, 500) | Tabular monospace with a typewriter-leaning 'a' and slashed zero. Used on MC numbers, load IDs, ETAs, lat/lng. Less default than JetBrains Mono / Geist Mono. |
+| Editorial accent | **Instrument Serif** (regular + italic, used sparingly) | Reserved for `.hero-numeral` (rate, mileage, latency) and `.eyebrow` italic above section titles. The cold-grotesque-vs-warm-Didone contrast is the project's editorial signature — it is what stops the page reading like every other Vercel-styled console. |
 
---fs-xs   : 11px / 16px   -- small meta (IDs, timestamps)
---fs-sm   : 13px / 20px   -- table cells, chips
---fs-base : 14px / 22px   -- body
---fs-md   : 16px / 24px   -- form inputs, primary nav
---fs-lg   : 18px / 26px   -- section titles
---fs-xl   : 22px / 30px   -- page titles
---fs-2xl  : 28px / 36px   -- hero numbers
+All three are self-hosted under `/public/fonts/` (latin + latin-ext woff2 subsets) so the production CSP keeps `font-src 'self'`. The two files used on first paint (Bricolage latin, DM Mono 400 latin) are preloaded from `index.html`.
 
---fw-regular : 400
---fw-medium  : 500
---fw-semibold: 600
+## Color
 
---tracking-tight  : -0.01em  (display)
---tracking-normal : 0
---tracking-wide   : 0.04em   (all-caps labels, button chips)
-```
+The M3 Expressive lime/dark palette from v2 is preserved — it works for a dispatch console and the contrast ratios are already validated. Tokens live in `css/tokens.css`. Dark is the default; light is opt-in via `data-theme="light"`.
 
-Use `font-feature-settings: "cv11" 1, "ss01" 1;` on Inter for slashed zero and true-italic terminal-ish feel (Linear does this). Mono is used for MC numbers, agent IDs, tool-call logs.
+- **Dominant**: M3 surface ladder (`--md-sys-color-surface*`) painting an inky-green console.
+- **Primary accent**: lime (`--md-sys-color-primary`, `#BEF264`) — single hot accent used for active states, the voice-agent listening ring, and pin selection.
+- **Tertiary accent**: cool tertiary cyan — wayfinding, info, route lines.
+- **Warn / danger**: amber + soft red.
 
-## Spacing (4 px base)
+## Atmosphere
 
-```
---sp-0 : 0
---sp-1 : 4px
---sp-2 : 8px
---sp-3 : 12px
---sp-4 : 16px
---sp-5 : 24px
---sp-6 : 32px
---sp-7 : 48px
---sp-8 : 64px
---sp-9 : 96px
-```
+Stripped flat in v2; restored deliberately in v3 via `body::before` and `body::after` in `css/base.css`:
 
-Dense layouts: rows 36 px tall (nav items, table rows), 44 px for primary form rows on mobile.
+1. **Signal-lamp radial washes** — top-right amber-lime, bottom-left cool tertiary, both at low opacity using `color-mix()` against the active palette so theme switching updates them automatically.
+2. **Engineering-paper grid** — 32 px hairline grid stamped from a pair of repeating linear gradients, masked to fade out toward the corners. No SVG asset, no extra request.
 
-## Radius
-
-```
---radius-xs : 4px   (tags, chips)
---radius-sm : 6px   (inputs, buttons)
---radius-md : 8px   (cards, table containers)
---radius-lg : 12px  (modals, large cards)
---radius-pill: 9999px (status pills, toggles)
-```
-
-## Shadow / elevation
-
-Flat by default; use subtle inner hairlines rather than drop shadows for elevation within the console. Overlay layers (modals, voice-agent dock) use a single soft shadow.
-
-```
---shadow-overlay : 0 12px 32px -8px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0,0,0,0.35);
---shadow-focus-ring-accent : 0 0 0 2px rgba(110, 231, 183, 0.35);
---shadow-focus-ring-danger : 0 0 0 2px rgba(248, 113, 113, 0.35);
-```
+The atmosphere is fixed-position, sits behind all content (`z-index: -2 / -1`), and is `pointer-events: none` so it never catches input. Light mode tones both layers down ~30%.
 
 ## Motion
 
-```
---ease-out-expo : cubic-bezier(0.16, 1, 0.3, 1)
---dur-fast      : 120ms
---dur-base      : 180ms
---dur-slow      : 280ms
-```
+- Tokens unchanged from v2 (`--dur-fast`, `--dur-base`, `--dur-slow`, M3 emphasized easings).
+- **One orchestrated entrance per route mount**: `#route-target > *` fade-and-lift staggered at 20 → 320 ms via `:nth-child` delays. The map page opts out (full-bleed surface owns its own entrance).
+- Micro-interactions kept where they already exist (pin pulse, chip hover, dock state). Reduced-motion users get the end state instantly via the global override in `base.css`.
 
-Respect `prefers-reduced-motion: reduce` — disable all non-essential animation and keep state changes instant.
+## Imagery
+
+Carrier portraits remain in `public/images/carriers/*.webp`. No new hero photography was sourced for this pass — the dispatch-console aesthetic deliberately pushes data-density over marketing imagery. A future pass can layer freight photography behind empty states (`/dispatch` empty queue, `/carriers` no results) where it would contribute warmth without competing with live data.
+
+## Map UX
+
+The Leaflet map widget had a critical bug — the user could zoom out far enough that the world tiled into a repeating strip — and was otherwise functional but visually bland. v3 fixes the bug. A deeper visual overhaul of the map UX (basemap swap, custom marker SVG language, mobile bottom-sheet) is scoped as a follow-up.
+
+### Bug — repeating world strip on zoom out
+
+Fixed in `js/map-widget.js` by combining four Leaflet options that all have to be set together:
+
+1. `tileLayer({ noWrap: true, bounds: WORLD_BOUNDS, ... })` — Leaflet stops requesting tiles outside `[-180, 180]`, which is the actual source of the repeating strip.
+2. `L.map({ worldCopyJump: false })` — markers don't teleport across antimeridian copies.
+3. `L.map({ maxBounds: WORLD_BOUNDS, maxBoundsViscosity: 1.0 })` — pan rubber-bands hard at the world envelope, so the user physically cannot drag past one world copy.
+4. `L.map({ minZoom })` computed dynamically as `ceil(log2(canvasWidth / 256))` and re-applied via the existing `ResizeObserver`. At every viewport width — 360 px phone through 2560 px desktop — the world is at least as wide as the canvas, so it never tiles. If the current zoom drops below the new floor on resize, the widget snaps zoom up to clear the gap.
+
+The `ABSOLUTE_MIN_ZOOM = 2` floor prevents anyone from constructing a container so wide that the math drops below sensible.
 
 ## Components
 
-### Nav bar (`<header class="app-header">`)
-48 px tall, full width, border-bottom hairline. Left: product name "Dhruv FreightOps" with a small pulsing-dot logo. Center: page tabs. Right: voice-agent status pill + persona select + session count.
+The component spec from v2 (chips, dock, tables, persona toggle, noise selector, status pills) is unchanged. New utilities in v3:
 
-### Voice-agent dock (fixed bottom-right)
-Floating card, 340 px wide, 16 px from edge, elevated with `--shadow-overlay`. Three sections stacked: transcript log (scrolls), status strip, control strip (wake-word/PTT, persona select, noise select, volume).
-
-Status strip: circular VU meter (bars) + state chip.
-
-The dock collapses to a 56 px pill when not expanded. `prefers-reduced-motion` disables the pulse animation on the state chip.
-
-### Tables
-Sticky header, `--color-bg-elev-1` background, row hover `--color-bg-elev-2`, 36 px row height, 13 px font. First column: mono text for IDs. Status column uses chip component.
-
-### Status chips
-```
-.chip { height: 22px; padding: 0 8px; border-radius: var(--radius-xs); font-size: var(--fs-xs); font-weight: var(--fw-medium); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
-.chip--ok      → accent
-.chip--warn    → warn
-.chip--danger  → danger
-.chip--info    → info
-.chip--neutral → border + muted text
-```
-
-### Forms
-Inputs: 36 px tall (dense) or 40 px (forms). `--color-bg-elev-1`, hairline border, focused border + focus ring. Labels: 11 px uppercase muted, 8 px below input. Helper text: 12 px muted.
-
-### Highlight flash (tool-call visual feedback)
-When `highlight(agent_id)` is called, add `.is-agent-highlighted` to the element: 2 px solid accent outline, offset 2 px, scale anim 1.02 → 1 over 600 ms, then fades out after 1.2 s total. Respects reduced motion (just outline, no scale).
-
-### Persona toggle
-Segmented control (5 options) in the dock: Professional, Cheerful, Frustrated, Tired, Excited. Each has a color dot (persona.voice color) and label. Selected state has `--color-accent` underline.
-
-### Noise selector
-Compact dropdown with 4 options + volume slider: Off, Phone line, Office chatter, Static. Slider is horizontal, 80 px wide.
+- **`.hero-numeral`** — Instrument Serif italic, tight leading, lining figures. Use for the largest single number on a card (rate, miles, ms latency).
+- **`.eyebrow`** — Instrument Serif italic, muted, sentence case. Use above a section title where a label would have read as bureaucratic.
 
 ## Accessibility
 
-- Every interactive element has a `:focus-visible` state using `--shadow-focus-ring-accent`.
-- Skip link at the top of every page to main content.
-- Voice dock's status changes are announced via an `aria-live="polite"` region.
-- `prefers-reduced-motion: reduce` honored on pulse, flash, and scroll effects.
+Unchanged. `prefers-reduced-motion` honored on the new route reveal (via the existing global override). Atmosphere layers are pointer-inert and contrast for body text remains comfortably above WCAG AA (palette unchanged from v2).
 
 ## What to avoid
 
-- Neumorphism, glassmorphism, frosted-glass.
-- Big hero imagery. This is a console — show data, not marketing fluff.
-- Rainbow gradients. One accent green, period.
-- Any motion above `--dur-slow`.
+- Generic AI fonts: Inter, Roboto, Arial, system-ui defaults, **Geist**, **Space Grotesk**, Manrope.
+- Purple-on-white gradients.
+- Animation longer than `--dur-slow` (320 ms).
+- Decoration that competes with live data on dense surfaces (table rows, the dock, the map canvas).
+- Hardcoded colors / spacing — token everything.
 
 ## Alignment with root
+
 Root is CLAUDE.md — vanilla HTML/CSS/JS, mobile-first, 2-space indent, tokens for all design values. No divergences. No framework introduced.

@@ -16,6 +16,28 @@ const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyrigh
 
 const DEFAULT_VIEW = { lat: 39.5, lng: -98.35, zoom: 4 };
 
+// World envelope used to clamp panning. Slightly inset from the
+// mathematical poles because Web Mercator distorts above ~85°.
+const WORLD_BOUNDS = [[-85.05112878, -180], [85.05112878, 180]];
+const TILE_PIXEL_SIZE = 256;
+// Hard floor so we never let the user zoom out further than "the world
+// shows once". 2 → roughly 1024 px wide world; we still recompute per
+// container below.
+const ABSOLUTE_MIN_ZOOM = 2;
+
+// Compute the smallest zoom level at which a single (un-tiled,
+// un-wrapped) world copy completely fills `containerWidth` CSS pixels.
+// At zoom z, the world is `TILE_PIXEL_SIZE * 2^z` pixels wide. We need
+// 2^z * 256 >= width, so z >= log2(width / 256). ceil() guarantees the
+// world is at least as wide as the viewport — anything smaller would
+// expose blank space (or, with wrap on, a repeating strip).
+function computeMinZoomForWidth(containerWidth) {
+  const w = Math.max(1, Number(containerWidth) || 1);
+  const raw = Math.log2(w / TILE_PIXEL_SIZE);
+  const ceil = Math.ceil(raw);
+  return Math.max(ABSOLUTE_MIN_ZOOM, Number.isFinite(ceil) ? ceil : ABSOLUTE_MIN_ZOOM);
+}
+
 const PAN_DURATION_LOCAL_S = 0.28;
 const PAN_DURATION_FLY_S   = 0.90;
 const FLY_THRESHOLD_KM     = 1500;
@@ -310,6 +332,13 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
 
     const reducedAtMount = prefersReducedMotion();
 
+    // Initial minZoom from the canvas's first measured width. We pin it
+    // to a safe floor and then refine on the first resize observation,
+    // because the canvas may not have its final size at construction
+    // time (route mount before layout settles).
+    const initialWidth = canvas.getBoundingClientRect().width || canvas.clientWidth || 1024;
+    const initialMinZoom = computeMinZoomForWidth(initialWidth);
+
     const map = L.map(canvas, {
       keyboard: true,
       zoomControl: false,
@@ -317,8 +346,18 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       zoomAnimation: !reducedAtMount,
       markerZoomAnimation: !reducedAtMount,
       fadeAnimation: !reducedAtMount,
-      preferCanvas: false
-    }).setView([DEFAULT_VIEW.lat, DEFAULT_VIEW.lng], DEFAULT_VIEW.zoom);
+      preferCanvas: false,
+      // World-wrap clamp — together these prevent the "infinite repeating
+      // strip" bug. `worldCopyJump:false` stops Leaflet from teleporting
+      // markers across antimeridian copies; `maxBounds` + viscosity 1.0
+      // makes the panning rubber-band hard at the world envelope so the
+      // user physically cannot drag past one world copy.
+      worldCopyJump: false,
+      maxBounds: WORLD_BOUNDS,
+      maxBoundsViscosity: 1.0,
+      minZoom: initialMinZoom,
+      maxZoom: 18
+    }).setView([DEFAULT_VIEW.lat, DEFAULT_VIEW.lng], Math.max(DEFAULT_VIEW.zoom, initialMinZoom));
     track(() => { try { map.remove(); } catch {} });
 
     // Dedicated panes per layer so we can fade whole layers via opacity on
@@ -329,7 +368,14 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
 
     const tileLayer = L.tileLayer(TILE_URL, {
       attribution: TILE_ATTRIBUTION,
-      maxZoom: 18
+      maxZoom: 18,
+      minZoom: ABSOLUTE_MIN_ZOOM,
+      // The single most important option for the wrap fix: do NOT request
+      // tiles outside [-180, 180]. Without this Leaflet happily renders
+      // x = -1, x = nTiles, etc., which is what produced the repeating
+      // world-strip the user reported.
+      noWrap: true,
+      bounds: WORLD_BOUNDS
     });
     tileLayer.addTo(map);
 
@@ -1379,10 +1425,32 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     }
 
     // Leaflet needs an explicit invalidateSize() when its container changes.
+    // We also recompute minZoom against the new container width so the
+    // world-wrap clamp tracks the viewport — without this, rotating a
+    // phone (480 → 800 px) would let the user zoom out to a width where
+    // the world no longer fills the canvas.
+    const applyMinZoomForCanvas = () => {
+      try {
+        const w = canvas.getBoundingClientRect().width || canvas.clientWidth || 0;
+        if (!w) return;
+        const next = computeMinZoomForWidth(w);
+        if (next !== map.getMinZoom()) {
+          map.setMinZoom(next);
+          if (map.getZoom() < next) {
+            map.setZoom(next, { animate: false });
+          }
+        }
+      } catch {}
+    };
     const ro = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(() => { try { map.invalidateSize(); } catch {} })
+      ? new ResizeObserver(() => {
+          try { map.invalidateSize(); } catch {}
+          applyMinZoomForCanvas();
+        })
       : null;
     if (ro && canvas) ro.observe(canvas);
+    // Refine immediately in case the canvas just laid out.
+    applyMinZoomForCanvas();
     track(() => { if (ro) { try { ro.disconnect(); } catch {} } });
 
     // Click-outside on mobile closes carrier panel
