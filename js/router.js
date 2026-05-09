@@ -226,7 +226,20 @@ class Router extends EventTarget {
       const h1 = this.target.querySelector('h1');
       if (h1) {
         h1.setAttribute('tabindex', '-1');
-        try { h1.focus({ preventScroll: true }); } catch {}
+        try {
+          h1.focus({ preventScroll: true });
+          // The H1 focus is for screen-reader route announcement only —
+          // sighted users did not initiate it, so we drop focus on the next
+          // microtask. Without this, some browsers paint a :focus-visible
+          // ring on programmatic focus from a non-keyboard activation. The
+          // SR has already grabbed the live-region content by the time we
+          // blur.
+          setTimeout(() => {
+            try {
+              if (document.activeElement === h1) h1.blur();
+            } catch {}
+          }, 0);
+        } catch {}
       }
 
       if (!suppressNotify) {

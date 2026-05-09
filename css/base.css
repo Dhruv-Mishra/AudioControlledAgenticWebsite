@@ -370,19 +370,15 @@ code, pre, .mono, .mono-id {
   }
 }
 
-/* ===== h1 focus tidy =========================================
- * The router focuses the page <h1> on navigation (a11y good). Suppress the
- * default outline for non-keyboard focus; keep the accent ring for keyboard
- * users who tab back to the title.
- */
-#route-target h1[tabindex="-1"]:focus:not(:focus-visible) {
-  outline: none;
-  box-shadow: none;
-}
+/* Programmatic-focus targets used purely for screen-reader announcement
+   of the new route. tabindex="-1" headings are not in the tab order, so
+   they should never paint a focus ring even under :focus-visible — the
+   ring would only ever appear from the router's auto-focus, which a
+   sighted user did not initiate. */
+#route-target h1[tabindex="-1"]:focus,
 #route-target h1[tabindex="-1"]:focus-visible {
   outline: none;
-  box-shadow: var(--shadow-focus-ring-accent);
-  border-radius: var(--radius-xs);
+  box-shadow: none;
 }
 
 /* ===== Editorial accents — Instrument Serif =================

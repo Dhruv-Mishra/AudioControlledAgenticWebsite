@@ -300,9 +300,9 @@ function renderActivityFeed() {
   const ul = document.getElementById('activity-feed');
   if (!ul) return;
   const loads = currentLoads();
-  // Build the initial event stream once per page mount, then mutate it
-  // in-place via tickActivityFeed() so the agent's `get_activity_feed`
-  // tool can read a stable, growing list.
+  // Build the initial event stream once per page mount, then prepend
+  // live store transitions so the agent's `get_activity_feed` tool can
+  // read a stable, growing list.
   if (!state._activityEvents) {
     const events = [];
     loads.forEach((l) => {
@@ -321,8 +321,51 @@ function renderActivityFeed() {
     events.sort((a, b) => b.when - a.when);
     state._activityEvents = events;
   }
+  syncActivityStatusSnapshot(loads);
   // Mirror to a window global so the agent tool can read without
   // crossing module boundaries.
+  try { window.__activityFeed = state._activityEvents; } catch {}
+  paintActivityFeed();
+}
+
+function syncActivityStatusSnapshot(loads = currentLoads()) {
+  if (!state) return;
+  state._loadStatuses = new Map(loads.map((load) => [load.id, load.status]));
+}
+
+function liveTickKindForStatus(status) {
+  if (status === 'booked') return 'booked';
+  if (status === 'in_transit') return 'transit';
+  if (status === 'delivered') return 'delivered';
+  if (status === 'pending') return 'pending';
+  if (status === 'delayed') return 'delayed';
+  return 'pending';
+}
+
+function liveTickTextForTransition(transition, fallback) {
+  if (!transition) return fallback;
+  if (transition.to === 'booked') return 'Carrier booked';
+  if (transition.to === 'in_transit') return 'Picked up - moving to in transit';
+  if (transition.to === 'delivered') return 'Delivered';
+  if (transition.to === 'pending') return 'Reposted';
+  return fallback;
+}
+
+function appendLiveTickActivity(detail) {
+  if (!state || !detail || detail.source !== 'live-tick' || !detail.load || !detail.patch) return;
+  if (!Object.prototype.hasOwnProperty.call(detail.patch, 'status')) return;
+  if (!state._activityEvents) renderActivityFeed();
+  if (!Array.isArray(state._activityEvents)) return;
+
+  const from = state._loadStatuses instanceof Map ? state._loadStatuses.get(detail.id) : null;
+  const to = detail.load.status || detail.patch.status || null;
+  state._activityEvents.unshift({
+    kind: liveTickKindForStatus(to),
+    when: Date.now(),
+    loadId: detail.id,
+    transition: { from: from || null, to }
+  });
+  if (state._activityEvents.length > 24) state._activityEvents.length = 24;
   try { window.__activityFeed = state._activityEvents; } catch {}
   paintActivityFeed();
 }
@@ -354,6 +397,7 @@ function paintActivityFeed() {
     const load = getLoad(ev.loadId);
     if (!load) return;
     const meta = labels[ev.kind] || labels.pending;
+    const text = liveTickTextForTransition(ev.transition, meta.text);
     const li = document.createElement('li');
     li.className = 'activity-item';
     li.setAttribute('data-agent-id', `dispatch.activity.${load.id}`);
@@ -362,7 +406,7 @@ function paintActivityFeed() {
       <span class="activity-dot chip--${meta.dot}" aria-hidden="true"></span>
       <div class="activity-body">
         <div class="activity-line">
-          <strong>${escapeHtml(meta.text)}</strong>
+          <strong>${escapeHtml(text)}</strong>
           <span class="mono">${escapeHtml(load.id)}</span>
           <span class="muted">${escapeHtml(load.pickup)} &rarr; ${escapeHtml(load.dropoff)}</span>
         </div>
@@ -389,23 +433,6 @@ function tickActivityRelTimes() {
   });
 }
 
-// Inject a fresh synthetic event every 5 min so the feed feels live.
-// Cycles deterministically through a small pool of templates and the
-// available loads/carriers — no randomness so reload stays stable.
-function tickActivityInjector() {
-  if (!state || !Array.isArray(state._activityEvents)) return;
-  const loads = currentLoads();
-  if (!loads.length) return;
-  const pool = ['transit', 'booked', 'quoted', 'countered', 'available', 'delayed'];
-  const minute = Math.floor(Date.now() / 60000);
-  const kind = pool[minute % pool.length];
-  const load = loads[minute % loads.length];
-  state._activityEvents.unshift({ kind, when: Date.now(), loadId: load.id });
-  if (state._activityEvents.length > 24) state._activityEvents.length = 24;
-  try { window.__activityFeed = state._activityEvents; } catch {}
-  paintActivityFeed();
-}
-
 function refreshFromStore() {
   if (!state) return;
   renderSummary();
@@ -415,6 +442,11 @@ function refreshFromStore() {
   renderLaneSummaries();
   renderHeroKpi();
   renderActivityFeed();
+}
+
+function handleLoadUpdated(detail) {
+  appendLiveTickActivity(detail);
+  refreshFromStore();
 }
 
 function bindFilters() {
@@ -449,12 +481,10 @@ export async function enter(root, { voiceAgent }) {
   bindMapCard();
   bindFilters();
 
-  // Live timers: refresh "X min ago" labels every 30s, inject a fresh
-  // event every 5 minutes. Cleared in exit().
+  // Live timer: refresh "X min ago" labels every 30s. New feed events
+  // come from store mutations so every live surface shares one source.
   if (state._relTimer) clearInterval(state._relTimer);
-  if (state._injectTimer) clearInterval(state._injectTimer);
   state._relTimer = setInterval(tickActivityRelTimes, 30_000);
-  state._injectTimer = setInterval(tickActivityInjector, 5 * 60_000);
 
   if (voiceAgent && voiceAgent.toolRegistry) {
     voiceAgent.toolRegistry.registerDomain('get_activity_feed', () => {
@@ -507,7 +537,7 @@ export async function enter(root, { voiceAgent }) {
   window.addEventListener('load-action', onLoadAction);
   state._onLoadAction = onLoadAction;
   state._unsubscribeStore = [
-    subscribe('load:updated', refreshFromStore),
+    subscribe('load:updated', handleLoadUpdated),
     subscribe('carrier:updated', refreshFromStore)
   ];
 
@@ -524,7 +554,6 @@ export async function enter(root, { voiceAgent }) {
 export function exit() {
   if (state) {
     if (state._relTimer) clearInterval(state._relTimer);
-    if (state._injectTimer) clearInterval(state._injectTimer);
   }
   if (agentRef && agentRef.toolRegistry && typeof agentRef.toolRegistry.unregisterDomain === 'function') {
     agentRef.toolRegistry.unregisterDomain('get_activity_feed');

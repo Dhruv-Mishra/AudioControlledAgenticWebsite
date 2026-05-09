@@ -14,6 +14,7 @@ import { bootstrapVoiceShell } from './ui.js';
 import { Router } from './router.js';
 import { initDataStore } from './data-store.js';
 import { bindKpis } from './kpi-binder.js';
+import { startLiveTick } from './live-tick.js';
 import { applyDispatchFilters, applyCarrierFilters } from './tool-registry.js';
 import { setActivityNote } from './activity-indicator.js';
 import { startLiveUi, getLiveState } from './live-ui.js';
@@ -78,6 +79,7 @@ async function main() {
   try {
     await initDataStore();
     bindKpis(document.body);
+    if (typeof window !== 'undefined') startLiveTick();
   } catch (err) {
     console.error('[app] data-store init', err);
   }
