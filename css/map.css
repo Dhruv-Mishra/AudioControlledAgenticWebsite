@@ -151,6 +151,10 @@
   background: var(--color-map-bg);
   position: relative;
   isolation: isolate;
+  /* Containment: tells the browser this subtree's paint and layout don't
+   * affect anything outside, so Leaflet's per-frame tile movements + lane
+   * animations don't trigger style recalcs on the rest of the SPA. */
+  contain: layout paint style;
   transition: opacity var(--dur-base) var(--ease-out-expo);
 }
 

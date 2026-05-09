@@ -77,6 +77,24 @@ export async function enter(root, { voiceAgent }) {
   state = { carriers: [], filter: { q: '', eq: 'all', available: 'all' } };
   agentRef = voiceAgent;
   await loadData();
+
+  // Pre-filter from URL: ?eq=dry+van etc. Lets the equipment tiles on
+  // the dispatch homepage and the in-page quick-filter strip act as
+  // plain <a> links without any router coupling.
+  try {
+    const sp = new URLSearchParams(location.search);
+    const eqParam = (sp.get('eq') || '').trim().toLowerCase();
+    if (eqParam) {
+      state.filter.eq = eqParam;
+      const eqSel = document.getElementById('carrier-eq');
+      if (eqSel) {
+        // The select uses lowercased option values that match the URL param.
+        const match = Array.from(eqSel.options).find((o) => o.value.toLowerCase() === eqParam);
+        if (match) eqSel.value = match.value;
+      }
+    }
+  } catch {}
+
   renderGrid();
   bindFilters();
 

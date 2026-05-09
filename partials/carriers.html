@@ -1,6 +1,59 @@
+<!-- Hero band: image-led, eyebrow + KPI strip mirrors the dispatch homepage. -->
+<div class="hero-band hero-band--carriers">
+  <picture>
+    <source srcset="/public/images/carriers/kenworth-w990.webp" type="image/webp" />
+    <img src="/public/images/carriers/kenworth-w990.webp"
+         alt="Kenworth W990 sleeper-cab tractor on a Pacific coastal highway at dawn"
+         width="1600" height="600"
+         loading="eager" fetchpriority="high"
+         decoding="async"
+         data-agent-description="A long-hood Kenworth W990 sleeper tractor pulling a reefer trailer along a Pacific coastal highway at first light." />
+  </picture>
+  <div class="hero-overlay" data-agent-id="carriers.hero.overlay">
+    <p class="eyebrow">The roster</p>
+    <h1 class="hero-title">Every rig you can put<br/><em>on a load today.</em></h1>
+    <p class="hero-sub">Forty-plus active carriers across dry van, reefer, flatbed, and tanker. Filter below or ask Jarvis to shortlist for a specific lane.</p>
+    <ul class="hero-kpi-strip" aria-label="Roster at a glance">
+      <li><span class="kpi-num hero-numeral">42</span><span class="kpi-lbl">active carriers</span></li>
+      <li><span class="kpi-num hero-numeral">28</span><span class="kpi-lbl">available now</span></li>
+      <li><span class="kpi-num hero-numeral">4.7</span><span class="kpi-lbl">avg star rating</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- Equipment quick-filter strip: clickable filter chips backed by images.
+     Each tile sets the equipment select via JS-free progressive enhancement
+     (page-carriers.js reads ?eq= from the URL on enter). -->
+<section class="page-section" aria-labelledby="carriers-eq-h">
+  <header class="section-head">
+    <p class="eyebrow">Filter by equipment</p>
+    <h2 class="section-title" id="carriers-eq-h">What are you moving?</h2>
+    <p class="section-sub muted">Tap an equipment type to narrow the directory below.</p>
+  </header>
+  <ul class="equipment-grid" data-agent-id="carriers.equipment.quickfilter">
+    <li><a class="equipment-tile" href="?eq=dry+van" data-agent-id="carriers.eq.dry_van"
+           data-agent-description="Dry van: 53-ft enclosed trailer for general palletised freight.">
+      <img src="/public/images/carriers/peterbilt-579.webp" alt="Peterbilt dry-van tractor" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Dry van</span><span class="eq-count">14 rigs</span></a></li>
+    <li><a class="equipment-tile" href="?eq=reefer" data-agent-id="carriers.eq.reefer"
+           data-agent-description="Reefer: refrigerated trailer for temperature-controlled freight.">
+      <img src="/public/images/carriers/kenworth-w990.webp" alt="Kenworth reefer tractor" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Reefer</span><span class="eq-count">9 rigs</span></a></li>
+    <li><a class="equipment-tile" href="?eq=flatbed" data-agent-id="carriers.eq.flatbed"
+           data-agent-description="Flatbed: open steel-deck trailer for steel coils and machinery.">
+      <img src="/public/images/carriers/flatbed-steel.webp" alt="Flatbed steel-deck trailer" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Flatbed</span><span class="eq-count">7 rigs</span></a></li>
+    <li><a class="equipment-tile" href="?eq=tanker" data-agent-id="carriers.eq.tanker"
+           data-agent-description="Tanker: liquid trailer for fuel, chemicals, and food-grade liquids.">
+      <img src="/public/images/carriers/tanker-fuel.webp" alt="Fuel tanker trailer" loading="lazy" decoding="async" width="240" height="160" />
+      <span class="eq-name">Tanker</span><span class="eq-count">4 rigs</span></a></li>
+  </ul>
+</section>
+
 <section class="page-header">
   <div class="page-header-text">
-    <h1 class="page-title">Carrier directory</h1>
+    <p class="eyebrow">The directory</p>
+    <h1 class="page-title">Carriers</h1>
     <p class="page-subtitle muted">Ask Jarvis to filter or shortlist carriers for a lane.</p>
   </div>
   <div class="toolbar" role="toolbar" aria-label="Carrier actions">
@@ -35,3 +88,4 @@
 </div>
 
 <div class="carrier-grid" id="carrier-grid" data-agent-id="carriers.grid" aria-label="Carriers"></div>
+

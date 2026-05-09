@@ -1,7 +1,63 @@
+<!-- Hero: warmer than the operational pages — this is "talk to a human". -->
+<div class="hero-band hero-band--contact">
+  <picture>
+    <source srcset="/public/images/carriers/dry-van-dock.webp" type="image/webp" />
+    <img src="/public/images/carriers/dry-van-dock.webp"
+         alt="Dry van backed into a loading dock at first light"
+         width="1600" height="600"
+         loading="eager" fetchpriority="high"
+         decoding="async"
+         data-agent-description="A dry-van trailer backed into a loading dock at first light, with dock plates extended." />
+  </picture>
+  <div class="hero-overlay" data-agent-id="contact.hero.overlay">
+    <p class="eyebrow">Support</p>
+    <h1 class="hero-title">A dispatcher,<br/><em>not a ticket queue.</em></h1>
+    <p class="hero-sub">Send a note or have Jarvis schedule a callback. Two-minute median response during business hours; under twenty after-hours.</p>
+    <ul class="hero-kpi-strip" aria-label="Support at a glance">
+      <li><span class="kpi-num hero-numeral">2 min</span><span class="kpi-lbl">median response</span></li>
+      <li><span class="kpi-num hero-numeral">24/7</span><span class="kpi-lbl">on-call dispatch</span></li>
+      <li><span class="kpi-num hero-numeral">98%</span><span class="kpi-lbl">first-call resolution</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- Channel cards: three ways to reach support, before the form. -->
+<section class="page-section" aria-labelledby="contact-channels-h">
+  <header class="section-head">
+    <p class="eyebrow">Pick a channel</p>
+    <h2 class="section-title" id="contact-channels-h">How would you like to reach us?</h2>
+    <p class="section-sub muted">Phone for fires, voice agent for routine moves, the form below for everything else.</p>
+  </header>
+  <ul class="channel-grid" data-agent-id="contact.channels">
+    <li class="channel-card" data-agent-id="contact.channel.phone"
+        data-agent-description="Phone support for emergencies, available 24/7 at the listed number.">
+      <span class="channel-glyph" aria-hidden="true">&#9742;</span>
+      <h3>Call dispatch</h3>
+      <p class="mono">+1 (555) 014-FREIGHT</p>
+      <p class="muted">For load fires &amp; in-motion exceptions.</p>
+    </li>
+    <li class="channel-card channel-card--accent" data-agent-id="contact.channel.voice"
+        data-agent-description="Talk to Jarvis, the on-page voice agent, who can take action on the dispatch console while you speak.">
+      <span class="channel-glyph" aria-hidden="true">&#9673;</span>
+      <h3>Talk to Jarvis</h3>
+      <p>Open the dock, hit <kbd>Place call</kbd>. He can assign carriers and send quotes while you talk.</p>
+      <p class="muted">Best for routine moves.</p>
+    </li>
+    <li class="channel-card" data-agent-id="contact.channel.email"
+        data-agent-description="Email and the form below, for non-urgent requests with a documented paper trail.">
+      <span class="channel-glyph" aria-hidden="true">&#9993;</span>
+      <h3>Send a note</h3>
+      <p class="mono">support@dhruvfreight.ops</p>
+      <p class="muted">Or use the form below &mdash; same inbox.</p>
+    </li>
+  </ul>
+</section>
+
 <section class="page-header">
   <div class="page-header-text">
-    <h1 class="page-title">Contact support</h1>
-    <p class="page-subtitle muted">Send a message or ask Jarvis to schedule a callback.</p>
+    <p class="eyebrow">The form</p>
+    <h1 class="page-title">Send a message</h1>
+    <p class="page-subtitle muted">Or ask Jarvis to schedule a callback for you.</p>
   </div>
 </section>
 
@@ -44,3 +100,27 @@
     </div>
   </aside>
 </div>
+
+<!-- FAQ: editorial cards. Lower-funnel content that takes pressure off
+     the form for the common questions. -->
+<section class="page-section" aria-labelledby="contact-faq-h">
+  <header class="section-head">
+    <p class="eyebrow">Before you ask</p>
+    <h2 class="section-title" id="contact-faq-h">Three things we get asked weekly</h2>
+  </header>
+  <ul class="faq-grid" data-agent-id="contact.faq">
+    <li class="faq-card" data-agent-id="contact.faq.payment">
+      <h3>How do carriers get paid?</h3>
+      <p>Net-30 by default, net-7 with a 2% quick-pay discount. Wire, ACH, or factor &mdash; we don&rsquo;t care which.</p>
+    </li>
+    <li class="faq-card" data-agent-id="contact.faq.tracking">
+      <h3>Can I track a load mid-transit?</h3>
+      <p>Yes. Open the <a href="/map.html" data-agent-id="contact.faq.map_link">map</a> and click any in-transit pin, or ask Jarvis &ldquo;where is LD-10824?&rdquo;</p>
+    </li>
+    <li class="faq-card" data-agent-id="contact.faq.escalate">
+      <h3>What if a load is delayed?</h3>
+      <p>Tap the load row on the dispatch board and click <strong>Escalate</strong>. A senior dispatcher gets paged within sixty seconds.</p>
+    </li>
+  </ul>
+</section>
+

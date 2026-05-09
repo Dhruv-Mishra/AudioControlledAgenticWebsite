@@ -1,9 +1,26 @@
-<section class="page-header">
-  <div class="page-header-text">
-    <h1 class="page-title">Rate negotiation</h1>
-    <p class="page-subtitle muted">Load <span class="mono" id="load-id-readout" data-agent-id="negotiate.load_id"></span>. Ask Jarvis to set a counter, submit, or accept.</p>
+<!-- Hero: editorial frame for the negotiation desk. The italic display
+     numerals echo the negotiation table below. -->
+<div class="hero-band hero-band--negotiate">
+  <picture>
+    <source srcset="/public/images/ambient/loading-dock.webp" type="image/webp" />
+    <img src="/public/images/ambient/loading-dock.webp"
+         alt="Empty loading dock waiting for a carrier"
+         width="1600" height="600"
+         loading="eager" fetchpriority="high"
+         decoding="async"
+         data-agent-description="A wide-angle photo of an empty loading dock waiting for a carrier to arrive, dock plates extended." />
+  </picture>
+  <div class="hero-overlay" data-agent-id="negotiate.hero.overlay">
+    <p class="eyebrow">The desk</p>
+    <h1 class="hero-title">Quote it,<br/><em>counter it,</em> close it.</h1>
+    <p class="hero-sub">Live rate negotiation for load <span class="mono" id="load-id-readout" data-agent-id="negotiate.load_id">&mdash;</span>. Ask Jarvis to set a counter, submit, or accept.</p>
+    <ul class="hero-kpi-strip" aria-label="Lane benchmarks">
+      <li><span class="kpi-num hero-numeral">$2.41</span><span class="kpi-lbl">market avg / mi</span></li>
+      <li><span class="kpi-num hero-numeral">$2.08</span><span class="kpi-lbl">7-day low</span></li>
+      <li><span class="kpi-num hero-numeral">$2.94</span><span class="kpi-lbl">7-day high</span></li>
+    </ul>
   </div>
-</section>
+</div>
 
 <div class="negotiate-grid">
   <form class="panel negotiate-form-panel" id="negotiate-form" data-agent-id="negotiate.form" aria-label="Negotiation form">
@@ -68,3 +85,83 @@
     </div>
   </aside>
 </div>
+
+<!-- Lane intelligence: comparison cards for similar lanes — gives the
+     dispatcher a quick "what does this corridor pay" reference without
+     needing to leave the page. Static snapshot for the demo; in prod
+     this would be wired to a market-rates API. -->
+<section class="page-section" aria-labelledby="negotiate-lanes-h">
+  <header class="section-head">
+    <p class="eyebrow">Lane intelligence</p>
+    <h2 class="section-title" id="negotiate-lanes-h">Comparable corridors</h2>
+    <p class="section-sub muted">What carriers have been clearing on similar lanes this week.</p>
+  </header>
+  <ul class="lane-card-grid" data-agent-id="negotiate.lanes.cards">
+    <li class="lane-card" data-agent-id="negotiate.lane.midwest">
+      <figure>
+        <img src="/public/images/carriers/peterbilt-579.webp" alt="Peterbilt 579 on the I-80 corridor"
+             loading="lazy" decoding="async" width="480" height="320"
+             data-agent-description="A Peterbilt 579 sleeper tractor on a Midwestern interstate, representative of the I-80 lane mix." />
+        <figcaption>
+          <span class="lane-tag">I-80</span>
+          <strong>Chicago &rarr; Dallas</strong>
+          <span class="lane-meta"><span class="hero-numeral">$2,450</span> avg &middot; 12 quotes / 7d</span>
+        </figcaption>
+      </figure>
+    </li>
+    <li class="lane-card" data-agent-id="negotiate.lane.southeast">
+      <figure>
+        <img src="/public/images/carriers/freightliner-cascadia.webp" alt="Freightliner Cascadia on the I-95 corridor"
+             loading="lazy" decoding="async" width="480" height="320"
+             data-agent-description="A Freightliner Cascadia day-cab tractor representative of I-95 spine traffic." />
+        <figcaption>
+          <span class="lane-tag">I-95</span>
+          <strong>Atlanta &rarr; Newark</strong>
+          <span class="lane-meta"><span class="hero-numeral">$2,180</span> avg &middot; 9 quotes / 7d</span>
+        </figcaption>
+      </figure>
+    </li>
+    <li class="lane-card" data-agent-id="negotiate.lane.westcoast">
+      <figure>
+        <img src="/public/images/carriers/kenworth-w990.webp" alt="Kenworth W990 on the I-5 corridor"
+             loading="lazy" decoding="async" width="480" height="320"
+             data-agent-description="A Kenworth W990 reefer tractor representative of I-5 west-coast reefer freight." />
+        <figcaption>
+          <span class="lane-tag">I-5 reefer</span>
+          <strong>Los Angeles &rarr; Seattle</strong>
+          <span class="lane-meta"><span class="hero-numeral">$3,120</span> avg &middot; 6 quotes / 7d</span>
+        </figcaption>
+      </figure>
+    </li>
+  </ul>
+</section>
+
+<!-- Negotiation playbook: editorial bookmarks for common openings the
+     dispatcher (or the agent) can reach for. Pure content surface —
+     no JS binding — but each card has an agent description so Jarvis
+     can suggest the right opener verbally. -->
+<section class="page-section" aria-labelledby="negotiate-playbook-h">
+  <header class="section-head">
+    <p class="eyebrow">The playbook</p>
+    <h2 class="section-title" id="negotiate-playbook-h">Three openings to reach for</h2>
+    <p class="section-sub muted">Field-tested ways to start a quote without leaving margin on the table.</p>
+  </header>
+  <ul class="playbook-grid" data-agent-id="negotiate.playbook">
+    <li class="playbook-card" data-agent-id="negotiate.playbook.anchor">
+      <p class="eyebrow">Anchor high</p>
+      <h3>Open at <span class="hero-numeral">$2.85</span>/mi.</h3>
+      <p>Drop to the 7-day average only on the second pass. The first number always sets the ceiling.</p>
+    </li>
+    <li class="playbook-card" data-agent-id="negotiate.playbook.bundle">
+      <p class="eyebrow">Bundle the backhaul</p>
+      <h3>Two for one.</h3>
+      <p>Offer the carrier the return load at posted rate. Trades a 6-8% discount on the outbound for a guaranteed RPM round-trip.</p>
+    </li>
+    <li class="playbook-card" data-agent-id="negotiate.playbook.fast">
+      <p class="eyebrow">Pay-fast premium</p>
+      <h3>Net-7 minus 4%.</h3>
+      <p>Offer a four-percent rate cut for net-7 terms instead of net-30. Most owner-operators take it.</p>
+    </li>
+  </ul>
+</section>
+

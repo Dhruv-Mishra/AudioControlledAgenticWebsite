@@ -1184,3 +1184,184 @@
   margin-bottom: var(--sp-1);
   color: var(--color-accent);
 }
+
+/* ============================================================
+ * 11. v3 page-overhaul: hero variants, channels, FAQ, playbook
+ * ------------------------------------------------------------
+ * These rules extend the homepage v3 vocabulary (lane-card,
+ * equipment-tile, page-section, section-head) onto carriers /
+ * negotiate / contact so the whole site reads as one piece.
+ * Every value flows through tokens; no hardcoded hex.
+ * ============================================================ */
+
+/* Hero variants: the base .hero-band already paints the image + gradient.
+ * The variants only re-tilt the gradient hue so each page has its own
+ * tonal signature without new image assets. */
+.hero-band--carriers img  { opacity: 0.46; }
+.hero-band--negotiate img { opacity: 0.36; filter: saturate(0.7) contrast(1.1); }
+.hero-band--contact img   { opacity: 0.40; }
+
+.hero-band--carriers::after,
+.hero-band--negotiate::after,
+.hero-band--contact::after {
+  background:
+    linear-gradient(
+      to right,
+      var(--color-bg) 0%,
+      color-mix(in oklab, var(--color-bg) 78%, transparent) 35%,
+      color-mix(in oklab, var(--color-bg) 40%, transparent) 75%,
+      transparent 100%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      transparent 60%,
+      color-mix(in oklab, var(--color-bg) 60%, transparent) 100%
+    );
+}
+
+/* ---- Contact: channel grid ---- */
+.channel-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-3);
+}
+.channel-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: background var(--dur-fast) var(--ease-snap),
+              border-color var(--dur-fast) var(--ease-snap);
+}
+.channel-card:hover {
+  background: var(--md-sys-color-surface-container);
+  border-color: var(--color-accent-outline);
+}
+.channel-card h3 {
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  margin: 0;
+}
+.channel-card p { font-size: var(--fs-sm); margin: 0; color: var(--color-text-muted); }
+.channel-card p.mono { color: var(--color-text); font-size: var(--fs-sm); }
+.channel-card kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--md-sys-color-surface-container-high);
+  border: 1px solid var(--color-border);
+}
+.channel-glyph {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  color: var(--color-text-muted);
+  line-height: 1;
+}
+.channel-card--accent {
+  background: color-mix(in oklab, var(--color-accent) 8%, var(--md-sys-color-surface-container));
+  border-color: var(--color-accent-outline);
+}
+.channel-card--accent:hover {
+  background: color-mix(in oklab, var(--color-accent) 12%, var(--md-sys-color-surface-container));
+}
+.channel-card--accent .channel-glyph { color: var(--color-accent); }
+.channel-card--accent p { color: var(--color-text); }
+
+/* ---- Contact: FAQ grid ---- */
+.faq-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-3);
+}
+.faq-card {
+  padding: var(--sp-5);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.faq-card h3 {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(20px, 1.1rem + 0.6vw, 24px);
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--sp-2) 0;
+  color: var(--color-text);
+  line-height: 1.2;
+}
+.faq-card p {
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* ---- Negotiate: playbook cards ---- */
+.playbook-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-3);
+}
+.playbook-card {
+  padding: var(--sp-5);
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+}
+.playbook-card .eyebrow { color: var(--color-accent); margin: 0 0 var(--sp-2) 0; }
+.playbook-card h3 {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: var(--fs-lg);
+  margin: 0 0 var(--sp-2) 0;
+  letter-spacing: var(--tracking-tight);
+}
+.playbook-card h3 .hero-numeral {
+  color: var(--color-accent);
+  font-size: clamp(28px, 1.6rem + 1vw, 36px);
+}
+.playbook-card p {
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* ============================================================
+ * 12. Mobile polish across v3 surfaces
+ * ============================================================ */
+@media (max-width: 720px) {
+  .page-section { margin-top: var(--sp-7); padding-top: var(--sp-5); }
+  .section-head { margin-bottom: var(--sp-4); }
+  .lane-card-grid { grid-template-columns: 1fr; }
+  .equipment-grid { grid-template-columns: repeat(2, 1fr); gap: var(--sp-2); }
+  .equipment-tile .eq-name  { padding-top: var(--sp-1); font-size: var(--fs-xs); }
+  .equipment-tile .eq-count { padding-bottom: var(--sp-2); }
+  .channel-grid { grid-template-columns: 1fr; }
+  .faq-grid     { grid-template-columns: 1fr; }
+  .playbook-grid{ grid-template-columns: 1fr; }
+  /* Activity feed on mobile: drop the sidecar to below, full width. */
+  .activity-grid { grid-template-columns: 1fr; }
+  .activity-sidecar img { aspect-ratio: 16 / 9; }
+}
+@media (max-width: 480px) {
+  .lane-card figcaption { padding: var(--sp-4) var(--sp-3) var(--sp-3); }
+  .lane-card strong     { font-size: var(--fs-md); }
+  .equipment-tile img   { aspect-ratio: 4 / 3; }
+}
