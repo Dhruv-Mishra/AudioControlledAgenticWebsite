@@ -124,6 +124,23 @@
   flex-shrink: 0;
 }
 
+/* v3 icon slot — replaces the bare dot with a 24×24 SVG glyph
+ * (route arrow for loads, truck silhouette for carriers). currentColor
+ * is set inline by JS to the row's status colour. */
+.map-filter-list-item .map-list-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+.map-filter-list-item .map-list-icon svg { display: block; }
+.map-filter-list-item:hover .map-list-icon {
+  filter: drop-shadow(0 0 6px color-mix(in oklab, currentColor 50%, transparent));
+}
+
 .map-filter-list-item .meta {
   display: block;
   font-family: var(--font-mono);

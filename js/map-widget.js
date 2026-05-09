@@ -671,23 +671,50 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     }
 
     let renderFilterListTimer = null;
+    // Inline SVG glyphs for the list items. Two icons cover both kinds:
+    //   - LOAD_GLYPH: pickup → dropoff arrow (route)
+    //   - CARRIER_GLYPH: a small truck silhouette
+    // Each is ~24×24, currentColor, so they tint to the row's status color
+    // via CSS without per-instance recolouring.
+    const LOAD_GLYPH = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">' +
+      '<circle cx="5" cy="12" r="2.4" fill="currentColor"/>' +
+      '<path d="M7.5 12h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
+      '<path d="M14 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '</svg>';
+    const CARRIER_GLYPH = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">' +
+      '<rect x="2" y="8" width="11" height="9" rx="1" fill="currentColor" opacity="0.85"/>' +
+      '<path d="M13 11h5l3 3v3h-8z" fill="currentColor" opacity="0.7"/>' +
+      '<circle cx="6.5" cy="18" r="1.6" fill="currentColor"/>' +
+      '<circle cx="17"  cy="18" r="1.6" fill="currentColor"/>' +
+      '</svg>';
+
     function renderFilterListImmediate() {
       if (!filterList) return;
       filterList.replaceChildren();
       const q = searchInput && searchInput.value ? searchInput.value.trim().toLowerCase() : '';
 
-      const addItem = ({ id, dotColor, label, meta, onClick }) => {
+      const addItem = ({ id, dotColor, glyph, label, meta, onClick }) => {
         const li = document.createElement('li');
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'map-filter-list-item';
         btn.setAttribute('data-agent-id', id);
-        const dot = document.createElement('span');
-        dot.className = 'dot';
-        dot.style.background = dotColor;
+        // Glyph slot — coloured via the dotColor (status-driven for loads,
+        // info for carriers). Falls back to the legacy dot if no glyph.
+        const icon = document.createElement('span');
+        icon.className = 'map-list-icon';
+        icon.style.color = dotColor;
+        if (glyph) {
+          icon.innerHTML = glyph;
+        } else {
+          const dot = document.createElement('span');
+          dot.className = 'dot';
+          dot.style.background = dotColor;
+          icon.appendChild(dot);
+        }
         const text = document.createElement('span');
         text.innerHTML = `${escapeHtml(label)}<br><span class="meta">${escapeHtml(meta)}</span>`;
-        btn.appendChild(dot);
+        btn.appendChild(icon);
         btn.appendChild(text);
         btn.addEventListener('click', onClick);
         li.appendChild(btn);
@@ -701,6 +728,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
           addItem({
             id: `map.list.${l.id}`,
             dotColor: colorForStatus(l.status),
+            glyph: LOAD_GLYPH,
             label: `${l.id}`,
             meta: `${l.pickup || '?'} → ${l.dropoff || '?'}`,
             onClick: () => { focusLoadInternal(l.id); if (window.__loadModal) window.__loadModal.open(l, { context: 'map' }); }
@@ -714,6 +742,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
           addItem({
             id: `map.list.${c.id}`,
             dotColor: 'var(--color-info)',
+            glyph: CARRIER_GLYPH,
             label: c.name,
             meta: `${c.id}${hq ? ' · ' + hq.city : ''}`,
             onClick: () => focusCarrierInternal(c.id)
