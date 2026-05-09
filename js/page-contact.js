@@ -1,5 +1,7 @@
 // Contact / Support page module — exports { enter, exit } for the SPA router.
 
+import { assignCarrierToLoad, getLoad, initDataStore } from './data-store.js';
+
 let state = null;
 let agentRef = null;
 
@@ -60,6 +62,7 @@ function wireForm() {
 export async function enter(root, { voiceAgent }) {
   state = { callbacks: [] };
   agentRef = voiceAgent;
+  await initDataStore();
   wireForm();
   renderCallbacks();
 
@@ -71,8 +74,18 @@ export async function enter(root, { voiceAgent }) {
       const entry = addCallback({ contact, whenIso, note: args.note || '' });
       return { ok: true, scheduled: entry };
     });
-    voiceAgent.toolRegistry.registerDomain('get_load',       () => ({ ok: false, error: 'Load lookup is on Dispatch.' }));
-    voiceAgent.toolRegistry.registerDomain('assign_carrier', () => ({ ok: false, error: 'Carrier assignment is on Dispatch.' }));
+    voiceAgent.toolRegistry.registerDomain('get_load', (args) => {
+      const load = getLoad(String(args.load_id || args.id || '').trim());
+      return load ? { ok: true, load } : { ok: false, error: `No load ${args.load_id || args.id}` };
+    });
+    voiceAgent.toolRegistry.registerDomain('assign_carrier', (args) => {
+      try {
+        const result = assignCarrierToLoad(args.load_id, args.carrier_id, { source: 'agent' });
+        return { ok: true, load: result.load, carrier: result.carrier };
+      } catch (err) {
+        return { ok: false, error: err && err.message || String(err) };
+      }
+    });
     voiceAgent.toolRegistry.registerDomain('submit_quote',   () => ({ ok: false, error: 'Submit quotes from the Rate Negotiation page.' }));
   }
 

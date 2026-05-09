@@ -403,6 +403,7 @@ export class VoiceAgent extends EventTarget {
     // Call-scoped flag: the greeting is sent exactly once per placeCall.
     // Reset on endCall / error.
     this._greetingSent = false;
+    this._initialGreetingDelivered = false;
     // audio-flow: start-audio gate tracking. Resolves when the startCall
     // clip has either finished or hit its safety cap. Separate from
     // `_greetingSent` — we can send `greet_gate_open` to the server
@@ -702,6 +703,7 @@ export class VoiceAgent extends EventTarget {
 
     this._callActive = true;
     this._greetingSent = false;
+    this._initialGreetingDelivered = false;
     // audio-flow: reset gate + idempotency state for this call.
     this._greetGateOpened = false;
     this._endingCall = false;
@@ -1020,6 +1022,7 @@ export class VoiceAgent extends EventTarget {
 
     this._callActive = false;
     this._greetingSent = false;
+    this._initialGreetingDelivered = false;
     this._greetGateOpened = false;
     this._callOpenSettled = false;
     this._callOpenPromise = null;
@@ -1082,6 +1085,7 @@ export class VoiceAgent extends EventTarget {
     this.ws = null;
     this._callActive = false;
     this._greetingSent = false;
+    this._initialGreetingDelivered = false;
     this._greetGateOpened = false;
     this._callOpenSettled = false;
     this._callOpenPromise = null;
@@ -1832,6 +1836,10 @@ export class VoiceAgent extends EventTarget {
         this._setState(STATES.LIVE_READY);
         this._persistSessionBlob();
         this._publishEvent('turn-complete', {});
+        if (this._callActive && this._greetingSent && !this._initialGreetingDelivered) {
+          this._initialGreetingDelivered = true;
+          this._drainPendingPageContextIfReady();
+        }
         // Dual-gate trigger for deferred page navigations / disruptive
         // tool effects. Drains immediately if no audio is still in
         // flight; otherwise the agent-playback-drained listener will
@@ -1923,11 +1931,7 @@ export class VoiceAgent extends EventTarget {
       this._sendJson({ type: 'call_start', page, title });
       this.pageContextInjected = true;
     } else if (this._pendingPageContext) {
-      // Normal mid-call navigation drain.
-      const pc = this._pendingPageContext;
-      this._pendingPageContext = null;
-      this._sendPageContextFrame(pc);
-      this.pageContextInjected = true;
+      this._drainPendingPageContextIfReady();
     } else if (!this.pageContextInjected && this._currentPathname) {
       this.pageContextInjected = true;
       this._tryInjectPageContext();
@@ -2159,6 +2163,20 @@ export class VoiceAgent extends EventTarget {
     }
     this._sendPageContextFrame(payload);
     this.pageContextInjected = true;
+  }
+
+  _drainPendingPageContextIfReady() {
+    if (!this._pendingPageContext) return false;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) return false;
+    if (this._callActive && this._greetingSent && !this._initialGreetingDelivered) {
+      dlog('holding queued page_context until initial greeting completes');
+      return false;
+    }
+    const pc = this._pendingPageContext;
+    this._pendingPageContext = null;
+    this._sendPageContextFrame(pc);
+    this.pageContextInjected = true;
+    return true;
   }
 
   _sendPageContextFrame({ page, title, elements }) {

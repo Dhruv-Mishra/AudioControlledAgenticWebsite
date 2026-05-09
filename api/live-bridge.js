@@ -100,13 +100,17 @@ function safeDelimText(s, max = 140) {
 function buildCallInitiatedText({ page, title, persona }) {
   const niceTitle = safeDelimText(title, 100) || '(untitled page)';
   const safePage = safeDelimText(page, 80) || '/';
+  const isDefaultPage = safePage === '/' || safePage === '/index.html';
   const script = (persona && persona.introScript)
     || 'Jarvis here, Dhruv FreightOps. How can I help?';
   const lines = [
     '<call_initiated>',
     `The user just placed a call and is now connected. They are on ${safePage} ("${niceTitle}").`,
-    `Speak this greeting EXACTLY: "${script}"`,
-    'Then wait for the user to respond. Do not call any tools yet.',
+    `Step 1 — Speak this greeting EXACTLY first, word-for-word: "${script}"`,
+    isDefaultPage
+      ? 'Step 2 — That is the entire turn. Then wait for the user to respond.'
+      : `Step 2 — Then add ONE short, natural sentence acknowledging that the user is on ${safePage} and briefly noting what they can do here (e.g. on /map.html: "I see you're on the map — you can track every load in motion from here." On /carriers.html: mention browsing or filtering carriers. On /negotiate.html: mention rate negotiation. On /contact.html: mention reaching support / scheduling a callback. On /dispatch.html or default dispatch: mention assigning carriers to loads.). Keep it to ONE sentence. Do NOT skip Step 1 — the greeting must come first verbatim.`,
+    'Step 3 — Wait for the user. Do not call any tools yet.',
     '</call_initiated>'
   ];
   return lines.join('\n');
@@ -1236,4 +1240,4 @@ function attach(browserWs, req, env) {
   emitState('idle');
 }
 
-module.exports = { attach };
+module.exports = { attach, buildCallInitiatedText };

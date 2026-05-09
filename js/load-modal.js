@@ -1,13 +1,8 @@
 // load-modal.js — singleton body-portal modal for load detail.
 // Auto-registers window.__loadModal and window.__modals.closeAll.
 
-const STATUS_LABEL = {
-  in_transit: { label: 'In transit', chip: 'info' },
-  booked:     { label: 'Booked',     chip: 'neutral' },
-  pending:    { label: 'Pending',    chip: 'warn' },
-  delayed:    { label: 'Delayed',    chip: 'danger' },
-  delivered:  { label: 'Delivered',  chip: 'ok' }
-};
+import { getCarrier, getLoad, initDataStore, listCarriers, subscribe } from './data-store.js';
+import { formatEta, formatLoadStatus, formatMiles, formatMoney, formatWeight } from './formatters.js';
 
 const MODAL_HTML = `<div id="load-modal-root" class="load-modal" data-modal-root="load" aria-hidden="true"
      aria-label="Load detail">
@@ -64,9 +59,10 @@ const MODAL_HTML = `<div id="load-modal-root" class="load-modal" data-modal-root
 </div>`;
 
 let root = null;
-let currentLoad = null;
+let currentLoadId = null;
 let currentOpts = null;
-let cachedData = { carriers: [], loads: [] };
+let unsubscribeLoad = null;
+let unsubscribeCarrier = null;
 
 function prefersReducedMotion() {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
@@ -100,21 +96,12 @@ function ensureRoot() {
   return root;
 }
 
-function fmtMiles(n) {
-  return n == null ? '—' : `${Number(n).toLocaleString('en-US')} mi`;
-}
-function fmtWeight(n) {
-  return n == null ? '—' : `${Number(n).toLocaleString('en-US')} lb`;
-}
-function fmtRate(n) {
-  return n == null ? '—' : `$${Number(n).toLocaleString('en-US')}`;
-}
-function fmtEta(iso) {
-  if (!iso) return '—';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  } catch { return '—'; }
+function chipForTone(tone) {
+  if (tone === 'success') return 'ok';
+  if (tone === 'danger') return 'danger';
+  if (tone === 'warn') return 'warn';
+  if (tone === 'info') return 'info';
+  return 'neutral';
 }
 
 function escapeHtml(s) {
@@ -124,19 +111,58 @@ function escapeHtml(s) {
 }
 
 function resolveCarrier(load) {
-  const carriers = cachedData.carriers || [];
-  return carriers.find((c) => c.id === load.carrierId || c.name === load.carrier) || null;
+  if (!load) return null;
+  if (load.carrierId) return getCarrier(load.carrierId) || null;
+  if (load.carrier) {
+    return listCarriers({ predicate: (c) => c.name === load.carrier })[0] || null;
+  }
+  return null;
+}
+
+function resolveLoad(input) {
+  const id = typeof input === 'object' && input ? input.id : input;
+  const fresh = getLoad(id);
+  return fresh || (typeof input === 'object' && input ? input : null);
+}
+
+function rerenderCurrent() {
+  if (!root || !currentLoadId) return;
+  const load = getLoad(currentLoadId);
+  if (!load) return;
+  populateFields(load);
+  renderActions(load, currentOpts || {});
+}
+
+function clearStoreSubscriptions() {
+  try { unsubscribeLoad && unsubscribeLoad(); } catch {}
+  try { unsubscribeCarrier && unsubscribeCarrier(); } catch {}
+  unsubscribeLoad = null;
+  unsubscribeCarrier = null;
+}
+
+function subscribeCurrentLoad() {
+  clearStoreSubscriptions();
+  unsubscribeLoad = subscribe('load:updated', (detail) => {
+    if (!currentLoadId) return;
+    if (!detail || detail.id == null || detail.id === currentLoadId) rerenderCurrent();
+  });
+  unsubscribeCarrier = subscribe('carrier:updated', (detail) => {
+    if (!currentLoadId) return;
+    const load = getLoad(currentLoadId);
+    if (!load) return;
+    if (!detail || detail.id == null || detail.id === load.carrierId) rerenderCurrent();
+  });
 }
 
 function populateFields(load) {
   const el = root;
-  const statusMeta = STATUS_LABEL[load.status] || { label: load.status || '—', chip: 'neutral' };
+  const statusMeta = formatLoadStatus(load.status);
 
   // Status chip
   const statusEl = el.querySelector('[data-modal-field="status"]');
   if (statusEl) {
     statusEl.textContent = statusMeta.label;
-    statusEl.className = `chip load-modal-status chip--${statusMeta.chip}`;
+    statusEl.className = `chip load-modal-status chip--${chipForTone(statusMeta.tone)}`;
   }
 
   // Title
@@ -146,13 +172,13 @@ function populateFields(load) {
   // Route
   setField('pickup', load.pickup || '—');
   setField('dropoff', load.dropoff || '—');
-  setField('miles', fmtMiles(load.miles));
+  setField('miles', formatMiles(load.miles));
 
   // Shipment
   setField('commodity', load.commodity || '—');
-  setField('weight', fmtWeight(load.weight));
-  setField('rate', fmtRate(load.rate));
-  setField('eta', fmtEta(load.eta));
+  setField('weight', formatWeight(load.weight));
+  setField('rate', formatMoney(load.rate));
+  setField('eta', formatEta(load).niceAbsolute);
 
   // Carrier
   const carrier = resolveCarrier(load);
@@ -161,8 +187,8 @@ function populateFields(load) {
   // Subtitle
   const subtitle = root.querySelector('.load-modal-subtitle');
   if (subtitle) {
-    const milesPart = load.miles ? `${Number(load.miles).toLocaleString('en-US')} mi` : '';
-    const etaPart = load.eta ? `ETA ${fmtEta(load.eta)}` : '';
+    const milesPart = load.miles ? formatMiles(load.miles) : '';
+    const etaPart = load.eta ? `ETA ${formatEta(load).niceAbsolute}` : '';
     const route = `${load.pickup || '?'} → ${load.dropoff || '?'}`;
     subtitle.textContent = [route, milesPart, etaPart].filter(Boolean).join(' · ');
   }
@@ -225,7 +251,7 @@ function renderActions(load, opts) {
 }
 
 async function handleShowOnMap() {
-  const load = currentLoad;
+  const load = getCurrent();
   if (!load) return;
   close();
   if (window.__router && typeof window.__router.navigate === 'function') {
@@ -241,14 +267,14 @@ async function handleShowOnMap() {
 }
 
 function handleCenterOnMap() {
-  const load = currentLoad;
+  const load = getCurrent();
   if (!load) return;
   close();
   if (window.__mapWidget) window.__mapWidget.highlightLoad(load.id);
 }
 
 function handleAssignCarrier() {
-  const load = currentLoad;
+  const load = getCurrent();
   if (!load) return;
   window.dispatchEvent(new CustomEvent('load-action', {
     detail: { action: 'assign', loadId: load.id }
@@ -256,7 +282,7 @@ function handleAssignCarrier() {
 }
 
 function handleCallCarrier() {
-  const load = currentLoad;
+  const load = getCurrent();
   if (!load) return;
   window.dispatchEvent(new CustomEvent('carrier-action', {
     detail: { action: 'call-driver', carrierId: load.carrierId || null, loadId: load.id }
@@ -264,7 +290,7 @@ function handleCallCarrier() {
 }
 
 function handleRequestStatus() {
-  const load = currentLoad;
+  const load = getCurrent();
   if (!load) return;
   window.dispatchEvent(new CustomEvent('carrier-action', {
     detail: { action: 'request-status', carrierId: load.carrierId || null, loadId: load.id }
@@ -293,10 +319,13 @@ function onResize() {
 }
 
 export function open(load, opts = {}) {
-  if (!load) return;
+  const resolved = resolveLoad(load);
+  if (!resolved || !resolved.id) return;
   const el = ensureRoot();
-  currentLoad = load;
+  currentLoadId = resolved.id;
   currentOpts = opts;
+  subscribeCurrentLoad();
+  try { initDataStore().then(rerenderCurrent).catch(() => {}); } catch {}
 
   // When body-portaled (no #map-root on the page, e.g. dispatch), offset
   // the panel below the sticky app-header so it doesn't overlap. On the
@@ -310,8 +339,8 @@ export function open(load, opts = {}) {
     el.style.removeProperty('--load-modal-top-offset');
   }
 
-  populateFields(load);
-  renderActions(load, opts);
+  populateFields(resolved);
+  renderActions(resolved, opts);
 
   // Signal other panels to close
   window.dispatchEvent(new CustomEvent('modal:open', { detail: { kind: 'load' } }));
@@ -356,7 +385,8 @@ export function close() {
     setTimeout(done, 300);
   }
 
-  currentLoad = null;
+  clearStoreSubscriptions();
+  currentLoadId = null;
   currentOpts = null;
 }
 
@@ -365,16 +395,24 @@ export function isOpen() {
 }
 
 export function getCurrent() {
-  return currentLoad;
+  return currentLoadId ? getLoad(currentLoadId) : null;
 }
 
-export function setData(data) {
-  if (data && data.carriers) cachedData.carriers = data.carriers;
-  if (data && data.loads) cachedData.loads = data.loads;
+export function setLoadId(id) {
+  const load = getLoad(id);
+  if (!load) return false;
+  currentLoadId = load.id;
+  subscribeCurrentLoad();
+  rerenderCurrent();
+  return true;
+}
+
+export function setData() {
+  return false;
 }
 
 // Window globals
-window.__loadModal = { open, close, isOpen, getCurrent, setData };
+window.__loadModal = { open, close, isOpen, getCurrent, setLoadId, setData };
 window.__modals = window.__modals || {};
 window.__modals.closeAll = () => {
   try { window.__loadModal.close(); } catch {}

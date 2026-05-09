@@ -12,7 +12,8 @@
 // Click selection: trucks have pointer-events:auto; the wrapper does not.
 // The overlay never blocks map drag/zoom.
 
-import { getLoadProgress } from './load-progress.js';
+import { getLoad, listCarriers, listLoads } from './data-store.js';
+import { loadProgress } from './formatters.js';
 import * as pageState from './page-state.js';
 
 const CARRIER_HQ_CITY = {
@@ -59,7 +60,7 @@ function isMovable(load) {
   return !!load;
 }
 
-export function mountOverlay({ widgetApi, root, loads, carriers }) {
+export function mountOverlay({ widgetApi, root, getLoads = listLoads, getCarriers = listCarriers }) {
   if (!widgetApi || typeof widgetApi._getLeafletMap !== 'function') {
     return () => {};
   }
@@ -132,12 +133,14 @@ export function mountOverlay({ widgetApi, root, loads, carriers }) {
 
   function reposition() {
     const now = Date.now();
-    loads.forEach((l) => {
+    const activeIds = new Set();
+    getLoads().forEach((l) => {
+      activeIds.add(l.id);
       if (!isMovable(l)) {
         if (truckEls.has(l.id)) removeTruckEl(l.id);
         return;
       }
-      const p = getLoadProgress(l, now);
+      const p = loadProgress(l, now);
       if (!p.currentLatLng) return;
       const entry = ensureTruckEl(l);
       let pt;
@@ -153,6 +156,9 @@ export function mountOverlay({ widgetApi, root, loads, carriers }) {
         entry.el.setAttribute('data-status', l.status || '');
         entry.load = l;
       }
+    });
+    truckEls.forEach((entry, loadId) => {
+      if (!activeIds.has(loadId)) removeTruckEl(loadId);
     });
     // Stationary carrier sprites at HQ.
     carrierEls.forEach((entry) => {
@@ -180,9 +186,7 @@ export function mountOverlay({ widgetApi, root, loads, carriers }) {
     carrierEls.set(carrier.id, { el, latLng: ll });
   }
 
-  if (Array.isArray(carriers)) {
-    carriers.forEach(ensureCarrierSprite);
-  }
+  getCarriers().forEach(ensureCarrierSprite);
 
   // Recompute layer-point positions when Leaflet resets the layer origin
   // (after every pan/zoom). During the actual zoom animation the pane
@@ -204,7 +208,7 @@ export function mountOverlay({ widgetApi, root, loads, carriers }) {
     const agentId = child && child.getAttribute && child.getAttribute('data-agent-id');
     if (!agentId || !/^map\.list\.LD-/.test(agentId)) return;
     const id = agentId.replace('map.list.', '');
-    const load = loads.find((l) => l.id === id);
+    const load = getLoad(id);
     if (!load) return;
     const bar = document.createElement('span');
     bar.className = 'map-list-progress';
@@ -229,9 +233,9 @@ export function mountOverlay({ widgetApi, root, loads, carriers }) {
     const now = Date.now();
     filterList.querySelectorAll('li[data-overlay-load-id]').forEach((li) => {
       const id = li.dataset.overlayLoadId;
-      const load = loads.find((l) => l.id === id);
+      const load = getLoad(id);
       if (!load) return;
-      const p = getLoadProgress(load, now);
+      const p = loadProgress(load, now);
       const bar = li.querySelector('.map-list-progress');
       if (bar) {
         const fill = bar.firstElementChild;
@@ -263,7 +267,12 @@ export function mountOverlay({ widgetApi, root, loads, carriers }) {
   function handleSelect(load) {
     try { pageState.selectLoad(load.id, `${load.pickup || ''} → ${load.dropoff || ''}`); } catch {}
     refreshSelectionHighlight();
-    try { window.__loadModal && window.__loadModal.open(load, { context: 'map' }); } catch {}
+    try {
+      if (window.__loadModal) {
+        if (typeof window.__loadModal.setLoadId === 'function') window.__loadModal.setLoadId(load.id);
+        window.__loadModal.open(load.id, { context: 'map' });
+      }
+    } catch {}
   }
 
   function refreshSelectionHighlight() {

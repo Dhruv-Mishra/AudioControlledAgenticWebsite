@@ -3,65 +3,72 @@
 // this module only wires its own DOM + domain tools.
 
 import { restoreFiltersFromUrl } from './tool-registry.js';
+import {
+  assignCarrierToLoad,
+  countLoadsByStatus,
+  getLoad,
+  initDataStore,
+  listCarriers,
+  listLoads,
+  subscribe
+} from './data-store.js';
+import {
+  formatEta,
+  formatLoadStatus,
+  formatMiles,
+  formatMoney,
+  formatWeight,
+  isLoadInMotion
+} from './formatters.js';
 import './load-modal.js';
-
-const STATUS_LABEL = {
-  in_transit: { label: 'In transit', chip: 'info' },
-  booked:     { label: 'Booked',     chip: 'neutral' },
-  pending:    { label: 'Pending',    chip: 'warn' },
-  delayed:    { label: 'Delayed',    chip: 'danger' },
-  delivered:  { label: 'Delivered',  chip: 'ok' }
-};
 
 // Per-mount state. Recreated on each enter() so navigation is clean.
 let state = null;
 let agentRef = null;
 
-function fmtMoney(n) {
-  if (n == null) return '—';
-  return `$${n.toLocaleString('en-US')}`;
-}
-function fmtMiles(n) { return n == null ? '—' : `${n.toLocaleString('en-US')} mi`; }
-function fmtEta(iso) {
-  if (!iso) return '—';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  } catch { return '—'; }
+function chipForTone(tone) {
+  if (tone === 'success') return 'ok';
+  if (tone === 'danger') return 'danger';
+  if (tone === 'warn') return 'warn';
+  if (tone === 'info') return 'info';
+  return 'neutral';
 }
 
-async function loadData() {
-  const [loads, carriers] = await Promise.all([
-    fetch('/data/loads.json').then((r) => r.json()),
-    fetch('/data/carriers.json').then((r) => r.json())
-  ]);
-  state.loads = loads;
-  state.carriers = carriers;
+function statusMeta(status) {
+  const meta = formatLoadStatus(status);
+  return { ...meta, chip: chipForTone(meta.tone) };
+}
+
+function currentLoads() {
+  return listLoads();
+}
+
+function currentCarriers() {
+  return listCarriers();
 }
 
 function filterLoads() {
   const { q, status, lane } = state.filter;
   const qq = (q || '').trim().toLowerCase();
-  return state.loads.filter((l) => {
-    if (status !== 'all' && l.status !== status) return false;
-    if (lane) {
-      const laneStr = `${l.pickup} ${l.dropoff}`.toLowerCase();
-      if (!laneStr.includes(lane.toLowerCase())) return false;
+  return listLoads({
+    status: status !== 'all' ? status : undefined,
+    search: qq,
+    predicate: (l) => {
+      if (lane) {
+        const laneStr = `${l.pickup} ${l.dropoff}`.toLowerCase();
+        if (!laneStr.includes(lane.toLowerCase())) return false;
+      }
+      return true;
     }
-    if (qq) {
-      const hay = `${l.id} ${l.pickup} ${l.dropoff} ${l.carrier || ''} ${l.commodity}`.toLowerCase();
-      if (!hay.includes(qq)) return false;
-    }
-    return true;
   });
 }
 
 function renderSummary() {
-  const loads = state.loads;
-  const byStatus = (s) => loads.filter((l) => l.status === s).length;
-  const transit = byStatus('in_transit');
-  const pending = byStatus('pending');
-  const delayed = byStatus('delayed');
+  const loads = currentLoads();
+  const counts = countLoadsByStatus();
+  const transit = counts.in_transit || 0;
+  const pending = counts.pending || 0;
+  const delayed = counts.delayed || 0;
   const revenue = loads.reduce((acc, l) => acc + (l.rate || 0), 0);
   const el = document.getElementById('summary-grid');
   if (!el) return;
@@ -69,7 +76,7 @@ function renderSummary() {
     <div class="summary-card"><div class="label">In transit</div><div class="value" data-agent-id="dispatch.kpi.in_transit">${transit}</div><div class="meta">Moving now</div></div>
     <div class="summary-card"><div class="label">Pending</div><div class="value" data-agent-id="dispatch.kpi.pending">${pending}</div><div class="meta">Awaiting carrier</div></div>
     <div class="summary-card"><div class="label">Delayed</div><div class="value" data-agent-id="dispatch.kpi.delayed">${delayed}</div><div class="meta">Needs attention</div></div>
-    <div class="summary-card"><div class="label">Booked rev.</div><div class="value" data-agent-id="dispatch.kpi.revenue">${fmtMoney(revenue)}</div><div class="meta">${loads.length} loads</div></div>
+    <div class="summary-card"><div class="label">Booked rev.</div><div class="value" data-agent-id="dispatch.kpi.revenue">${formatMoney(revenue)}</div><div class="meta">${loads.length} loads</div></div>
   `;
 }
 
@@ -90,15 +97,15 @@ function renderTable() {
     tr.setAttribute('role', 'button');
     tr.setAttribute('aria-label', `Load ${l.id}, ${l.pickup} to ${l.dropoff}`);
     if (l.id === state.selectedId) tr.setAttribute('aria-selected', 'true');
-    const statusMeta = STATUS_LABEL[l.status] || { label: l.status, chip: 'neutral' };
+    const meta = statusMeta(l.status);
     tr.innerHTML = `
       <td><span class="mono">${l.id}</span></td>
       <td>${escapeHtml(l.pickup)} → ${escapeHtml(l.dropoff)}</td>
       <td>${escapeHtml(l.carrier || '—')}</td>
-      <td><span class="chip chip--${statusMeta.chip}">${statusMeta.label}</span></td>
-      <td class="mono">${fmtMiles(l.miles)}</td>
-      <td class="mono">${fmtMoney(l.rate)}</td>
-      <td class="mono">${fmtEta(l.eta)}</td>
+      <td><span class="chip chip--${meta.chip}">${meta.label}</span></td>
+      <td class="mono">${formatMiles(l.miles)}</td>
+      <td class="mono">${formatMoney(l.rate)}</td>
+      <td class="mono">${formatEta(l).niceAbsolute}</td>
     `;
     tr.addEventListener('click', () => selectLoad(l.id));
     tr.addEventListener('keydown', (e) => {
@@ -118,10 +125,11 @@ function selectLoad(id) {
   });
   renderDetail();
 
-  const load = state.loads.find((x) => x.id === id);
+  const load = getLoad(id);
   if (load && window.__loadModal) {
     const opener = document.querySelector(`tr[data-load-id="${CSS.escape(id)}"]`);
-    window.__loadModal.open(load, { context: 'dispatch', opener });
+    if (typeof window.__loadModal.setLoadId === 'function') window.__loadModal.setLoadId(id);
+    window.__loadModal.open(id, { context: 'dispatch', opener });
   }
 }
 
@@ -129,26 +137,26 @@ function renderDetail() {
   const panel = document.getElementById('detail-panel');
   if (!panel) return;
   const id = state.selectedId;
-  const l = id && state.loads.find((x) => x.id === id);
+  const l = id && getLoad(id);
   if (!l) {
     panel.innerHTML = `<div class="muted">Select a load to see details.</div>`;
     return;
   }
-  const statusMeta = STATUS_LABEL[l.status] || { label: l.status, chip: 'neutral' };
+  const meta = statusMeta(l.status);
   panel.innerHTML = `
     <div class="row" style="justify-content: space-between;">
       <h2 data-agent-id="dispatch.detail.title">Load <span class="mono">${l.id}</span></h2>
-      <span class="chip chip--${statusMeta.chip}">${statusMeta.label}</span>
+      <span class="chip chip--${meta.chip}">${meta.label}</span>
     </div>
     <dl class="detail-kv" style="margin-top: var(--sp-3);">
       <dt>Pickup</dt><dd data-agent-id="dispatch.detail.pickup">${escapeHtml(l.pickup)}</dd>
       <dt>Dropoff</dt><dd data-agent-id="dispatch.detail.dropoff">${escapeHtml(l.dropoff)}</dd>
       <dt>Commodity</dt><dd data-agent-id="dispatch.detail.commodity">${escapeHtml(l.commodity)}</dd>
-      <dt>Weight</dt><dd class="mono">${(l.weight || 0).toLocaleString('en-US')} lb</dd>
-      <dt>Miles</dt><dd class="mono">${fmtMiles(l.miles)}</dd>
-      <dt>Rate</dt><dd class="mono" data-agent-id="dispatch.detail.rate">${fmtMoney(l.rate)}</dd>
+      <dt>Weight</dt><dd class="mono">${formatWeight(l.weight)}</dd>
+      <dt>Miles</dt><dd class="mono">${formatMiles(l.miles)}</dd>
+      <dt>Rate</dt><dd class="mono" data-agent-id="dispatch.detail.rate">${formatMoney(l.rate)}</dd>
       <dt>Carrier</dt><dd data-agent-id="dispatch.detail.carrier">${escapeHtml(l.carrier || 'Unassigned')}</dd>
-      <dt>ETA</dt><dd class="mono" data-agent-id="dispatch.detail.eta">${fmtEta(l.eta)}</dd>
+      <dt>ETA</dt><dd class="mono" data-agent-id="dispatch.detail.eta">${formatEta(l).niceAbsolute}</dd>
     </dl>
     <div class="detail-actions">
       <button class="btn btn--primary" data-agent-id="dispatch.detail.assign_carrier" id="detail-assign">Assign carrier</button>
@@ -159,34 +167,27 @@ function renderDetail() {
 
   const btn = document.getElementById('detail-assign');
   if (btn) btn.addEventListener('click', () => {
-    const avail = state.carriers.filter((c) => c.available);
+    const avail = currentCarriers().filter((c) => c.available);
     const pick = avail[0];
     if (!pick) { window.alert('No carriers available.'); return; }
-    assignCarrierLocal(l.id, pick.id);
+    assignCarrierLocal(l.id, pick.id, 'dispatch');
   });
 }
 
-function assignCarrierLocal(loadId, carrierId) {
-  const load = state.loads.find((x) => x.id === loadId);
-  const carrier = state.carriers.find((x) => x.id === carrierId);
-  if (!load) return { ok: false, error: 'Unknown load' };
-  if (!carrier) return { ok: false, error: 'Unknown carrier' };
-  load.carrier = carrier.name;
-  load.carrierId = carrier.id;
-  if (load.status === 'pending') load.status = 'booked';
-  renderTable();
-  renderDetail();
-  renderSummary();
-  renderHeroKpi();
-  renderActivityFeed();
-  return { ok: true, load };
+function assignCarrierLocal(loadId, carrierId, source = 'dispatch') {
+  try {
+    const { load } = assignCarrierToLoad(loadId, carrierId, { source });
+    return { ok: true, load };
+  } catch (err) {
+    return { ok: false, error: err && err.message || String(err) };
+  }
 }
 
 function renderMapCard() {
   const sub = document.getElementById('dispatch-map-sub');
   const ul = document.getElementById('dispatch-map-lanes');
   if (!ul) return;
-  const loads = Array.isArray(state.loads) ? state.loads : [];
+  const loads = currentLoads();
   const active = loads.filter((l) => l.status !== 'delivered');
   if (sub) {
     const delayed = loads.filter((l) => l.status === 'delayed').length;
@@ -245,8 +246,8 @@ function bindMapCard() {
 // the same numbers a sighted user does.
 
 function renderHeroKpi() {
-  const loads = state.loads || [];
-  const active = loads.filter((l) => l.status === 'in_transit' || l.status === 'booked').length;
+  const loads = currentLoads();
+  const active = loads.filter(isLoadInMotion).length;
   const milesInMotion = loads
     .filter((l) => l.status === 'in_transit')
     .reduce((acc, l) => acc + (l.miles || 0), 0);
@@ -260,7 +261,7 @@ function renderHeroKpi() {
   };
   setText('hero-kpi-active', active.toLocaleString('en-US'));
   setText('hero-kpi-miles', milesInMotion.toLocaleString('en-US'));
-  setText('hero-kpi-rev', '$' + bookedToday.toLocaleString('en-US'));
+  setText('hero-kpi-rev', formatMoney(bookedToday));
 
   const ts = document.getElementById('dispatch-hero-ts') ||
              document.querySelector('[data-agent-id="dispatch.hero.timestamp"]');
@@ -273,7 +274,7 @@ function renderHeroKpi() {
 function renderActivityFeed() {
   const ul = document.getElementById('activity-feed');
   if (!ul) return;
-  const loads = state.loads || [];
+  const loads = currentLoads();
   // Build the initial event stream once per page mount, then mutate it
   // in-place via tickActivityFeed() so the agent's `get_activity_feed`
   // tool can read a stable, growing list.
@@ -281,15 +282,15 @@ function renderActivityFeed() {
     const events = [];
     loads.forEach((l) => {
       if (l.status === 'in_transit') {
-        events.push({ kind: 'transit', when: l.eta ? new Date(l.eta).getTime() - 1000 * 60 * 60 * 6 : Date.now(), load: l });
+        events.push({ kind: 'transit', when: l.eta ? new Date(l.eta).getTime() - 1000 * 60 * 60 * 6 : Date.now(), loadId: l.id });
       } else if (l.status === 'delayed') {
-        events.push({ kind: 'delayed', when: Date.now() - Math.random() * 1000 * 60 * 90, load: l });
+        events.push({ kind: 'delayed', when: Date.now() - Math.random() * 1000 * 60 * 90, loadId: l.id });
       } else if (l.status === 'booked') {
-        events.push({ kind: 'booked', when: Date.now() - Math.random() * 1000 * 60 * 240, load: l });
+        events.push({ kind: 'booked', when: Date.now() - Math.random() * 1000 * 60 * 240, loadId: l.id });
       } else if (l.status === 'delivered') {
-        events.push({ kind: 'delivered', when: Date.now() - Math.random() * 1000 * 60 * 60 * 18, load: l });
+        events.push({ kind: 'delivered', when: Date.now() - Math.random() * 1000 * 60 * 60 * 18, loadId: l.id });
       } else if (l.status === 'pending') {
-        events.push({ kind: 'pending', when: Date.now() - Math.random() * 1000 * 60 * 30, load: l });
+        events.push({ kind: 'pending', when: Date.now() - Math.random() * 1000 * 60 * 30, loadId: l.id });
       }
     });
     events.sort((a, b) => b.when - a.when);
@@ -325,27 +326,29 @@ function paintActivityFeed() {
   };
   ul.replaceChildren();
   state._activityEvents.slice(0, 12).forEach((ev) => {
+    const load = getLoad(ev.loadId);
+    if (!load) return;
     const meta = labels[ev.kind] || labels.pending;
     const li = document.createElement('li');
     li.className = 'activity-item';
-    li.setAttribute('data-agent-id', `dispatch.activity.${ev.load.id}`);
+    li.setAttribute('data-agent-id', `dispatch.activity.${load.id}`);
     li.setAttribute('data-event', ev.kind);
     li.innerHTML = `
       <span class="activity-dot chip--${meta.dot}" aria-hidden="true"></span>
       <div class="activity-body">
         <div class="activity-line">
           <strong>${escapeHtml(meta.text)}</strong>
-          <span class="mono">${escapeHtml(ev.load.id)}</span>
-          <span class="muted">${escapeHtml(ev.load.pickup)} &rarr; ${escapeHtml(ev.load.dropoff)}</span>
+          <span class="mono">${escapeHtml(load.id)}</span>
+          <span class="muted">${escapeHtml(load.pickup)} &rarr; ${escapeHtml(load.dropoff)}</span>
         </div>
         <div class="activity-meta muted">
-          ${escapeHtml(ev.load.carrier || 'Unassigned')} &middot;
-          ${ev.load.rate ? '$' + ev.load.rate.toLocaleString('en-US') : '—'} &middot;
+          ${escapeHtml(load.carrier || 'Unassigned')} &middot;
+          ${formatMoney(load.rate)} &middot;
           <time datetime="${new Date(ev.when).toISOString()}" data-rel-time="${ev.when}">${escapeHtml(relTimeText(ev.when))}</time>
         </div>
       </div>
     `;
-    li.addEventListener('click', () => selectLoad(ev.load.id));
+    li.addEventListener('click', () => selectLoad(load.id));
     ul.appendChild(li);
   });
 }
@@ -366,16 +369,26 @@ function tickActivityRelTimes() {
 // available loads/carriers — no randomness so reload stays stable.
 function tickActivityInjector() {
   if (!state || !Array.isArray(state._activityEvents)) return;
-  const loads = state.loads || [];
+  const loads = currentLoads();
   if (!loads.length) return;
   const pool = ['transit', 'booked', 'quoted', 'countered', 'available', 'delayed'];
   const minute = Math.floor(Date.now() / 60000);
   const kind = pool[minute % pool.length];
   const load = loads[minute % loads.length];
-  state._activityEvents.unshift({ kind, when: Date.now(), load });
+  state._activityEvents.unshift({ kind, when: Date.now(), loadId: load.id });
   if (state._activityEvents.length > 24) state._activityEvents.length = 24;
   try { window.__activityFeed = state._activityEvents; } catch {}
   paintActivityFeed();
+}
+
+function refreshFromStore() {
+  if (!state) return;
+  renderSummary();
+  renderTable();
+  renderDetail();
+  renderMapCard();
+  renderHeroKpi();
+  renderActivityFeed();
 }
 
 function bindFilters() {
@@ -396,17 +409,9 @@ function escapeHtml(s) {
 
 // ---------- module lifecycle for the router ----------
 export async function enter(root, { voiceAgent }) {
-  state = { loads: [], carriers: [], filter: { q: '', status: 'all', lane: '' }, selectedId: null };
+  state = { filter: { q: '', status: 'all', lane: '' }, selectedId: null };
   agentRef = voiceAgent;
-  await loadData();
-
-  // Provide data to the load-modal singleton
-  if (window.__loadModal) {
-    window.__loadModalData = { carriers: state.carriers, loads: state.loads };
-    if (typeof window.__loadModal.setData === 'function') {
-      window.__loadModal.setData({ carriers: state.carriers, loads: state.loads });
-    }
-  }
+  await initDataStore();
 
   renderSummary();
   renderTable();
@@ -431,21 +436,24 @@ export async function enter(root, { voiceAgent }) {
         ok: true,
         events: list.slice(0, 12).map((ev) => ({
           kind: ev.kind,
-          load_id: ev.load && ev.load.id,
-          summary: `${ev.kind} on ${ev.load && ev.load.id} (${ev.load && ev.load.pickup} → ${ev.load && ev.load.dropoff})`,
+          load_id: ev.loadId,
+          summary: (() => {
+            const load = getLoad(ev.loadId);
+            return load ? `${ev.kind} on ${load.id} (${load.pickup} → ${load.dropoff})` : `${ev.kind} on ${ev.loadId}`;
+          })(),
           ago_text: relTimeText(ev.when),
           timestamp_iso: new Date(ev.when).toISOString()
         }))
       };
     });
     voiceAgent.toolRegistry.registerDomain('get_load', (args) => {
-      const l = state.loads.find((x) => x.id === String(args.load_id || '').trim());
+      const l = getLoad(String(args.load_id || '').trim());
       if (!l) return { ok: false, error: `No load ${args.load_id}` };
       selectLoad(l.id);
       return { ok: true, load: l };
     });
     voiceAgent.toolRegistry.registerDomain('assign_carrier', (args) => {
-      return assignCarrierLocal(args.load_id, args.carrier_id);
+      return assignCarrierLocal(args.load_id, args.carrier_id, 'agent');
     });
     voiceAgent.toolRegistry.registerDomain('submit_quote', () => ({
       ok: false, error: 'submit_quote is only available on the Rate Negotiation page.'
@@ -463,14 +471,18 @@ export async function enter(root, { voiceAgent }) {
   const onLoadAction = (e) => {
     const { action, loadId } = e.detail || {};
     if (action === 'assign' && loadId) {
-      const avail = state.carriers.filter((c) => c.available);
+      const avail = currentCarriers().filter((c) => c.available);
       const pick = avail[0];
       if (!pick) return;
-      assignCarrierLocal(loadId, pick.id);
+      assignCarrierLocal(loadId, pick.id, 'modal');
     }
   };
   window.addEventListener('load-action', onLoadAction);
   state._onLoadAction = onLoadAction;
+  state._unsubscribeStore = [
+    subscribe('load:updated', refreshFromStore),
+    subscribe('carrier:updated', refreshFromStore)
+  ];
 
   // Register per-page quick-action chips (best-effort — module is dynamic).
   import('./quick-chips.js').then((chips) => {
@@ -496,6 +508,9 @@ export function exit() {
   }
   if (state && state._onLoadAction) {
     window.removeEventListener('load-action', state._onLoadAction);
+  }
+  if (state && Array.isArray(state._unsubscribeStore)) {
+    state._unsubscribeStore.forEach((fn) => { try { fn(); } catch {} });
   }
   import('./quick-chips.js').then((chips) => chips.clearChips()).catch(() => {});
   state = null;

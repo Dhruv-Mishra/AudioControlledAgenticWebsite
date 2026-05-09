@@ -12,6 +12,7 @@
 
 import * as fsm from './negotiation-state.js';
 import { getSelection } from './page-state.js';
+import { assignCarrierToLoad, getLoad, initDataStore, listLoads, subscribe } from './data-store.js';
 
 let agentRef = null;
 let state = null;       // FSM state object
@@ -24,6 +25,7 @@ let unsubAccept = null;
 let unsubOffer = null;
 let unsubInput = null;
 let unsubKey = null;
+let unsubStore = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -237,10 +239,27 @@ function pickLoad(loads) {
   return loads.find((l) => l.status === 'pending') || loads[0];
 }
 
+function refreshLoadFields() {
+  if (!load) return;
+  const fresh = getLoad(load.id);
+  if (!fresh) return;
+  load = fresh;
+  const map = [
+    ['field-pickup', load.pickup],
+    ['field-dropoff', load.dropoff],
+    ['field-commodity', load.commodity],
+    ['field-weight', load.weight || '']
+  ];
+  map.forEach(([id, value]) => {
+    const el = $(id);
+    if (el) el.value = value == null ? '' : value;
+  });
+}
+
 export async function enter(root, { voiceAgent }) {
   agentRef = voiceAgent;
-  const loads = await fetch('/data/loads.json').then((r) => r.json());
-  load = pickLoad(loads);
+  await initDataStore();
+  load = pickLoad(listLoads());
   suggestedRate = Number(load && load.rate) || (load && load.miles ? Math.round(load.miles * 2.4 / 25) * 25 : 1850);
 
   state = (load && fsm.load(load.id)) || fsm.makeInitial(load && load.id, suggestedRate);
@@ -263,6 +282,10 @@ export async function enter(root, { voiceAgent }) {
     const sug = $('negotiate-suggested');
     if (sug) sug.textContent = `$${fmt(suggestedRate)}`;
   }
+  unsubStore = subscribe('load:updated', (detail) => {
+    if (!load) return;
+    if (!detail || detail.id == null || detail.id === load.id) refreshLoadFields();
+  });
 
   const form = $('negotiate-form');
   if (form) {
@@ -324,8 +347,15 @@ export async function enter(root, { voiceAgent }) {
       doSubmit('offer');
       return { ok: true, scheduled: true, target_rate: Number(args.target_rate) || null };
     });
-    voiceAgent.toolRegistry.registerDomain('get_load', () => ({ ok: true, load }));
-    voiceAgent.toolRegistry.registerDomain('assign_carrier', () => ({ ok: false, error: 'Carrier assignment is on the Dispatch page.' }));
+    voiceAgent.toolRegistry.registerDomain('get_load', () => ({ ok: true, load: load ? getLoad(load.id) || load : null }));
+    voiceAgent.toolRegistry.registerDomain('assign_carrier', (args) => {
+      try {
+        const result = assignCarrierToLoad(args.load_id, args.carrier_id, { source: 'agent' });
+        return { ok: true, load: result.load, carrier: result.carrier };
+      } catch (err) {
+        return { ok: false, error: err && err.message || String(err) };
+      }
+    });
     voiceAgent.toolRegistry.registerDomain('schedule_callback', () => ({ ok: false, error: 'schedule_callback is on the Contact page.' }));
   }
 
@@ -349,7 +379,9 @@ export async function enter(root, { voiceAgent }) {
 export function exit() {
   if (inflight) { try { inflight.controller.abort(); } catch {} inflight = null; }
   [unsubAccept, unsubOffer, unsubInput, unsubKey].forEach((fn) => { try { fn && fn(); } catch {} });
+  try { unsubStore && unsubStore(); } catch {}
   unsubAccept = unsubOffer = unsubInput = unsubKey = null;
+  unsubStore = null;
   if (agentRef && agentRef.toolRegistry && typeof agentRef.toolRegistry.unregisterDomain === 'function') {
     ['submit_quote', 'get_load', 'assign_carrier', 'schedule_callback'].forEach((n) => agentRef.toolRegistry.unregisterDomain(n));
   }

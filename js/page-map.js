@@ -1,27 +1,27 @@
 // /map.html page module — exports { enter, exit } for the SPA router.
 // Dynamic-imports the Leaflet wrapper so the map chunk never enters the
-// main bundle. Data is loaded from the existing JSON fixtures; we do NOT
-// mutate them (coordinates live in js/map-widget.js CITY_COORDS).
+// main bundle. Freight records come from the client-side data store;
+// coordinates live in js/map-widget.js CITY_COORDS.
+
+import { initDataStore, listCarriers, listLoads, subscribe } from './data-store.js';
 
 let instance = null;
 let agentRef = null;
+let unsubscribeStore = [];
 
 async function loadData() {
   try {
-    const [loads, carriers] = await Promise.all([
-      fetch('/data/loads.json').then((r) => {
-        if (!r.ok) throw new Error(`loads.json → ${r.status}`);
-        return r.json();
-      }),
-      fetch('/data/carriers.json').then((r) => {
-        if (!r.ok) throw new Error(`carriers.json → ${r.status}`);
-        return r.json();
-      })
-    ]);
-    return { loads, carriers };
+    await initDataStore();
+    return { loads: listLoads(), carriers: listCarriers() };
   } catch (err) {
     throw new Error('Could not load map data: ' + (err && err.message || err));
   }
+}
+
+function refreshMapFromStore() {
+  const api = instance && instance.api;
+  if (!api || typeof api.updateData !== 'function') return;
+  api.updateData({ loads: listLoads(), carriers: listCarriers() });
 }
 
 function renderErrorBanner(root, message) {
@@ -76,7 +76,7 @@ export async function enter(root, { voiceAgent }) {
       const { mountOverlay } = await import('./map-overlay.js');
       const widgetApi = instance && instance.api;
       if (widgetApi) {
-        const destroyOverlay = mountOverlay({ widgetApi, root: mapRoot, loads: data.loads, carriers: data.carriers });
+        const destroyOverlay = mountOverlay({ widgetApi, root: mapRoot, getLoads: listLoads, getCarriers: listCarriers });
         if (instance && typeof destroyOverlay === 'function') {
           const origDestroy = instance.destroy;
           instance.destroy = () => {
@@ -88,6 +88,10 @@ export async function enter(root, { voiceAgent }) {
     } catch (overlayErr) {
       console.warn('[page-map] overlay mount failed (non-fatal)', overlayErr);
     }
+    unsubscribeStore = [
+      subscribe('load:updated', refreshMapFromStore),
+      subscribe('carrier:updated', refreshMapFromStore)
+    ];
   } catch (err) {
     console.error('[page-map] createMap failed', err);
     renderErrorBanner(mapRoot, 'Map failed to mount: ' + (err && err.message || err));
@@ -97,6 +101,8 @@ export async function enter(root, { voiceAgent }) {
 }
 
 export function exit() {
+  unsubscribeStore.forEach((fn) => { try { fn(); } catch {} });
+  unsubscribeStore = [];
   // Destroy happens even if createMap threw — instance may be {api, destroy}
   // or just a partial object. Be defensive.
   if (instance && typeof instance.destroy === 'function') {

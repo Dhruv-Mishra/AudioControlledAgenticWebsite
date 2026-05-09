@@ -5,6 +5,16 @@
 // matching data-agent-id. No `eval`, no arbitrary CSS selectors. Every tool
 // that touches inputs emits native events so the page's own listeners react.
 
+import {
+  assignCarrierToLoad,
+  getLoad,
+  initDataStore,
+  isReady,
+  listCarriers,
+  listLoads
+} from './data-store.js';
+import { isLoadInMotion } from './formatters.js';
+
 const VALID_PATHS = new Set(['/', '/index.html', '/carriers.html', '/negotiate.html', '/contact.html', '/map.html']);
 
 function textOf(el) {
@@ -566,6 +576,52 @@ export class ToolRegistry {
           document.querySelector('.carrier-panel.is-open');
         return { closed: !anyOpen };
       }
+      case 'get_load': {
+        const handler = this.domainHandlers.get(name);
+        if (handler) return await handler(args);
+        await initDataStore();
+        const id = String(args.load_id || args.id || '').trim();
+        const load = getLoad(id);
+        if (!load) return { ok: false, error: `No load ${id || args.load_id}` };
+        return { ok: true, load };
+      }
+      case 'assign_carrier': {
+        const handler = this.domainHandlers.get(name);
+        if (handler) return await handler(args);
+        await initDataStore();
+        try {
+          const result = assignCarrierToLoad(args.load_id, args.carrier_id, { source: 'agent' });
+          return { ok: true, load: result.load, carrier: result.carrier };
+        } catch (err) {
+          return { ok: false, error: err && err.message || String(err) };
+        }
+      }
+      case 'filter_loads': {
+        const handler = this.domainHandlers.get(name);
+        if (handler) return await handler(args);
+        return applyDispatchFilters(args || {});
+      }
+      case 'filter_carriers': {
+        const handler = this.domainHandlers.get(name);
+        if (handler) return await handler(args);
+        return applyCarrierFilters(args || {});
+      }
+      case 'get_live_state': {
+        const handler = this.domainHandlers.get(name);
+        if (handler) return await handler(args);
+        await initDataStore();
+        const loadRows = listLoads();
+        const carriersOnline = listCarriers({ available: true }).length;
+        const bookedToday = loadRows
+          .filter((load) => load.status === 'booked' || load.status === 'in_transit')
+          .reduce((acc, load) => acc + (load.rate || 0), 0);
+        return {
+          now_iso: new Date().toISOString(),
+          loads_in_motion: loadRows.filter(isLoadInMotion).length,
+          carriers_online: carriersOnline,
+          revenue_booked_today_usd: bookedToday
+        };
+      }
       default: {
         const handler = this.domainHandlers.get(name);
         if (handler) return await handler(args);
@@ -614,7 +670,24 @@ export function applyDispatchFilters({ status, lane_contains, carrier_contains, 
   if (Number.isFinite(Number(min_miles))) changes.min_miles = Number(min_miles);
   if (Number.isFinite(Number(max_miles))) changes.max_miles = Number(max_miles);
   syncUrlFilters('dispatch', { status, lane_contains, carrier_contains, min_miles, max_miles });
-  return { ok: true, applied: changes };
+  const result = { ok: true, applied: changes };
+  if (isReady()) {
+    result.count = listLoads({
+      status: typeof status === 'string' && status && status !== 'all' ? status : undefined,
+      search: carrier_contains,
+      predicate: (load) => {
+        if (typeof lane_contains === 'string' && lane_contains) {
+          const lane = `${load.pickup || ''} ${load.dropoff || ''}`.toLowerCase();
+          if (!lane.includes(lane_contains.toLowerCase())) return false;
+        }
+        const miles = Number(load.miles);
+        if (Number.isFinite(Number(min_miles)) && miles < Number(min_miles)) return false;
+        if (Number.isFinite(Number(max_miles)) && miles > Number(max_miles)) return false;
+        return true;
+      }
+    }).length;
+  }
+  return result;
 }
 
 /** Drive the carriers-page filter inputs. */
@@ -642,7 +715,20 @@ export function applyCarrierFilters({ equipment, available, search }) {
     changes.search = search;
   }
   syncUrlFilters('carriers', { equipment, available, search });
-  return { ok: true, applied: changes };
+  const result = { ok: true, applied: changes };
+  if (isReady()) {
+    result.count = listCarriers({
+      available: available === 'yes' ? true : available === 'no' ? false : undefined,
+      search,
+      predicate: (carrier) => {
+        if (typeof equipment === 'string' && equipment && equipment !== 'all') {
+          return carrier.equipment.map((item) => item.toLowerCase()).includes(equipment.toLowerCase());
+        }
+        return true;
+      }
+    }).length;
+  }
+  return result;
 }
 
 function syncUrlFilters(domain, params) {

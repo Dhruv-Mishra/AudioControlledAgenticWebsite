@@ -8,6 +8,14 @@
 //     Promise so agent tool handlers can `await` it before calling the
 //     widget. No document-event bridge.
 
+import {
+  formatCarrierAvailability,
+  formatEta,
+  formatLoadStatus,
+  formatMiles,
+  formatMoney
+} from './formatters.js';
+
 const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 // For a production deploy with real traffic, swap to Stadia's free tier
 // by setting STADIA_API_KEY in .env and using:
@@ -147,25 +155,6 @@ function escapeHtml(s) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[ch]));
 }
-
-function fmtMiles(n) { return n == null ? '—' : `${Number(n).toLocaleString('en-US')} mi`; }
-function fmtMoney(n) { return n == null ? '—' : `$${Number(n).toLocaleString('en-US')}`; }
-
-function fmtEta(iso) {
-  if (!iso) return '—';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  } catch { return '—'; }
-}
-
-const STATUS_LABEL = {
-  in_transit: 'In transit',
-  booked: 'Booked',
-  pending: 'Pending',
-  delayed: 'Delayed',
-  delivered: 'Delivered'
-};
 
 function statusChipClass(status) {
   switch (status) {
@@ -626,7 +615,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       head.textContent = carrier.name;
       const sub = document.createElement('div');
       sub.className = 'map-popup-sub';
-      sub.textContent = `${carrier.mc || ''} · ${city || ''} · ${carrier.available ? 'Available' : 'Assigned'}`;
+      sub.textContent = `${carrier.mc || ''} · ${city || ''} · ${formatCarrierAvailability(carrier).label}`;
       wrap.appendChild(head);
       wrap.appendChild(sub);
       return wrap;
@@ -665,7 +654,13 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
             dotColor: colorForStatus(l.status),
             label: `${l.id}`,
             meta: `${l.pickup || '?'} → ${l.dropoff || '?'}`,
-            onClick: () => { focusLoadInternal(l.id); if (window.__loadModal) window.__loadModal.open(l, { context: 'map' }); }
+            onClick: () => {
+              focusLoadInternal(l.id);
+              if (window.__loadModal) {
+                if (typeof window.__loadModal.setLoadId === 'function') window.__loadModal.setLoadId(l.id);
+                window.__loadModal.open(l.id, { context: 'map' });
+              }
+            }
           });
         });
       }
@@ -715,14 +710,19 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
         li.textContent = `${l.id} — ${l.pickup || '?'} → ${l.dropoff || '?'}`;
         const meta = document.createElement('div');
         meta.className = 'meta';
-        meta.textContent = `${STATUS_LABEL[l.status] || l.status} · ${fmtMiles(l.miles)} · ETA ${fmtEta(l.eta)}`;
+        meta.textContent = `${formatLoadStatus(l.status).label} · ${formatMiles(l.miles)} · ETA ${formatEta(l).niceAbsolute}`;
         li.appendChild(meta);
         li.setAttribute('role', 'button');
         li.setAttribute('tabindex', '0');
         li.setAttribute('aria-label', `Load ${l.id}, ${l.pickup || ''} to ${l.dropoff || ''}`);
         const openLoad = () => {
           focusLoadInternal(l.id);
-          if (window.__loadModal) { try { window.__loadModal.open(l, { context: 'map' }); } catch {} }
+          if (window.__loadModal) {
+            try {
+              if (typeof window.__loadModal.setLoadId === 'function') window.__loadModal.setLoadId(l.id);
+              window.__loadModal.open(l.id, { context: 'map' });
+            } catch {}
+          }
         };
         li.addEventListener('click', openLoad);
         li.addEventListener('keydown', (ev) => {
@@ -736,7 +736,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
         li.textContent = `${c.name} (${c.id})`;
         const meta = document.createElement('div');
         meta.className = 'meta';
-        meta.textContent = `${hq ? hq.city : 'Unknown HQ'} · ${c.available ? 'Available' : 'Assigned'}`;
+        meta.textContent = `${hq ? hq.city : 'Unknown HQ'} · ${formatCarrierAvailability(c).label}`;
         li.appendChild(meta);
         listViewItems.appendChild(li);
       });
@@ -814,7 +814,8 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       try { api._setLoadEmphasis && api._setLoadEmphasis(load.id); } catch {}
       if (window.__loadModal) {
         closeCarrierPanel();
-        window.__loadModal.open(load, { context: 'map', opener });
+        if (typeof window.__loadModal.setLoadId === 'function') window.__loadModal.setLoadId(load.id);
+        window.__loadModal.open(load.id, { context: 'map', opener });
         return;
       }
       // Fallback: old detail panel
@@ -823,14 +824,14 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       const dl = document.createElement('dl');
       dl.className = 'detail-kv';
       const kv = [
-        ['Status', STATUS_LABEL[load.status] || load.status],
+        ['Status', formatLoadStatus(load.status).label],
         ['Pickup', load.pickup || '—'],
         ['Dropoff', load.dropoff || '—'],
         ['Carrier', load.carrier || 'Unassigned'],
         ['Commodity', load.commodity || '—'],
-        ['Miles', fmtMiles(load.miles)],
-        ['Rate', fmtMoney(load.rate)],
-        ['ETA', fmtEta(load.eta)]
+        ['Miles', formatMiles(load.miles)],
+        ['Rate', formatMoney(load.rate)],
+        ['ETA', formatEta(load).niceAbsolute]
       ];
       kv.forEach(([k, v]) => {
         const dt = document.createElement('dt'); dt.textContent = k;
@@ -1221,7 +1222,10 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       const entry = registry.get(loadId);
       announceFocus(`load ${loadId}`);
       if (window.__loadModal && entry.record) {
-        try { window.__loadModal.open(entry.record, { context: 'map' }); } catch {}
+        try {
+          if (typeof window.__loadModal.setLoadId === 'function') window.__loadModal.setLoadId(loadId);
+          window.__loadModal.open(loadId, { context: 'map' });
+        } catch {}
       }
       return {
         load_id: loadId,
@@ -1276,6 +1280,94 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       });
     }
 
+    function replaceRecords(target, nextRows) {
+      const rows = Array.isArray(nextRows) ? nextRows.slice() : [];
+      target.splice(0, target.length, ...rows);
+    }
+
+    function removePinStatusClasses(pin) {
+      if (!pin || !pin.classList) return;
+      Array.from(pin.classList).forEach((name) => {
+        if (name.indexOf('map-pin--') === 0) pin.classList.remove(name);
+      });
+    }
+
+    function setMarkerLoadStatus(marker, status) {
+      const rootEl = marker && marker.getElement && marker.getElement();
+      const pin = rootEl && rootEl.querySelector('.map-pin');
+      if (!pin) return;
+      removePinStatusClasses(pin);
+      pin.classList.add(`map-pin--${status || 'booked'}`);
+    }
+
+    function syncLoadEntry(load) {
+      const entry = registry.get(load.id);
+      if (!entry || entry.kind !== 'load') {
+        addLoadMarker(load);
+        return;
+      }
+      entry.record = load;
+      [entry.pickup, entry.dropoff].forEach((marker) => setMarkerLoadStatus(marker, load.status));
+      if (entry.lane) {
+        const pending = !load.carrier || load.status === 'pending';
+        try {
+          const path = entry.lane._path;
+          if (path) path.classList.toggle('map-lane--pending', pending);
+        } catch {}
+      }
+    }
+
+    function syncCarrierEntry(carrier) {
+      const entry = registry.get(carrier.id);
+      if (!entry || entry.kind !== 'carrier') {
+        addCarrierMarker(carrier);
+        return;
+      }
+      entry.record = carrier;
+      const rootEl = entry.marker && entry.marker.getElement && entry.marker.getElement();
+      const pin = rootEl && rootEl.querySelector('.map-pin');
+      if (pin) {
+        removePinStatusClasses(pin);
+        pin.classList.add(carrier.status ? `map-pin--${carrier.status}` : 'map-pin--carrier');
+        pin.style.transform = `rotate(${typeof carrier.heading === 'number' ? carrier.heading : 0}deg)`;
+        pin.setAttribute('aria-label', `Carrier ${carrier.name || carrier.id}`);
+      }
+      const hq = CARRIER_HQ[carrier.id];
+      try { entry.marker.setPopupContent(buildCarrierPopup(carrier, hq && hq.city)); } catch {}
+    }
+
+    function removeMissingRecords(kind, keepIds) {
+      Array.from(registry.entries()).forEach(([id, entry]) => {
+        if (!entry || entry.kind !== kind || keepIds.has(id)) return;
+        if (kind === 'load') {
+          [entry.pickup, entry.dropoff].forEach((marker) => {
+            try { if (marker) loadLayer.removeLayer(marker); } catch {}
+          });
+          try { if (entry.lane) laneLayer.removeLayer(entry.lane); } catch {}
+        } else if (kind === 'carrier') {
+          try { if (entry.marker) carrierLayer.removeLayer(entry.marker); } catch {}
+        }
+        registry.delete(id);
+      });
+    }
+
+    function refreshData(nextData) {
+      replaceRecords(loads, nextData && nextData.loads);
+      replaceRecords(carriers, nextData && nextData.carriers);
+
+      const loadIds = new Set(loads.map((load) => load.id));
+      const carrierIds = new Set(carriers.map((carrier) => carrier.id));
+      removeMissingRecords('load', loadIds);
+      removeMissingRecords('carrier', carrierIds);
+      loads.forEach(syncLoadEntry);
+      carriers.forEach(syncCarrierEntry);
+      applyDelayedFilter();
+      renderFilterListImmediate();
+      renderListView();
+      updateEmptyState();
+      return { loads: loads.length, carriers: carriers.length };
+    }
+
     function updateEmptyState() {
       if (!emptyStateEl) return;
       const anyVisible =
@@ -1290,13 +1382,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     renderFilterListImmediate();
     renderListView();
 
-    // Wire load-modal data + listen for modal:open to close carrier panel
-    if (window.__loadModal) {
-      window.__loadModalData = { carriers, loads };
-      if (typeof window.__loadModal.setData === 'function') {
-        window.__loadModal.setData({ carriers, loads });
-      }
-    }
+    // Listen for modal:open to close carrier panel.
     function onModalOpen(ev) {
       if (ev.detail && ev.detail.kind === 'load') closeCarrierPanel();
     }
@@ -1552,6 +1638,12 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
         );
       }
       return envelopeOk(r);
+    };
+
+    api.updateData = function updateData(nextData) {
+      if (destroyed) return envelopeErr('destroyed', 'Map has been torn down.');
+      if (!readySettled) return envelopeErr('not_ready', 'Map not mounted yet.');
+      return envelopeOk(refreshData(nextData || {}));
     };
 
     api.getViewState = function getViewState() {

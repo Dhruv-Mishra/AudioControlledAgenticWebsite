@@ -4,6 +4,9 @@
 // alive but never reset on refresh. Numbers drift slowly; the clock
 // ticks every second.
 
+import { initDataStore, listLoads, subscribe } from './data-store.js';
+import { isLoadInMotion } from './formatters.js';
+
 const liveState = {
   // last computed snapshot — refreshed every tick.
   now: new Date(),
@@ -16,7 +19,8 @@ const liveState = {
 let started = false;
 let tickHandle = null;
 let listeners = new Set();
-let loadsRef = [];
+let unsubscribeStore = null;
+let resolveHost = () => null;
 
 function pad2(n) { return String(n).padStart(2, '0'); }
 
@@ -37,13 +41,23 @@ function recompute() {
   const d = new Date();
   liveState.now = d;
   liveState.clock = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-  const inMotion = loadsRef.filter((l) => l.status === 'in_transit' || l.status === 'delayed').length;
+  const inMotion = listLoads().filter(isLoadInMotion).length;
   liveState.loadsInMotion = inMotion || deterministicCount('loadsInMotion', 18, 4);
   liveState.carriersOnline = deterministicCount('carriersOnline', 31, 5);
   // Booked today varies through the day, max around 5pm local.
   const dayFrac = (d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds()) / 86400;
   const curve = Math.min(1, dayFrac * 1.4);
   liveState.bookedToday = Math.round(48000 * curve + deterministicCount('booked', 800, 600));
+}
+
+function publish() {
+  recompute();
+  const host = resolveHost();
+  if (host) {
+    if (!host.children.length) render(host);
+    else patch(host);
+  }
+  listeners.forEach((fn) => { try { fn(getLiveState()); } catch {} });
 }
 
 function render(host) {
@@ -82,10 +96,7 @@ export function getLiveState() {
 export function startLiveUi() {
   if (started) return;
   started = true;
-  // Loads dataset for grounding the in-motion count.
-  fetch('/data/loads.json').then((r) => r.json()).then((rows) => {
-    loadsRef = Array.isArray(rows) ? rows : [];
-  }).catch(() => {});
+  try { initDataStore().then(publish).catch(() => {}); } catch {}
 
   // Inject the host element into the header right-rail (created by ui.js).
   // Falls back to creating our own anchor on .app-header if the right-rail
@@ -112,19 +123,15 @@ export function startLiveUi() {
     }
     return host;
   };
+  resolveHost = ensureHost;
 
   recompute();
   const host = ensureHost();
   if (host) render(host);
+  unsubscribeStore = subscribe('load:updated', publish);
 
   tickHandle = setInterval(() => {
-    recompute();
-    const h = ensureHost();
-    if (h) {
-      if (!h.children.length) render(h);
-      else patch(h);
-    }
-    listeners.forEach((fn) => { try { fn(getLiveState()); } catch {} });
+    publish();
   }, 1000);
 
   // Re-mount on SPA route changes in case anything clobbers the header.

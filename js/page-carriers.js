@@ -1,6 +1,8 @@
 // Carrier Directory page module — exports { enter, exit } for the SPA router.
 
 import { restoreFiltersFromUrl } from './tool-registry.js';
+import { assignCarrierToLoad, getLoad, initDataStore, listCarriers, subscribe } from './data-store.js';
+import { formatCarrierAvailability } from './formatters.js';
 
 let state = null;
 let agentRef = null;
@@ -11,24 +13,24 @@ function escapeHtml(s) {
   }[ch]));
 }
 
-async function loadData() {
-  state.carriers = await fetch('/data/carriers.json').then((r) => r.json());
+function chipForTone(tone) {
+  if (tone === 'success') return 'ok';
+  if (tone === 'danger') return 'danger';
+  if (tone === 'warn') return 'warn';
+  if (tone === 'info') return 'info';
+  return 'neutral';
 }
 
 function filtered() {
   const { q, eq, available } = state.filter;
   const qq = (q || '').trim().toLowerCase();
-  return state.carriers.filter((c) => {
-    if (available !== 'all') {
-      const want = available === 'yes';
-      if (c.available !== want) return false;
+  return listCarriers({
+    available: available !== 'all' ? available === 'yes' : undefined,
+    search: qq,
+    predicate: (c) => {
+      if (eq !== 'all' && !c.equipment.map((e) => e.toLowerCase()).includes(eq)) return false;
+      return true;
     }
-    if (eq !== 'all' && !c.equipment.map((e) => e.toLowerCase()).includes(eq)) return false;
-    if (qq) {
-      const hay = `${c.name} ${c.id} ${c.mc} ${c.lanes.join(' ')}`.toLowerCase();
-      if (!hay.includes(qq)) return false;
-    }
-    return true;
   });
 }
 
@@ -42,6 +44,7 @@ function renderGrid() {
     return;
   }
   rows.forEach((c) => {
+    const availability = formatCarrierAvailability(c);
     const card = document.createElement('article');
     card.className = 'carrier-card';
     card.setAttribute('data-agent-id', `carriers.card.${c.id}`);
@@ -63,7 +66,7 @@ function renderGrid() {
       <div class="carrier-card-body">
         <div class="row" style="justify-content: space-between;">
           <div class="name">${escapeHtml(c.name)}</div>
-          <span class="chip chip--${c.available ? 'ok' : 'neutral'}">${c.available ? 'Available' : 'Unavailable'}</span>
+          <span class="chip chip--${chipForTone(availability.tone)}">${availability.label}</span>
         </div>
         <div class="meta"><span class="mono">${c.id}</span> · ${escapeHtml(c.mc)} · <span class="hero-numeral carrier-rating">${c.rating.toFixed(1)}</span><span class="muted"> ★</span></div>
         <div class="meta">Lanes: ${c.lanes.map(escapeHtml).join(', ')}</div>
@@ -90,9 +93,9 @@ function bindFilters() {
 }
 
 export async function enter(root, { voiceAgent }) {
-  state = { carriers: [], filter: { q: '', eq: 'all', available: 'all' } };
+  state = { filter: { q: '', eq: 'all', available: 'all' } };
   agentRef = voiceAgent;
-  await loadData();
+  await initDataStore();
 
   // Pre-filter from URL: ?eq=dry+van etc. Lets the equipment tiles on
   // the dispatch homepage and the in-page quick-filter strip act as
@@ -113,14 +116,21 @@ export async function enter(root, { voiceAgent }) {
 
   renderGrid();
   bindFilters();
+  state._unsubscribeStore = subscribe('carrier:updated', () => { if (state) renderGrid(); });
 
   if (voiceAgent && voiceAgent.toolRegistry) {
-    voiceAgent.toolRegistry.registerDomain('get_load', () => ({
-      ok: false, error: 'Load lookup is only on the Dispatch page. Navigate there first.'
-    }));
-    voiceAgent.toolRegistry.registerDomain('assign_carrier', () => ({
-      ok: false, error: 'Navigate to the Dispatch page to assign a carrier to a load.'
-    }));
+    voiceAgent.toolRegistry.registerDomain('get_load', (args) => {
+      const load = getLoad(String(args.load_id || args.id || '').trim());
+      return load ? { ok: true, load } : { ok: false, error: `No load ${args.load_id || args.id}` };
+    });
+    voiceAgent.toolRegistry.registerDomain('assign_carrier', (args) => {
+      try {
+        const result = assignCarrierToLoad(args.load_id, args.carrier_id, { source: 'agent' });
+        return { ok: true, load: result.load, carrier: result.carrier };
+      } catch (err) {
+        return { ok: false, error: err && err.message || String(err) };
+      }
+    });
     voiceAgent.toolRegistry.registerDomain('submit_quote', () => ({
       ok: false, error: 'Submit quotes from the Rate Negotiation page.'
     }));
@@ -146,6 +156,9 @@ export function exit() {
     agentRef.toolRegistry.unregisterDomain('assign_carrier');
     agentRef.toolRegistry.unregisterDomain('submit_quote');
     agentRef.toolRegistry.unregisterDomain('schedule_callback');
+  }
+  if (state && state._unsubscribeStore) {
+    try { state._unsubscribeStore(); } catch {}
   }
   import('./quick-chips.js').then((chips) => chips.clearChips()).catch(() => {});
   state = null;
