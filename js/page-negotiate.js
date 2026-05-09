@@ -20,6 +20,8 @@ let load = null;        // selected load
 let suggestedRate = 0;
 let lastSubmitAt = 0;
 const THROTTLE_MS = 1500;
+const OFFER_TOLERANCE = 0.25;
+const OFFER_TOLERANCE_PCT = 25;
 let inflight = null;    // { id, controller }
 let unsubAccept = null;
 let unsubOffer = null;
@@ -48,6 +50,39 @@ function setHint(msg, kind) {
 }
 
 function fmt(n) { return Number(n || 0).toLocaleString('en-US'); }
+
+function getSuggestedRate() {
+  const stateRate = Number(state && state.suggestedRate);
+  if (Number.isFinite(stateRate) && stateRate > 0) return stateRate;
+  const loadRate = Number(load && load.rate);
+  if (Number.isFinite(loadRate) && loadRate > 0) return loadRate;
+  const fallbackRate = Number(suggestedRate);
+  return Number.isFinite(fallbackRate) && fallbackRate > 0 ? fallbackRate : null;
+}
+
+function getAcceptedBand(rate) {
+  const numericRate = Number(rate);
+  if (!Number.isFinite(numericRate) || numericRate <= 0) {
+    return { accepted_min: null, accepted_max: null };
+  }
+  return {
+    accepted_min: Math.round(numericRate * (1 - OFFER_TOLERANCE)),
+    accepted_max: Math.round(numericRate * (1 + OFFER_TOLERANCE))
+  };
+}
+
+function getNegotiationContext() {
+  const currentSuggestedRate = getSuggestedRate();
+  const history = state && Array.isArray(state.history) ? state.history : [];
+  return {
+    load_id: (state && state.loadId) || (load && load.id) || null,
+    suggested_rate: currentSuggestedRate,
+    ...getAcceptedBand(currentSuggestedRate),
+    tolerance_pct: OFFER_TOLERANCE_PCT,
+    last_offer: state && state.latestOffer ? state.latestOffer : null,
+    history_count: history.length
+  };
+}
 
 function renderHistory() {
   const el = $('negotiate-history');
@@ -342,11 +377,33 @@ export async function enter(root, { voiceAgent }) {
 
   if (voiceAgent && voiceAgent.toolRegistry) {
     voiceAgent.toolRegistry.registerDomain('submit_quote', (args) => {
+      const context = getNegotiationContext();
+      const validation = fsm.validateOffer(args && args.target_rate, context.suggested_rate);
+      if (!validation.ok) {
+        setHint(validation.error, 'warn');
+        const err = new Error(validation.error);
+        err.code = 'OFFER_OUT_OF_BAND';
+        err.recovery = {
+          suggested_rate: context.suggested_rate,
+          accepted_min: context.accepted_min,
+          accepted_max: context.accepted_max,
+          tolerance_pct: OFFER_TOLERANCE_PCT
+        };
+        throw err;
+      }
       const draft = $('field-target-rate');
-      if (draft) { draft.value = String(Math.round(Number(args.target_rate) || 0)); draft.dispatchEvent(new Event('input', { bubbles: true })); }
-      doSubmit('offer');
-      return { ok: true, scheduled: true, target_rate: Number(args.target_rate) || null };
+      if (draft) { draft.value = String(validation.value); draft.dispatchEvent(new Event('input', { bubbles: true })); }
+      void doSubmit('offer');
+      return {
+        ok: true,
+        scheduled: true,
+        target_rate: validation.value,
+        suggested_rate: context.suggested_rate,
+        accepted_min: context.accepted_min,
+        accepted_max: context.accepted_max
+      };
     });
+    voiceAgent.toolRegistry.registerDomain('get_negotiation_context', () => getNegotiationContext());
     voiceAgent.toolRegistry.registerDomain('get_load', () => ({ ok: true, load: load ? getLoad(load.id) || load : null }));
     voiceAgent.toolRegistry.registerDomain('assign_carrier', (args) => {
       try {
@@ -383,7 +440,7 @@ export function exit() {
   unsubAccept = unsubOffer = unsubInput = unsubKey = null;
   unsubStore = null;
   if (agentRef && agentRef.toolRegistry && typeof agentRef.toolRegistry.unregisterDomain === 'function') {
-    ['submit_quote', 'get_load', 'assign_carrier', 'schedule_callback'].forEach((n) => agentRef.toolRegistry.unregisterDomain(n));
+    ['submit_quote', 'get_negotiation_context', 'get_load', 'assign_carrier', 'schedule_callback'].forEach((n) => agentRef.toolRegistry.unregisterDomain(n));
   }
   import('./quick-chips.js').then((chips) => chips.clearChips()).catch(() => {});
   state = null; load = null; agentRef = null;

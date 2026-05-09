@@ -512,7 +512,10 @@ function attach(browserWs, req, env) {
       const extra = payload.result && typeof payload.result === 'object'
         ? ' DETAIL: ' + JSON.stringify(payload.result)
         : '';
-      return { error: msg + extra };
+      const response = { error: msg + extra };
+      if (payload.code) response.code = String(payload.code);
+      if (payload.recovery !== undefined) response.recovery = payload.recovery;
+      return response;
     }
     if (payload.result === undefined || payload.result === null) {
       return { result: 'ok' };
@@ -1121,11 +1124,14 @@ function attach(browserWs, req, env) {
         // Log name + ok/fail status only. The result object can contain
         // DOM text / read_text output — redact when SHOW_TEXT=false.
         dlog(sessionId, 'tool_result', data.name || pending.name, 'ok=' + (data.ok !== false));
-        sendToolResponse(id, data.name || pending.name, {
+        const payload = {
           ok: data.ok !== false,
           result: data.result,
           error: data.error
-        });
+        };
+        if (data.code) payload.code = data.code;
+        if (data.recovery !== undefined) payload.recovery = data.recovery;
+        sendToolResponse(id, data.name || pending.name, payload);
         emitState('listening');
         return;
       }
