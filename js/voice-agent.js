@@ -2161,6 +2161,16 @@ export class VoiceAgent extends EventTarget {
       dlog('queued page_context page=' + page + ' elements=' + elements.length + ' (ws/setup not ready)');
       return;
     }
+    // Hold mid-call nav frames until the initial greeting turn has
+    // actually completed — otherwise a navigation racing the first
+    // model utterance ships a `<page_context>` user message that
+    // collides with the `<call_initiated>` intro and the model
+    // collapses both into the terse page acknowledgement.
+    if (this._callActive && this._greetingSent && !this._initialGreetingDelivered) {
+      this._pendingPageContext = payload;
+      dlog('queued page_context page=' + page + ' (holding until initial greeting completes)');
+      return;
+    }
     this._sendPageContextFrame(payload);
     this.pageContextInjected = true;
   }

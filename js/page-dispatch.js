@@ -73,7 +73,7 @@ function renderSummary() {
   const el = document.getElementById('summary-grid');
   if (!el) return;
   el.innerHTML = `
-    <div class="summary-card"><div class="label">In transit</div><div class="value" data-agent-id="dispatch.kpi.in_transit">${transit}</div><div class="meta">Moving now</div></div>
+    <div class="summary-card"><div class="label">In transit</div><div class="value" data-agent-id="dispatch.kpi.in_transit">${transit}</div><div class="meta">On the road</div></div>
     <div class="summary-card"><div class="label">Pending</div><div class="value" data-agent-id="dispatch.kpi.pending">${pending}</div><div class="meta">Awaiting carrier</div></div>
     <div class="summary-card"><div class="label">Delayed</div><div class="value" data-agent-id="dispatch.kpi.delayed">${delayed}</div><div class="meta">Needs attention</div></div>
     <div class="summary-card"><div class="label">Booked rev.</div><div class="value" data-agent-id="dispatch.kpi.revenue">${formatMoney(revenue)}</div><div class="meta">${loads.length} loads</div></div>
