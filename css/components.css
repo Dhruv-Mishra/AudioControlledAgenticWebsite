@@ -660,7 +660,7 @@
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: var(--sp-5);
-  height: 64px;
+  height: var(--app-header-height, 64px);
   padding: 0 var(--sp-5);
   background: var(--md-sys-color-surface-container-low);
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
@@ -752,6 +752,7 @@
   align-items: center;
   gap: var(--sp-3);
   justify-self: end;
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
@@ -762,22 +763,66 @@
 @media (max-width: 640px) {
   .app-header {
     height: auto;
-    padding: var(--sp-3);
-    gap: var(--sp-3);
-    grid-template-columns: 1fr auto;
+    min-height: var(--app-header-height, 92px);
+    padding: calc(var(--sp-2) + 2px) calc(var(--sp-3) + 2px) var(--sp-3);
+    gap: var(--sp-2) var(--sp-3);
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto auto;
+    align-items: center;
+  }
+  .app-brand {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+    min-width: 0;
+    gap: 0;
+    max-width: none;
+  }
+  .app-brand-mark {
+    display: none;
+  }
+  .app-brand-name {
+    min-width: 0;
+    display: inline-flex;
+    flex-direction: row;
+    gap: 4px;
+    align-items: baseline;
+    justify-content: center;
+    white-space: nowrap;
+    font-size: 13px;
+    line-height: 1;
+    text-align: left;
+  }
+  .app-brand-name-secondary {
+    font-size: 1em;
+  }
+  .app-header-right {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    align-self: center;
+    width: auto;
+    max-width: none;
+    justify-content: flex-end;
+  }
+  .app-header-right:empty {
+    min-height: 26px;
   }
   .app-nav {
     grid-column: 1 / -1;
+    grid-row: 2;
     margin-left: 0;
+    width: 100%;
+    gap: var(--sp-1);
     overflow-x: auto;
-    padding-bottom: 4px;
+    padding-bottom: 2px;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
   .app-nav::-webkit-scrollbar { display: none; }
   .app-nav a {
-    height: 36px;
+    flex: 0 0 auto;
+    height: 34px;
     white-space: nowrap;
     padding: 0 var(--sp-3);
   }

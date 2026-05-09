@@ -1157,7 +1157,7 @@
 @media (max-width: 480px) {
   .voice-settings-row--segmented {
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-start;
     gap: var(--sp-2, 8px);
   }
   .voice-settings-row--segmented .voice-settings-row-label {
@@ -1166,10 +1166,20 @@
   }
   .voice-settings-row--segmented .voice-settings-row-control {
     margin-left: 0;
-    width: 100%;
+    width: auto;
+    max-width: 100%;
+    align-self: flex-start;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .voice-settings-row--segmented .voice-settings-row-control::-webkit-scrollbar {
+    display: none;
   }
   .voice-settings-row--segmented .voice-settings-row-control .segmented {
-    width: 100%;
+    width: fit-content;
+    max-width: 100%;
   }
 }
 

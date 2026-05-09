@@ -278,6 +278,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     const resetBtn = root.querySelector('#map-reset');
     const tileErrorEl = root.querySelector('#map-tile-error');
     const tileRetryBtn = root.querySelector('#map-tile-retry');
+    const appMain = root.closest('.app-main');
 
     if (!canvas) throw new Error('map-widget: #map-canvas missing from partial');
 
@@ -1453,6 +1454,12 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     let onListToggle = null;
     function setListView(on) {
       listOpen = !!on;
+      root.classList.toggle('map-page--list-open', listOpen);
+      if (appMain) appMain.classList.toggle('app-main--map-list-open', listOpen);
+      if (listOpen) {
+        closeDetailPanel();
+        closeCarrierPanel();
+      }
       if (listView) {
         listView.hidden = !listOpen;
         listView.toggleAttribute('inert', !listOpen);
@@ -1462,12 +1469,21 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
         listToggleBtn.setAttribute('aria-pressed', listOpen ? 'true' : 'false');
         listToggleBtn.textContent = listOpen ? 'Map view' : 'List view';
       }
+      if (!listOpen) {
+        requestAnimationFrame(() => {
+          try { map.invalidateSize(false); } catch {}
+        });
+      }
     }
     if (listToggleBtn) {
       onListToggle = () => setListView(!listOpen);
       listToggleBtn.addEventListener('click', onListToggle);
       track(() => { try { listToggleBtn.removeEventListener('click', onListToggle); } catch {} });
     }
+    track(() => {
+      try { root.classList.remove('map-page--list-open'); } catch {}
+      try { if (appMain) appMain.classList.remove('app-main--map-list-open'); } catch {}
+    });
 
     // ESC closes detail panel or carrier panel
     function onKeydown(ev) {

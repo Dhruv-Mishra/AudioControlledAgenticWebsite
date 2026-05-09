@@ -28,6 +28,18 @@ html {
 
 html[data-theme="light"] { color-scheme: light; }
 
+:root {
+  --app-header-height: 64px;
+  --app-mobile-dock-clearance: 0px;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --app-header-height: 88px;
+    --app-mobile-dock-clearance: calc(96px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 /* ===== Body — atmospheric M3 surface =========================
  * v3 ("Yard Operator") restores a deliberately light atmosphere layer
  * that v2 stripped out: two pinned radial washes (warm amber lamp,
@@ -297,7 +309,7 @@ code, pre, .mono, .mono-id {
   /* When the dock is a minimised pill on mobile, content only needs room
    * for the 60 px pill + safe-area inset. */
   body:has(.voice-dock.is-collapsed) .app-main {
-    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: var(--app-mobile-dock-clearance);
   }
 }
 

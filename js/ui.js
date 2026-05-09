@@ -362,11 +362,7 @@ function buildHeader() {
       <a href="/map.html" data-agent-id="nav.map">Map</a>
       <a href="/contact.html" data-agent-id="nav.contact">Contact</a>
     </nav>
-    <div class="app-header-right">
-      <a href="#voice-dock" class="btn btn--ghost btn--sm app-header-voice-link" data-agent-id="nav.voice_dock" data-external>
-        <span>Voice</span>
-      </a>
-    </div>
+    <div class="app-header-right"></div>
   `;
   document.body.insertBefore(header, document.body.firstChild);
 }
