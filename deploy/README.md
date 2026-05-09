@@ -132,6 +132,8 @@ If you keep it private, create a read-only GHCR token and store it in GitHub sec
 
 Edit `deploy/targets.json` in the repo. In the default case you only replace the placeholder host with the VM public IP or a DNS-only deploy hostname.
 
+If you do not want to commit the host into the repo, you can leave the placeholder in place and set `PROD_VM_HOST` in GitHub instead.
+
 Example:
 
 ```json
@@ -160,6 +162,7 @@ In the GitHub repository settings, add:
 |---|---|---|
 | `PROD_SSH_PRIVATE_KEY` | yes | Private key for the deploy user on the VM(s). |
 | `PROD_SSH_KNOWN_HOSTS` | optional | Pinned `known_hosts` entries for each VM. If omitted, the workflow runs `ssh-keyscan` against the target host at deploy time. |
+| `PROD_VM_HOST` | optional | VM public IP or SSH hostname when you want GitHub to supply the host instead of committing it in `deploy/targets.json`. Prefer a repository variable for this; a secret also works. |
 | `GHCR_PULL_USERNAME` | only for private GHCR images | Read-only GHCR username. |
 | `GHCR_PULL_TOKEN` | only for private GHCR images | Read-only GHCR token. |
 
@@ -169,6 +172,12 @@ Minimum required setup for the SSH path:
 2. Create `PROD_SSH_PRIVATE_KEY`.
 
 That is enough for the workflow to connect because it will auto-discover the host key from the target IP.
+
+Alternative if you do not want the host committed in the repo:
+
+1. Leave `deploy/targets.json` with the placeholder host.
+2. Create a repository variable named `PROD_VM_HOST` with the VM public IP or deploy hostname.
+3. Create `PROD_SSH_PRIVATE_KEY`.
 
 If you want stricter SSH pinning, also create `PROD_SSH_KNOWN_HOSTS`.
 

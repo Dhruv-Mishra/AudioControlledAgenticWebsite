@@ -31,6 +31,9 @@ jobs:
       - name: Load deploy targets
         id: targets
         shell: bash
+        env:
+          OVERRIDE_TARGET_HOST: ${{ vars.PROD_VM_HOST }}
+          SECRET_TARGET_HOST: ${{ secrets.PROD_VM_HOST }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
@@ -39,6 +42,8 @@ jobs:
           const filePath = path.join(process.cwd(), 'deploy', 'targets.json');
           const raw = fs.readFileSync(filePath, 'utf8');
           const parsed = JSON.parse(raw);
+          const placeholderHost = 'replace-with-your-vm-public-ip';
+          const hostOverride = process.env.OVERRIDE_TARGET_HOST || process.env.SECRET_TARGET_HOST || '';
           if (!Array.isArray(parsed) || parsed.length === 0) {
             throw new Error('deploy/targets.json must contain at least one target.');
           }
@@ -46,8 +51,11 @@ jobs:
             if (!target.host || typeof target.host !== 'string') {
               throw new Error('Each target requires a non-empty host value.');
             }
-            if (target.host.includes('example.com') || target.host.includes('replace-with-your-vm-public-ip')) {
+            if (target.host.includes('example.com')) {
               throw new Error('Replace placeholder hosts in deploy/targets.json before running production deploys.');
+            }
+            if (target.host.includes(placeholderHost) && !hostOverride) {
+              throw new Error('Replace the placeholder host in deploy/targets.json or create PROD_VM_HOST as a repository variable or secret.');
             }
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(parsed)}\n`);
@@ -136,14 +144,30 @@ jobs:
       max-parallel: 1
       matrix:
         target: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    env:
+      MATRIX_TARGET_HOST: ${{ matrix.target.host }}
+      OVERRIDE_TARGET_HOST: ${{ vars.PROD_VM_HOST }}
+      SECRET_TARGET_HOST: ${{ secrets.PROD_VM_HOST }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Resolve target host
+        shell: bash
+        run: |
+          target_host="$MATRIX_TARGET_HOST"
+          if [[ "$target_host" == 'replace-with-your-vm-public-ip' ]]; then
+            target_host="${OVERRIDE_TARGET_HOST:-$SECRET_TARGET_HOST}"
+          fi
+          [[ -n "$target_host" ]] || {
+            echo 'No deployment host was resolved.' >&2
+            exit 1
+          }
+          printf 'TARGET_HOST=%s\n' "$target_host" >> "$GITHUB_ENV"
+
       - name: Configure SSH
         shell: bash
         env:
-          TARGET_HOST: ${{ matrix.target.host }}
           TARGET_PORT: ${{ matrix.target.port }}
           SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
         run: |
@@ -165,7 +189,6 @@ jobs:
       - name: Copy deploy files to target
         shell: bash
         env:
-          TARGET_HOST: ${{ matrix.target.host }}
           TARGET_PORT: ${{ matrix.target.port }}
           TARGET_USER: ${{ matrix.target.user }}
           TARGET_APP_DIR: ${{ matrix.target.appDir }}
@@ -178,7 +201,6 @@ jobs:
       - name: Deploy target
         shell: bash
         env:
-          TARGET_HOST: ${{ matrix.target.host }}
           TARGET_PORT: ${{ matrix.target.port }}
           TARGET_USER: ${{ matrix.target.user }}
           TARGET_APP_DIR: ${{ matrix.target.appDir }}
