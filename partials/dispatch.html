@@ -18,9 +18,9 @@
     </h1>
     <p class="hero-sub">Talk to Jarvis to assign carriers, counter rates, or chase delayed freight &mdash; he sees what you see and clicks the same buttons you would.</p>
     <ul class="hero-kpi-strip" aria-label="Network at a glance">
-      <li><span class="kpi-num hero-numeral" id="hero-kpi-active" data-agent-id="dispatch.hero.kpi.active">&mdash;</span><span class="kpi-lbl">active</span></li>
-      <li><span class="kpi-num hero-numeral" id="hero-kpi-miles" data-agent-id="dispatch.hero.kpi.miles">&mdash;</span><span class="kpi-lbl">miles in motion</span></li>
-      <li><span class="kpi-num hero-numeral" id="hero-kpi-rev" data-agent-id="dispatch.hero.kpi.revenue">&mdash;</span><span class="kpi-lbl">booked today</span></li>
+      <li><span class="kpi-num hero-numeral" id="hero-kpi-active" data-agent-id="dispatch.hero.kpi.active" data-kpi="loads.in_motion">&mdash;</span><span class="kpi-lbl">active</span></li>
+      <li><span class="kpi-num hero-numeral" id="hero-kpi-miles" data-agent-id="dispatch.hero.kpi.miles" data-kpi="loads.miles_in_motion">&mdash;</span><span class="kpi-lbl">miles in motion</span></li>
+      <li><span class="kpi-num hero-numeral" id="hero-kpi-rev" data-agent-id="dispatch.hero.kpi.revenue" data-kpi="booked.revenue">&mdash;</span><span class="kpi-lbl">booked today</span></li>
     </ul>
   </div>
 </div>
@@ -39,7 +39,7 @@
   </header>
 
   <ul class="lane-card-grid" data-agent-id="dispatch.network.cards">
-    <li class="lane-card" data-agent-id="dispatch.network.card.midwest">
+    <li class="lane-card" data-agent-id="dispatch.network.card.midwest" data-lane="IL->TX">
       <figure>
         <img src="/public/images/lanes/i80-corridor.webp"
              alt="I-80 corridor at golden hour with semi-trucks"
@@ -48,11 +48,11 @@
         <figcaption>
           <span class="lane-tag">I-80 corridor</span>
           <strong>Chicago &rarr; Dallas</strong>
-          <span class="lane-meta">12 active loads &middot; <span class="hero-numeral">$2.41</span>/mi avg</span>
+          <span class="lane-meta" data-lane-meta>&mdash;</span>
         </figcaption>
       </figure>
     </li>
-    <li class="lane-card" data-agent-id="dispatch.network.card.southeast">
+    <li class="lane-card" data-agent-id="dispatch.network.card.southeast" data-lane="GA->NJ">
       <figure>
         <img src="/public/images/lanes/i95-spine.webp"
              alt="I-95 spine through the Southeast"
@@ -61,11 +61,11 @@
         <figcaption>
           <span class="lane-tag">I-95 spine</span>
           <strong>Atlanta &rarr; Newark</strong>
-          <span class="lane-meta">8 active loads &middot; <span class="hero-numeral">$2.86</span>/mi avg</span>
+          <span class="lane-meta" data-lane-meta>&mdash;</span>
         </figcaption>
       </figure>
     </li>
-    <li class="lane-card" data-agent-id="dispatch.network.card.westcoast">
+    <li class="lane-card" data-agent-id="dispatch.network.card.westcoast" data-lane="CA->WA">
       <figure>
         <img src="/public/images/hero/highway-signage.webp"
              alt="Pacific coast interstate signage"
@@ -74,7 +74,7 @@
         <figcaption>
           <span class="lane-tag">I-5 reefer</span>
           <strong>Los Angeles &rarr; Seattle</strong>
-          <span class="lane-meta">6 active loads &middot; <span class="hero-numeral">$3.12</span>/mi avg</span>
+          <span class="lane-meta" data-lane-meta>&mdash;</span>
         </figcaption>
       </figure>
     </li>
@@ -98,35 +98,35 @@
     <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.dry_van"
            data-agent-description="Dry van tractor-trailer fleet, the workhorse 53-ft enclosed trailer used for general freight.">
       <img src="/public/images/carriers/peterbilt-579.webp" alt="Peterbilt 579 dry-van tractor" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Dry van</span><span class="eq-count">14 rigs</span></a></li>
+      <span class="eq-name">Dry van</span><span class="eq-count" data-kpi="equipment.dry-van">&mdash;</span></a></li>
     <li><a class="equipment-tile" href="/carriers.html?eq=reefer" data-agent-id="dispatch.equipment.reefer"
            data-agent-description="Refrigerated trailer fleet, used for temperature-controlled freight like produce and pharma.">
       <img src="/public/images/carriers/kenworth-w990.webp" alt="Kenworth W990 reefer tractor" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Reefer</span><span class="eq-count">9 rigs</span></a></li>
+      <span class="eq-name">Reefer</span><span class="eq-count" data-kpi="equipment.reefer">&mdash;</span></a></li>
     <li><a class="equipment-tile" href="/carriers.html?eq=flatbed" data-agent-id="dispatch.equipment.flatbed"
            data-agent-description="Flatbed steel-deck trailer, used for steel coils, machinery, and oversized freight.">
       <img src="/public/images/carriers/flatbed-steel.webp" alt="Flatbed steel-deck trailer" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Flatbed</span><span class="eq-count">7 rigs</span></a></li>
+      <span class="eq-name">Flatbed</span><span class="eq-count" data-kpi="equipment.flatbed">&mdash;</span></a></li>
     <li><a class="equipment-tile" href="/carriers.html?eq=tanker" data-agent-id="dispatch.equipment.tanker"
            data-agent-description="Liquid tanker trailer, used for fuel, chemicals, and food-grade liquids.">
       <img src="/public/images/carriers/tanker-fuel.webp" alt="Fuel tanker trailer" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Tanker</span><span class="eq-count">4 rigs</span></a></li>
+      <span class="eq-name">Tanker</span><span class="eq-count" data-kpi="equipment.tanker">&mdash;</span></a></li>
     <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.cascadia"
            data-agent-description="Freightliner Cascadia day-cab tractor, the most common fleet truck in North America.">
       <img src="/public/images/carriers/freightliner-cascadia.webp" alt="Freightliner Cascadia day cab" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Day cab</span><span class="eq-count">11 rigs</span></a></li>
+      <span class="eq-name">Day cab</span><span class="eq-count" data-static-kpi="true">11 rigs</span></a></li>
     <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.dock"
            data-agent-description="Loading-dock door at a distribution center where dry vans pick up palletised freight.">
       <img src="/public/images/carriers/dry-van-dock.webp" alt="Dry van at a loading dock" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">At dock</span><span class="eq-count">3 loading</span></a></li>
+      <span class="eq-name">At dock</span><span class="eq-count" data-static-kpi="true">3 loading</span></a></li>
     <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.vnl"
            data-agent-description="Volvo VNL sleeper tractor, common on long-haul over-the-road runs.">
       <img src="/public/images/carriers/volvo-vnl.webp" alt="Volvo VNL sleeper tractor" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Sleeper</span><span class="eq-count">8 rigs</span></a></li>
+      <span class="eq-name">Sleeper</span><span class="eq-count" data-static-kpi="true">8 rigs</span></a></li>
     <li><a class="equipment-tile" href="/carriers.html?eq=dry+van" data-agent-id="dispatch.equipment.t680"
            data-agent-description="Kenworth T680 mid-roof tractor, optimised for fuel economy on regional lanes.">
       <img src="/public/images/carriers/kenworth-t680.webp" alt="Kenworth T680 tractor" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Regional</span><span class="eq-count">6 rigs</span></a></li>
+      <span class="eq-name">Regional</span><span class="eq-count" data-static-kpi="true">6 rigs</span></a></li>
   </ul>
 </section>
 

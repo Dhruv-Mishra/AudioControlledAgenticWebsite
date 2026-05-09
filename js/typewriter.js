@@ -24,7 +24,7 @@ const ROUTE_PHRASES = {
   ],
   '/carriers.html': [
     'Every rig you can put on a load today.',
-    'Forty-plus carriers, one shortlist.',
+    'Current carriers, one shortlist.',
     'Filter, call, book — by voice.',
     'The roster, ready to roll.'
   ],
@@ -36,7 +36,7 @@ const ROUTE_PHRASES = {
   ],
   '/contact.html': [
     'A dispatcher, not a ticket queue.',
-    'Two-minute median response.',
+    'Fast dispatcher response.',
     'Talk to a human, or to Jarvis.',
     'Support that picks up.'
   ],

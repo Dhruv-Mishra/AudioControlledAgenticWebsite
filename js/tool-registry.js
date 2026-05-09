@@ -13,7 +13,11 @@ import {
   listCarriers,
   listLoads
 } from './data-store.js';
-import { isLoadInMotion } from './formatters.js';
+import {
+  selectAvailableCarriers,
+  selectBookedRevenue,
+  selectLoadsInMotion
+} from './selectors.js';
 
 const VALID_PATHS = new Set(['/', '/index.html', '/carriers.html', '/negotiate.html', '/contact.html', '/map.html']);
 
@@ -611,15 +615,12 @@ export class ToolRegistry {
         if (handler) return await handler(args);
         await initDataStore();
         const loadRows = listLoads();
-        const carriersOnline = listCarriers({ available: true }).length;
-        const bookedToday = loadRows
-          .filter((load) => load.status === 'booked' || load.status === 'in_transit')
-          .reduce((acc, load) => acc + (load.rate || 0), 0);
+        const carrierRows = listCarriers();
         return {
           now_iso: new Date().toISOString(),
-          loads_in_motion: loadRows.filter(isLoadInMotion).length,
-          carriers_online: carriersOnline,
-          revenue_booked_today_usd: bookedToday
+          loads_in_motion: selectLoadsInMotion(loadRows),
+          carriers_online: selectAvailableCarriers(carrierRows),
+          revenue_booked_today_usd: selectBookedRevenue(loadRows)
         };
       }
       default: {

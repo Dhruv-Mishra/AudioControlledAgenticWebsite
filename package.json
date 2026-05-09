@@ -33,7 +33,9 @@
     "smoke:pending-action-queue": "node evals/pending-action-queue-smoke.js",
     "smoke:negotiation-context": "node evals/negotiation-context-smoke.js",
     "smoke:greeting-non-default-page": "node evals/greeting-non-default-page-smoke.js",
-    "smoke:data-store": "node evals/data-store-smoke.js"
+    "smoke:data-store": "node evals/data-store-smoke.js",
+    "smoke:selectors": "node evals/selectors-smoke.js",
+    "smoke:kpi-binder": "node evals/kpi-binder-smoke.js"
   },
   "engines": {
     "node": ">=20"

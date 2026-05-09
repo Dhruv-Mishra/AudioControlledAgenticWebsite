@@ -12,6 +12,8 @@
 
 import { bootstrapVoiceShell } from './ui.js';
 import { Router } from './router.js';
+import { initDataStore } from './data-store.js';
+import { bindKpis } from './kpi-binder.js';
 import { applyDispatchFilters, applyCarrierFilters } from './tool-registry.js';
 import { setActivityNote } from './activity-indicator.js';
 import { startLiveUi, getLiveState } from './live-ui.js';
@@ -52,12 +54,33 @@ async function main() {
       try {
         requestAnimationFrame(() => autoApplyTypewriter(target));
       } catch {}
+      try { bindKpis(document.body); } catch (err) { console.error('[app] kpi-bind route', err); }
     }
   });
   window.__router = router;
 
+  // Re-bind KPIs on EVERY route change — including back/forward
+  // (popstate). The router suppresses `onRouteChange` for popstate
+  // navigations but always dispatches the `route-change` event, so
+  // listening here covers both forward navigation and history
+  // navigation. `bindKpis` is idempotent (Set-tracked roots, single
+  // store subscription) so this is safe to fire alongside the
+  // onRouteChange call above.
+  try {
+    router.addEventListener('route-change', () => {
+      try { bindKpis(document.body); } catch (err) { console.error('[app] kpi-bind popstate', err); }
+    });
+  } catch (err) { console.error('[app] route-change listener', err); }
+
   // Live header ticker — starts once, ticks every second.
   try { startLiveUi(); } catch (err) { console.error('[app] live-ui', err); }
+
+  try {
+    await initDataStore();
+    bindKpis(document.body);
+  } catch (err) {
+    console.error('[app] data-store init', err);
+  }
 
   // One-time cleanup: a previous build registered a tile-caching Service
   // Worker at /public/sw-tiles.js. That file no longer exists; unregister

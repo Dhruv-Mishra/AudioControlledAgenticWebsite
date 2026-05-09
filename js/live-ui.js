@@ -1,11 +1,12 @@
 // Live UI: a thin clock + ops counters strip, mounted in the app header.
-//
-// All counters are deterministic functions of Date.now() so they look
-// alive but never reset on refresh. Numbers drift slowly; the clock
-// ticks every second.
+// Counters are sourced from the freight store; only the clock ticks.
 
-import { initDataStore, listLoads, subscribe } from './data-store.js';
-import { isLoadInMotion } from './formatters.js';
+import { initDataStore, listCarriers, listLoads, subscribe } from './data-store.js';
+import {
+  selectAvailableCarriers,
+  selectBookedRevenue,
+  selectLoadsInMotion
+} from './selectors.js';
 
 const liveState = {
   // last computed snapshot — refreshed every tick.
@@ -24,30 +25,15 @@ let resolveHost = () => null;
 
 function pad2(n) { return String(n).padStart(2, '0'); }
 
-function deterministicCount(seedKey, base, jitter) {
-  // Use minute resolution so the number changes maybe every couple of
-  // minutes — feels alive without flickering.
-  const minute = Math.floor(Date.now() / 60_000);
-  let h = 2166136261 ^ minute;
-  for (let i = 0; i < seedKey.length; i++) {
-    h ^= seedKey.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  const r = ((h >>> 0) / 0xffffffff);
-  return Math.round(base + (r * 2 - 1) * jitter);
-}
-
 function recompute() {
   const d = new Date();
   liveState.now = d;
   liveState.clock = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-  const inMotion = listLoads().filter(isLoadInMotion).length;
-  liveState.loadsInMotion = inMotion || deterministicCount('loadsInMotion', 18, 4);
-  liveState.carriersOnline = deterministicCount('carriersOnline', 31, 5);
-  // Booked today varies through the day, max around 5pm local.
-  const dayFrac = (d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds()) / 86400;
-  const curve = Math.min(1, dayFrac * 1.4);
-  liveState.bookedToday = Math.round(48000 * curve + deterministicCount('booked', 800, 600));
+  const loads = listLoads();
+  const carriers = listCarriers();
+  liveState.loadsInMotion = selectLoadsInMotion(loads);
+  liveState.carriersOnline = selectAvailableCarriers(carriers);
+  liveState.bookedToday = selectBookedRevenue(loads);
 }
 
 function publish() {
@@ -128,7 +114,12 @@ export function startLiveUi() {
   recompute();
   const host = ensureHost();
   if (host) render(host);
-  unsubscribeStore = subscribe('load:updated', publish);
+  unsubscribeStore = [
+    subscribe('data:ready', publish),
+    subscribe('load:updated', publish),
+    subscribe('carrier:updated', publish),
+    subscribe('store:reset', publish)
+  ];
 
   tickHandle = setInterval(() => {
     publish();

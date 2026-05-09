@@ -12,11 +12,11 @@
   <div class="hero-overlay" data-agent-id="carriers.hero.overlay">
     <p class="eyebrow">The roster</p>
     <h1 class="hero-title">Every rig you can put<br/><em>on a load today.</em></h1>
-    <p class="hero-sub">Forty-plus active carriers across dry van, reefer, flatbed, and tanker. Filter below or ask Jarvis to shortlist for a specific lane.</p>
+    <p class="hero-sub">Current carrier roster across dry van, reefer, flatbed, and tanker. Filter below or ask Jarvis to shortlist for a specific lane.</p>
     <ul class="hero-kpi-strip" aria-label="Roster at a glance">
-      <li><span class="kpi-num hero-numeral">42</span><span class="kpi-lbl">active carriers</span></li>
-      <li><span class="kpi-num hero-numeral">28</span><span class="kpi-lbl">available now</span></li>
-      <li><span class="kpi-num hero-numeral">4.7</span><span class="kpi-lbl">avg star rating</span></li>
+      <li><span class="kpi-num hero-numeral" data-kpi="carriers.total">&mdash;</span><span class="kpi-lbl">active carriers</span></li>
+      <li><span class="kpi-num hero-numeral" data-kpi="carriers.available">&mdash;</span><span class="kpi-lbl">available now</span></li>
+      <li><span class="kpi-num hero-numeral" data-kpi="carriers.avg_rating">&mdash;</span><span class="kpi-lbl">avg star rating</span></li>
     </ul>
   </div>
 </div>
@@ -34,19 +34,19 @@
     <li><a class="equipment-tile" href="?eq=dry+van" data-agent-id="carriers.eq.dry_van"
            data-agent-description="Dry van: 53-ft enclosed trailer for general palletised freight.">
       <img src="/public/images/carriers/peterbilt-579.webp" alt="Peterbilt dry-van tractor" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Dry van</span><span class="eq-count">14 rigs</span></a></li>
+      <span class="eq-name">Dry van</span><span class="eq-count" data-kpi="equipment.dry-van">&mdash;</span></a></li>
     <li><a class="equipment-tile" href="?eq=reefer" data-agent-id="carriers.eq.reefer"
            data-agent-description="Reefer: refrigerated trailer for temperature-controlled freight.">
       <img src="/public/images/carriers/kenworth-t680.webp" alt="Kenworth T680 reefer tractor" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Reefer</span><span class="eq-count">9 rigs</span></a></li>
+      <span class="eq-name">Reefer</span><span class="eq-count" data-kpi="equipment.reefer">&mdash;</span></a></li>
     <li><a class="equipment-tile" href="?eq=flatbed" data-agent-id="carriers.eq.flatbed"
            data-agent-description="Flatbed: open steel-deck trailer for steel coils and machinery.">
       <img src="/public/images/carriers/flatbed-steel.webp" alt="Flatbed steel-deck trailer" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Flatbed</span><span class="eq-count">7 rigs</span></a></li>
+      <span class="eq-name">Flatbed</span><span class="eq-count" data-kpi="equipment.flatbed">&mdash;</span></a></li>
     <li><a class="equipment-tile" href="?eq=tanker" data-agent-id="carriers.eq.tanker"
            data-agent-description="Tanker: liquid trailer for fuel, chemicals, and food-grade liquids.">
       <img src="/public/images/carriers/tanker-fuel.webp" alt="Fuel tanker trailer" loading="lazy" decoding="async" width="240" height="160" />
-      <span class="eq-name">Tanker</span><span class="eq-count">4 rigs</span></a></li>
+      <span class="eq-name">Tanker</span><span class="eq-count" data-kpi="equipment.tanker">&mdash;</span></a></li>
   </ul>
 </section>
 

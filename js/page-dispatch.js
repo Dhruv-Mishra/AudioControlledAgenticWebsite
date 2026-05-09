@@ -5,7 +5,6 @@
 import { restoreFiltersFromUrl } from './tool-registry.js';
 import {
   assignCarrierToLoad,
-  countLoadsByStatus,
   getLoad,
   initDataStore,
   listCarriers,
@@ -17,9 +16,17 @@ import {
   formatLoadStatus,
   formatMiles,
   formatMoney,
-  formatWeight,
-  isLoadInMotion
+  formatWeight
 } from './formatters.js';
+import {
+  selectBookedRevenue,
+  selectDelayedLoads,
+  selectLanesSummary,
+  selectLoadStatusCounts,
+  selectLoadsInMotion,
+  selectMilesInMotion,
+  selectOpenLoads
+} from './selectors.js';
 import './load-modal.js';
 
 // Per-mount state. Recreated on each enter() so navigation is clean.
@@ -65,18 +72,18 @@ function filterLoads() {
 
 function renderSummary() {
   const loads = currentLoads();
-  const counts = countLoadsByStatus();
+  const counts = selectLoadStatusCounts(loads);
   const transit = counts.in_transit || 0;
   const pending = counts.pending || 0;
   const delayed = counts.delayed || 0;
-  const revenue = loads.reduce((acc, l) => acc + (l.rate || 0), 0);
+  const revenue = selectBookedRevenue(loads);
   const el = document.getElementById('summary-grid');
   if (!el) return;
   el.innerHTML = `
-    <div class="summary-card"><div class="label">In transit</div><div class="value" data-agent-id="dispatch.kpi.in_transit">${transit}</div><div class="meta">On the road</div></div>
-    <div class="summary-card"><div class="label">Pending</div><div class="value" data-agent-id="dispatch.kpi.pending">${pending}</div><div class="meta">Awaiting carrier</div></div>
-    <div class="summary-card"><div class="label">Delayed</div><div class="value" data-agent-id="dispatch.kpi.delayed">${delayed}</div><div class="meta">Needs attention</div></div>
-    <div class="summary-card"><div class="label">Booked rev.</div><div class="value" data-agent-id="dispatch.kpi.revenue">${formatMoney(revenue)}</div><div class="meta">${loads.length} loads</div></div>
+    <div class="summary-card"><div class="label">In transit</div><div class="value" data-agent-id="dispatch.kpi.in_transit" data-kpi="loads.in_transit">${transit}</div><div class="meta">On the road</div></div>
+    <div class="summary-card"><div class="label">Pending</div><div class="value" data-agent-id="dispatch.kpi.pending" data-kpi="loads.pending">${pending}</div><div class="meta">Awaiting carrier</div></div>
+    <div class="summary-card"><div class="label">Delayed</div><div class="value" data-agent-id="dispatch.kpi.delayed" data-kpi="loads.delayed">${delayed}</div><div class="meta">Needs attention</div></div>
+    <div class="summary-card"><div class="label">Booked rev.</div><div class="value" data-agent-id="dispatch.kpi.revenue" data-kpi="booked.revenue">${formatMoney(revenue)}</div><div class="meta"><span data-kpi="loads.total">${loads.length}</span> loads</div></div>
   `;
 }
 
@@ -188,15 +195,16 @@ function renderMapCard() {
   const ul = document.getElementById('dispatch-map-lanes');
   if (!ul) return;
   const loads = currentLoads();
-  const active = loads.filter((l) => l.status !== 'delivered');
+  const open = loads.filter((l) => l.status !== 'delivered');
   if (sub) {
-    const delayed = loads.filter((l) => l.status === 'delayed').length;
+    const openCount = selectOpenLoads(loads);
+    const delayed = selectDelayedLoads(loads);
     sub.textContent = delayed
-      ? `${active.length} active · ${delayed} delayed`
-      : `${active.length} active lanes`;
+      ? `${openCount} open · ${delayed} delayed`
+      : `${openCount} open loads`;
   }
   ul.innerHTML = '';
-  active.slice(0, 6).forEach((l) => {
+  open.slice(0, 6).forEach((l) => {
     const li = document.createElement('li');
     li.className = 'dispatch-map-lane';
     li.setAttribute('data-agent-id', `dispatch.map_lane.${l.id}`);
@@ -239,6 +247,27 @@ function bindMapCard() {
   });
 }
 
+function formatRatePerMile(value) {
+  return value == null ? '—' : `$${value.toFixed(2)}/mi avg`;
+}
+
+function renderLaneSummaries() {
+  const byKey = new Map(selectLanesSummary(currentLoads()).map((summary) => [summary.key, summary]));
+  document.querySelectorAll('[data-lane]').forEach((card) => {
+    const key = card.getAttribute('data-lane');
+    const meta = card.querySelector('[data-lane-meta]') || card.querySelector('.lane-meta');
+    if (!key || !meta) return;
+    const summary = byKey.get(key);
+    if (!summary) {
+      meta.textContent = '—';
+      return;
+    }
+    const countLabel = summary.count === 1 ? 'load' : 'loads';
+    const avg = formatRatePerMile(summary.avgRatePerMile);
+    meta.innerHTML = `${summary.count.toLocaleString('en-US')} ${countLabel} &middot; <span class="hero-numeral">${escapeHtml(avg)}</span>`;
+  });
+}
+
 // ---- Hero KPI strip + Activity feed (homepage v3 sections) ----------
 //
 // Both surfaces are data-driven from the same `state.loads` snapshot the
@@ -247,20 +276,16 @@ function bindMapCard() {
 
 function renderHeroKpi() {
   const loads = currentLoads();
-  const active = loads.filter(isLoadInMotion).length;
-  const milesInMotion = loads
-    .filter((l) => l.status === 'in_transit')
-    .reduce((acc, l) => acc + (l.miles || 0), 0);
-  const bookedToday = loads
-    .filter((l) => l.status === 'booked' || l.status === 'in_transit')
-    .reduce((acc, l) => acc + (l.rate || 0), 0);
+  const active = selectLoadsInMotion(loads);
+  const milesInMotion = selectMilesInMotion(loads);
+  const bookedToday = selectBookedRevenue(loads);
 
   const setText = (id, value) => {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
   };
   setText('hero-kpi-active', active.toLocaleString('en-US'));
-  setText('hero-kpi-miles', milesInMotion.toLocaleString('en-US'));
+  setText('hero-kpi-miles', formatMiles(milesInMotion));
   setText('hero-kpi-rev', formatMoney(bookedToday));
 
   const ts = document.getElementById('dispatch-hero-ts') ||
@@ -387,6 +412,7 @@ function refreshFromStore() {
   renderTable();
   renderDetail();
   renderMapCard();
+  renderLaneSummaries();
   renderHeroKpi();
   renderActivityFeed();
 }
@@ -417,6 +443,7 @@ export async function enter(root, { voiceAgent }) {
   renderTable();
   renderDetail();
   renderMapCard();
+  renderLaneSummaries();
   renderHeroKpi();
   renderActivityFeed();
   bindMapCard();

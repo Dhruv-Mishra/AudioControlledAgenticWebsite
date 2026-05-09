@@ -15,9 +15,9 @@
     <h1 class="hero-title">Quote it,<br/><em>counter it,</em> close it.</h1>
     <p class="hero-sub">Live rate negotiation for load <span class="mono" id="load-id-readout" data-agent-id="negotiate.load_id">&mdash;</span>. Ask Jarvis to set a counter, submit, or accept.</p>
     <ul class="hero-kpi-strip" aria-label="Lane benchmarks">
-      <li><span class="kpi-num hero-numeral">$2.41</span><span class="kpi-lbl">market avg / mi</span></li>
-      <li><span class="kpi-num hero-numeral">$2.08</span><span class="kpi-lbl">7-day low</span></li>
-      <li><span class="kpi-num hero-numeral">$2.94</span><span class="kpi-lbl">7-day high</span></li>
+      <li><span class="kpi-num hero-numeral" data-kpi="loads.avg_rate_per_mile">&mdash;</span><span class="kpi-lbl">market avg / mi</span></li>
+      <li data-static-kpi="true"><span class="kpi-num hero-numeral">$2.08</span><span class="kpi-lbl">7-day low</span></li>
+      <li data-static-kpi="true"><span class="kpi-num hero-numeral">$2.94</span><span class="kpi-lbl">7-day high</span></li>
     </ul>
   </div>
 </div>
@@ -100,7 +100,7 @@
     <h2 class="section-title" id="negotiate-lanes-h">Comparable corridors</h2>
     <p class="section-sub muted">What carriers have been clearing on similar lanes this week.</p>
   </header>
-  <ul class="lane-card-grid" data-agent-id="negotiate.lanes.cards">
+  <ul class="lane-card-grid" data-agent-id="negotiate.lanes.cards" data-static-kpi="true">
     <li class="lane-card" data-agent-id="negotiate.lane.midwest">
       <figure>
         <img src="/public/images/hero/highway-signage.webp" alt="Interstate highway signage at sunset"
@@ -109,7 +109,7 @@
         <figcaption>
           <span class="lane-tag">I-80</span>
           <strong>Chicago &rarr; Dallas</strong>
-          <span class="lane-meta"><span class="hero-numeral">$2,450</span> avg &middot; 12 quotes / 7d</span>
+          <span class="lane-meta" data-static-kpi="true"><span class="hero-numeral">$2,450</span> avg &middot; 12 quotes / 7d</span>
         </figcaption>
       </figure>
     </li>
@@ -121,7 +121,7 @@
         <figcaption>
           <span class="lane-tag">I-95</span>
           <strong>Atlanta &rarr; Newark</strong>
-          <span class="lane-meta"><span class="hero-numeral">$2,180</span> avg &middot; 9 quotes / 7d</span>
+          <span class="lane-meta" data-static-kpi="true"><span class="hero-numeral">$2,180</span> avg &middot; 9 quotes / 7d</span>
         </figcaption>
       </figure>
     </li>
@@ -133,7 +133,7 @@
         <figcaption>
           <span class="lane-tag">I-5 reefer</span>
           <strong>Los Angeles &rarr; Seattle</strong>
-          <span class="lane-meta"><span class="hero-numeral">$3,120</span> avg &middot; 6 quotes / 7d</span>
+          <span class="lane-meta" data-static-kpi="true"><span class="hero-numeral">$3,120</span> avg &middot; 6 quotes / 7d</span>
         </figcaption>
       </figure>
     </li>
@@ -150,7 +150,7 @@
     <h2 class="section-title" id="negotiate-playbook-h">Three openings to reach for</h2>
     <p class="section-sub muted">Field-tested ways to start a quote without leaving margin on the table.</p>
   </header>
-  <ul class="playbook-grid" data-agent-id="negotiate.playbook">
+  <ul class="playbook-grid" data-agent-id="negotiate.playbook" data-static-kpi="true">
     <li class="playbook-card" data-agent-id="negotiate.playbook.anchor">
       <p class="eyebrow">Anchor high</p>
       <h3>Open at <span class="hero-numeral">$2.85</span>/mi.</h3>
