@@ -1,11 +1,11 @@
 // load-modal.js — singleton body-portal modal for load detail.
 // Auto-registers window.__loadModal and window.__modals.closeAll.
 
-import { getCarrier, getLoad, initDataStore, listCarriers, subscribe } from './data-store.js';
+import { getCarrier, getLoad, initDataStore, isReady, listCarriers, subscribe } from './data-store.js';
 import { formatEta, formatLoadStatus, formatMiles, formatMoney, formatWeight } from './formatters.js';
 
-const MODAL_HTML = `<div id="load-modal-root" class="load-modal" data-modal-root="load" aria-hidden="true"
-     aria-label="Load detail">
+const MODAL_HTML = `<div id="load-modal-root" class="load-modal" data-modal-root="load" role="dialog"
+  aria-modal="true" aria-hidden="true" aria-labelledby="load-modal-title" tabindex="-1">
   <aside class="load-modal-card">
 
     <div class="load-modal-hero">
@@ -23,7 +23,7 @@ const MODAL_HTML = `<div id="load-modal-root" class="load-modal" data-modal-root
     </div>
 
     <div class="load-modal-body">
-      <h2 class="load-modal-title" data-agent-id="load_modal.title"
+      <h2 id="load-modal-title" class="load-modal-title" data-agent-id="load_modal.title"
           data-modal-field="title"></h2>
       <p class="load-modal-subtitle" data-modal-field="subtitle"></p>
 
@@ -63,37 +63,50 @@ let currentLoadId = null;
 let currentOpts = null;
 let unsubscribeLoad = null;
 let unsubscribeCarrier = null;
+let scrollLockState = null;
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'area[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])'
+].join(',');
 
 function prefersReducedMotion() {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
 }
 
 function ensureRoot() {
-  const mapRoot = document.getElementById('map-root');
-  // Reparent if the preferred host changed (SPA nav between map ↔ other pages)
+  // Keep the modal viewport-owned. Mounting inside map/list containers makes
+  // mobile sheet placement depend on whichever page surface opened it.
+  const desired = document.body;
   if (root && root.isConnected) {
-    const desired = mapRoot || document.body;
     if (root.parentNode !== desired) desired.appendChild(root);
     return root;
   }
   root = document.getElementById('load-modal-root');
   if (root) {
-    const desired = mapRoot || document.body;
     if (root.parentNode !== desired) desired.appendChild(root);
+    wireRoot(root);
     return root;
   }
   const div = document.createElement('div');
   div.innerHTML = MODAL_HTML;
   root = div.firstElementChild;
-  // Prefer mounting inside the map root so vertical placement matches
-  // the carrier-panel aside (which is also a child of #map-root and uses
-  // position:absolute relative to it). Falls back to <body> on pages
-  // without a map (e.g. dispatch) where position:fixed kicks in.
-  (mapRoot || document.body).appendChild(root);
-  // Close button
+  desired.appendChild(root);
+  wireRoot(root);
+  return root;
+}
+
+function wireRoot(el) {
+  if (!el || el.dataset.loadModalWired === 'true') return;
+  el.dataset.loadModalWired = 'true';
+  el.addEventListener('click', onBackdropClick);
   const closeBtn = root.querySelector('.load-modal-close');
   if (closeBtn) closeBtn.addEventListener('click', close);
-  return root;
 }
 
 function chipForTone(tone) {
@@ -198,12 +211,17 @@ function populateFields(load) {
   const imgSrc = `/public/images/carriers/${slug}.webp`;
   const source = el.querySelector('[data-modal-field="hero_srcset"]');
   const img = el.querySelector('[data-modal-field="hero_img"]');
-  if (source) source.setAttribute('srcset', imgSrc);
+  if (source && source.getAttribute('srcset') !== imgSrc) source.setAttribute('srcset', imgSrc);
   if (img) {
-    img.classList.remove('is-loaded');
-    img.onload = () => img.classList.add('is-loaded');
-    img.onerror = () => img.classList.add('is-loaded');
-    img.src = imgSrc;
+    const targetSrc = new URL(imgSrc, window.location.href).href;
+    if (img.src !== targetSrc) {
+      img.classList.remove('is-loaded');
+      img.onload = () => img.classList.add('is-loaded');
+      img.onerror = () => img.classList.add('is-loaded');
+      img.src = imgSrc;
+    } else {
+      img.classList.add('is-loaded');
+    }
     img.alt = carrier
       ? `${carrier.name} — Load ${load.id}`
       : `Freight load ${load.id}`;
@@ -248,6 +266,94 @@ function renderActions(load, opts) {
     btn.addEventListener('click', handler);
     actionsEl.appendChild(btn);
   });
+}
+
+function getFocusableElements() {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR)).filter((el) => {
+    if (!el || el.getAttribute('aria-hidden') === 'true') return false;
+    if (el.disabled) return false;
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  });
+}
+
+function trapFocus(ev) {
+  const focusable = getFocusableElements();
+  if (!focusable.length) {
+    ev.preventDefault();
+    try { root.focus(); } catch {}
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+
+  if (!root.contains(active)) {
+    ev.preventDefault();
+    first.focus();
+    return;
+  }
+  if (ev.shiftKey && active === first) {
+    ev.preventDefault();
+    last.focus();
+    return;
+  }
+  if (!ev.shiftKey && active === last) {
+    ev.preventDefault();
+    first.focus();
+  }
+}
+
+function lockPageScroll() {
+  if (scrollLockState || !document.body) return;
+  const doc = document.documentElement;
+  const body = document.body;
+  const scrollY = window.scrollY || doc.scrollTop || 0;
+  scrollLockState = {
+    scrollY,
+    bodyPosition: body.style.position,
+    bodyTop: body.style.top,
+    bodyLeft: body.style.left,
+    bodyRight: body.style.right,
+    bodyWidth: body.style.width,
+    bodyOverflow: body.style.overflow,
+    docOverflow: doc.style.overflow
+  };
+
+  doc.classList.add('is-modal-open');
+  body.classList.add('is-modal-open');
+  doc.style.overflow = 'hidden';
+  body.style.overflow = 'hidden';
+  body.style.position = 'fixed';
+  body.style.top = `-${scrollY}px`;
+  body.style.left = '0';
+  body.style.right = '0';
+  body.style.width = '100%';
+}
+
+function unlockPageScroll() {
+  if (!scrollLockState || !document.body) return;
+  const doc = document.documentElement;
+  const body = document.body;
+  const { scrollY } = scrollLockState;
+
+  body.style.position = scrollLockState.bodyPosition;
+  body.style.top = scrollLockState.bodyTop;
+  body.style.left = scrollLockState.bodyLeft;
+  body.style.right = scrollLockState.bodyRight;
+  body.style.width = scrollLockState.bodyWidth;
+  body.style.overflow = scrollLockState.bodyOverflow;
+  doc.style.overflow = scrollLockState.docOverflow;
+  body.classList.remove('is-modal-open');
+  doc.classList.remove('is-modal-open');
+  scrollLockState = null;
+
+  try { window.scrollTo(0, scrollY); } catch {}
+}
+
+function onBackdropClick(ev) {
+  if (ev.target === root) close();
 }
 
 async function handleShowOnMap() {
@@ -298,7 +404,8 @@ function handleRequestStatus() {
 }
 
 function onKeydown(ev) {
-  if (ev.key === 'Escape') { close(); }
+  if (ev.key === 'Escape') { close(); return; }
+  if (ev.key === 'Tab') trapFocus(ev);
 }
 
 // Recompute the body-portal top offset when the viewport crosses the
@@ -308,7 +415,6 @@ function onKeydown(ev) {
 // the modal is open and removed on close.
 function onResize() {
   if (!root || !root.classList.contains('is-open')) return;
-  if (root.parentNode !== document.body) return;
   if (window.innerWidth > 640) {
     const header = document.querySelector('.app-header');
     const hh = header ? Math.round(header.getBoundingClientRect().height) : 0;
@@ -325,13 +431,17 @@ export function open(load, opts = {}) {
   currentLoadId = resolved.id;
   currentOpts = opts;
   subscribeCurrentLoad();
-  try { initDataStore().then(rerenderCurrent).catch(() => {}); } catch {}
+  try {
+    if (!isReady()) {
+      initDataStore().then(() => {
+        rerenderCurrent();
+      }).catch(() => {});
+    }
+  } catch {}
 
-  // When body-portaled (no #map-root on the page, e.g. dispatch), offset
-  // the panel below the sticky app-header so it doesn't overlap. On the
-  // map page the panel lives inside #map-root and this is a no-op.
-  // Skip on mobile (≤640 px) — bottom-sheet layout doesn't use top offset.
-  if (el.parentNode === document.body && window.innerWidth > 640) {
+  // Offset the desktop drawer below the sticky app-header. Mobile bottom
+  // sheet sizing is handled entirely in CSS with dynamic viewport units.
+  if (window.innerWidth > 640) {
     const header = document.querySelector('.app-header');
     const hh = header ? Math.round(header.getBoundingClientRect().height) : 0;
     el.style.setProperty('--load-modal-top-offset', hh + 'px');
@@ -345,6 +455,7 @@ export function open(load, opts = {}) {
   // Signal other panels to close
   window.dispatchEvent(new CustomEvent('modal:open', { detail: { kind: 'load' } }));
 
+  lockPageScroll();
   el.setAttribute('aria-hidden', 'false');
   void el.offsetWidth;
   el.classList.add('is-open');
@@ -371,6 +482,7 @@ export function close() {
   const done = () => {
     root.setAttribute('aria-hidden', 'true');
     root.removeEventListener('transitionend', done);
+    unlockPageScroll();
     // Return focus
     if (opener && opener.isConnected && typeof opener.focus === 'function') {
       opener.focus();

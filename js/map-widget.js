@@ -656,7 +656,9 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
             label: `${l.id}`,
             meta: `${l.pickup || '?'} → ${l.dropoff || '?'}`,
             onClick: () => {
-              focusLoadInternal(l.id);
+              if (!listOpen) {
+                try { focusLoadInternal(l.id); } catch (err) { console.warn('[map-widget] focus load failed before modal open', err); }
+              }
               if (window.__loadModal) {
                 if (typeof window.__loadModal.setLoadId === 'function') window.__loadModal.setLoadId(l.id);
                 window.__loadModal.open(l.id, { context: 'map' });
@@ -717,7 +719,9 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
         li.setAttribute('tabindex', '0');
         li.setAttribute('aria-label', `Load ${l.id}, ${l.pickup || ''} to ${l.dropoff || ''}`);
         const openLoad = () => {
-          focusLoadInternal(l.id);
+          if (!listOpen) {
+            try { focusLoadInternal(l.id); } catch (err) { console.warn('[map-widget] focus load failed before modal open', err); }
+          }
           if (window.__loadModal) {
             try {
               if (typeof window.__loadModal.setLoadId === 'function') window.__loadModal.setLoadId(l.id);
