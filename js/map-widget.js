@@ -8,31 +8,11 @@
 //     Promise so agent tool handlers can `await` it before calling the
 //     widget. No document-event bridge.
 
-// Basemap — CARTO Voyager (light) + Dark Matter (dark) replace the
-// default OSM raster. Both ride on top of OSM data and require
-// attribution. CARTO’s free tier permits hot-linking; we add the
-// `*.basemaps.cartocdn.com` host to the production CSP `img-src`
-// allow-list (deploy/nginx/jarvis.whoisdhruv.com.conf) and to the two
-// Playwright smoke scripts that mirror that CSP.
-//
-// `{r}` is Leaflet’s retina suffix — it expands to `@2x` on hi-DPI
-// screens, which CARTO supports across both styles.
-const TILE_URL_LIGHT = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-const TILE_URL_DARK  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-const TILE_SUBDOMAINS = 'abcd';
-const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &middot; ' +
-  '&copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
-
-// Pick a basemap based on the current document theme. Defaults to dark
-// because that’s the project’s default, but recomputes on every mount
-// so a /map.html navigation after a theme switch picks the right tiles.
-function resolveTileUrl() {
-  try {
-    const t = document.documentElement.getAttribute('data-theme');
-    return t === 'light' ? TILE_URL_LIGHT : TILE_URL_DARK;
-  } catch { return TILE_URL_DARK; }
-}
+const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+// For a production deploy with real traffic, swap to Stadia's free tier
+// by setting STADIA_API_KEY in .env and using:
+//   https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key=...
+const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
 
 const DEFAULT_VIEW = { lat: 39.5, lng: -98.35, zoom: 4 };
 
@@ -40,17 +20,10 @@ const DEFAULT_VIEW = { lat: 39.5, lng: -98.35, zoom: 4 };
 // mathematical poles because Web Mercator distorts above ~85°.
 const WORLD_BOUNDS = [[-85.05112878, -180], [85.05112878, 180]];
 const TILE_PIXEL_SIZE = 256;
-// Hard floor so we never let the user zoom out further than "the world
-// shows once". 2 → roughly 1024 px wide world; we still recompute per
-// container below.
 const ABSOLUTE_MIN_ZOOM = 2;
-
-// Compute the smallest zoom level at which a single (un-tiled,
-// un-wrapped) world copy completely fills `containerWidth` CSS pixels.
-// At zoom z, the world is `TILE_PIXEL_SIZE * 2^z` pixels wide. We need
-// 2^z * 256 >= width, so z >= log2(width / 256). ceil() guarantees the
-// world is at least as wide as the viewport — anything smaller would
-// expose blank space (or, with wrap on, a repeating strip).
+// Smallest zoom level at which one un-wrapped world copy fully fills
+// `containerWidth` CSS pixels. Prevents the rectangular world from being
+// visible (or worse, repeating) at low zoom levels.
 function computeMinZoomForWidth(containerWidth) {
   const w = Math.max(1, Number(containerWidth) || 1);
   const raw = Math.log2(w / TILE_PIXEL_SIZE);
@@ -352,10 +325,6 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
 
     const reducedAtMount = prefersReducedMotion();
 
-    // Initial minZoom from the canvas's first measured width. We pin it
-    // to a safe floor and then refine on the first resize observation,
-    // because the canvas may not have its final size at construction
-    // time (route mount before layout settles).
     const initialWidth = canvas.getBoundingClientRect().width || canvas.clientWidth || 1024;
     const initialMinZoom = computeMinZoomForWidth(initialWidth);
 
@@ -367,11 +336,9 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       markerZoomAnimation: !reducedAtMount,
       fadeAnimation: !reducedAtMount,
       preferCanvas: false,
-      // World-wrap clamp — together these prevent the "infinite repeating
-      // strip" bug. `worldCopyJump:false` stops Leaflet from teleporting
-      // markers across antimeridian copies; `maxBounds` + viscosity 1.0
-      // makes the panning rubber-band hard at the world envelope so the
-      // user physically cannot drag past one world copy.
+      // Prevents the user from zooming out past one world copy and seeing
+      // a tiny rectangular world floating in empty space (or, with wrap,
+      // a horizontally-repeating strip).
       worldCopyJump: false,
       maxBounds: WORLD_BOUNDS,
       maxBoundsViscosity: 1.0,
@@ -380,42 +347,42 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     }).setView([DEFAULT_VIEW.lat, DEFAULT_VIEW.lng], Math.max(DEFAULT_VIEW.zoom, initialMinZoom));
     track(() => { try { map.remove(); } catch {} });
 
+    // Refine minZoom on first layout + on resize (rotating a phone
+    // changes the canvas width, which changes the smallest single-world
+    // zoom level).
+    const applyMinZoomForCanvas = () => {
+      try {
+        const w = canvas.getBoundingClientRect().width || canvas.clientWidth || 0;
+        if (!w) return;
+        const next = computeMinZoomForWidth(w);
+        if (next !== map.getMinZoom()) {
+          map.setMinZoom(next);
+          if (map.getZoom() < next) map.setZoom(next, { animate: false });
+        }
+      } catch {}
+    };
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => applyMinZoomForCanvas());
+      ro.observe(canvas);
+      track(() => { try { ro.disconnect(); } catch {} });
+    }
+    applyMinZoomForCanvas();
+
     // Dedicated panes per layer so we can fade whole layers via opacity on
     // a single DOM node instead of add/removeLayer.
     map.createPane('loads-pane');    map.getPane('loads-pane').style.zIndex    = '410';
     map.createPane('carriers-pane'); map.getPane('carriers-pane').style.zIndex = '420';
     map.createPane('lanes-pane');    map.getPane('lanes-pane').style.zIndex    = '405';
 
-    const tileLayer = L.tileLayer(resolveTileUrl(), {
+    const tileLayer = L.tileLayer(TILE_URL, {
       attribution: TILE_ATTRIBUTION,
-      subdomains: TILE_SUBDOMAINS,
-      maxZoom: 19,
+      maxZoom: 18,
       minZoom: ABSOLUTE_MIN_ZOOM,
-      // The single most important option for the wrap fix: do NOT request
-      // tiles outside [-180, 180]. Without this Leaflet happily renders
-      // x = -1, x = nTiles, etc., which is what produced the repeating
-      // world-strip the user reported.
+      // Companion to maxBounds: never request tiles outside [-180,180].
+      // Without this, the tile layer would still try to render copies of
+      // the world even though panning is clamped.
       noWrap: true,
-      bounds: WORLD_BOUNDS,
-      crossOrigin: true,
-      // ---- Perf tuning (user reported "slow / tiling" on zoom-in) ----
-      // Default keepBuffer is 2 — raising it to 4 keeps a wider apron of
-      // tiles in the DOM around the viewport, so panning + small zoom
-      // steps reuse the cache instead of re-requesting. Costs ~3× the
-      // memory of the visible viewport, which is fine on every device
-      // we target.
-      keepBuffer: 4,
-      // Don’t request mid-gesture tiles — wait until the zoom animation
-      // settles. This eliminates the "flicker / half-loaded strip" the
-      // user saw, because Leaflet was firing requests for every
-      // intermediate zoom level during the wheel scroll.
-      updateWhenZooming: false,
-      // On mobile pan, batch tile requests until the user lifts their
-      // finger. Saves a flood of cancelled requests during a flick.
-      updateWhenIdle: true,
-      // Custom class so the CSS in map.css can override Leaflet’s default
-      // per-tile fade (which adds a noticeable flicker on fast scrolls).
-      className: 'map-tile-layer'
+      bounds: WORLD_BOUNDS
     });
     tileLayer.addTo(map);
 
@@ -501,12 +468,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       osm.target = '_blank';
       osm.rel = 'noopener';
       osm.textContent = 'OpenStreetMap';
-      const carto = document.createElement('a');
-      carto.href = 'https://carto.com/attributions';
-      carto.target = '_blank';
-      carto.rel = 'noopener';
-      carto.textContent = 'CARTO';
-      attribution.append(osm, ' contributors · © ', carto);
+      attribution.append(osm, ' contributors');
     }
 
     // --- layers (plain layerGroups on dedicated panes — no clustering)
@@ -671,50 +633,23 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     }
 
     let renderFilterListTimer = null;
-    // Inline SVG glyphs for the list items. Two icons cover both kinds:
-    //   - LOAD_GLYPH: pickup → dropoff arrow (route)
-    //   - CARRIER_GLYPH: a small truck silhouette
-    // Each is ~24×24, currentColor, so they tint to the row's status color
-    // via CSS without per-instance recolouring.
-    const LOAD_GLYPH = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">' +
-      '<circle cx="5" cy="12" r="2.4" fill="currentColor"/>' +
-      '<path d="M7.5 12h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
-      '<path d="M14 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
-      '</svg>';
-    const CARRIER_GLYPH = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">' +
-      '<rect x="2" y="8" width="11" height="9" rx="1" fill="currentColor" opacity="0.85"/>' +
-      '<path d="M13 11h5l3 3v3h-8z" fill="currentColor" opacity="0.7"/>' +
-      '<circle cx="6.5" cy="18" r="1.6" fill="currentColor"/>' +
-      '<circle cx="17"  cy="18" r="1.6" fill="currentColor"/>' +
-      '</svg>';
-
     function renderFilterListImmediate() {
       if (!filterList) return;
       filterList.replaceChildren();
       const q = searchInput && searchInput.value ? searchInput.value.trim().toLowerCase() : '';
 
-      const addItem = ({ id, dotColor, glyph, label, meta, onClick }) => {
+      const addItem = ({ id, dotColor, label, meta, onClick }) => {
         const li = document.createElement('li');
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'map-filter-list-item';
         btn.setAttribute('data-agent-id', id);
-        // Glyph slot — coloured via the dotColor (status-driven for loads,
-        // info for carriers). Falls back to the legacy dot if no glyph.
-        const icon = document.createElement('span');
-        icon.className = 'map-list-icon';
-        icon.style.color = dotColor;
-        if (glyph) {
-          icon.innerHTML = glyph;
-        } else {
-          const dot = document.createElement('span');
-          dot.className = 'dot';
-          dot.style.background = dotColor;
-          icon.appendChild(dot);
-        }
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = dotColor;
         const text = document.createElement('span');
         text.innerHTML = `${escapeHtml(label)}<br><span class="meta">${escapeHtml(meta)}</span>`;
-        btn.appendChild(icon);
+        btn.appendChild(dot);
         btn.appendChild(text);
         btn.addEventListener('click', onClick);
         li.appendChild(btn);
@@ -728,7 +663,6 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
           addItem({
             id: `map.list.${l.id}`,
             dotColor: colorForStatus(l.status),
-            glyph: LOAD_GLYPH,
             label: `${l.id}`,
             meta: `${l.pickup || '?'} → ${l.dropoff || '?'}`,
             onClick: () => { focusLoadInternal(l.id); if (window.__loadModal) window.__loadModal.open(l, { context: 'map' }); }
@@ -742,7 +676,6 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
           addItem({
             id: `map.list.${c.id}`,
             dotColor: 'var(--color-info)',
-            glyph: CARRIER_GLYPH,
             label: c.name,
             meta: `${c.id}${hq ? ' · ' + hq.city : ''}`,
             onClick: () => focusCarrierInternal(c.id)
@@ -870,6 +803,15 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     function openLoadDetail(load, side) {
       const entry = registry.get(load.id);
       const opener = entry && entry[side] ? entry[side].getElement() : (entry && entry.pickup ? entry.pickup.getElement() : null);
+      // Broadcast selection so the overlay's selection-highlight (and any
+      // other subscribers like the agent) light up. Lazy-imported to avoid
+      // a hard dependency from the map widget on page-state.
+      try {
+        import('./page-state.js').then((ps) => {
+          try { ps.selectLoad(load.id, `${load.pickup || ''} → ${load.dropoff || ''}`); } catch {}
+        }).catch(() => {});
+      } catch {}
+      try { api._setLoadEmphasis && api._setLoadEmphasis(load.id); } catch {}
       if (window.__loadModal) {
         closeCarrierPanel();
         window.__loadModal.open(load, { context: 'map', opener });
@@ -1499,32 +1441,10 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     }
 
     // Leaflet needs an explicit invalidateSize() when its container changes.
-    // We also recompute minZoom against the new container width so the
-    // world-wrap clamp tracks the viewport — without this, rotating a
-    // phone (480 → 800 px) would let the user zoom out to a width where
-    // the world no longer fills the canvas.
-    const applyMinZoomForCanvas = () => {
-      try {
-        const w = canvas.getBoundingClientRect().width || canvas.clientWidth || 0;
-        if (!w) return;
-        const next = computeMinZoomForWidth(w);
-        if (next !== map.getMinZoom()) {
-          map.setMinZoom(next);
-          if (map.getZoom() < next) {
-            map.setZoom(next, { animate: false });
-          }
-        }
-      } catch {}
-    };
     const ro = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(() => {
-          try { map.invalidateSize(); } catch {}
-          applyMinZoomForCanvas();
-        })
+      ? new ResizeObserver(() => { try { map.invalidateSize(); } catch {} })
       : null;
     if (ro && canvas) ro.observe(canvas);
-    // Refine immediately in case the canvas just laid out.
-    applyMinZoomForCanvas();
     track(() => { if (ro) { try { ro.disconnect(); } catch {} } });
 
     // Click-outside on mobile closes carrier panel
@@ -1668,6 +1588,40 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     };
 
     // Expose BEFORE ready resolves so callers can `await w.ready`.
+    // overlay hook: js/map-overlay.js needs the raw Leaflet map for
+    // latLngToContainerPoint() during overlay positioning. Internal use only.
+    api._getLeafletMap = () => map;
+    api._getLoads = () => loads;
+
+    // Selection emphasis: highlight a load's pickup pin, dropoff pin, and
+    // lane polyline. Reverts the previously-emphasized load. `id` may be
+    // null/undefined to clear.
+    let _emphasizedLoadId = null;
+    function _applyEmphasis(loadId, on) {
+      const entry = loadId && registry.get(loadId);
+      if (!entry || entry.kind !== 'load') return;
+      [entry.pickup, entry.dropoff].forEach((m) => {
+        if (!m) return;
+        const root = m.getElement();
+        const pin = root && root.querySelector('.map-pin');
+        if (pin) pin.classList.toggle('is-selected-load', !!on);
+      });
+      if (entry.lane) {
+        try {
+          const path = entry.lane._path;
+          if (path) path.classList.toggle('is-selected-load', !!on);
+          if (on) entry.lane.setStyle({ weight: 5 });
+          else    entry.lane.setStyle({ weight: 2 });
+          if (on && typeof entry.lane.bringToFront === 'function') entry.lane.bringToFront();
+        } catch {}
+      }
+    }
+    api._setLoadEmphasis = (loadId) => {
+      if (_emphasizedLoadId === loadId) return;
+      if (_emphasizedLoadId) _applyEmphasis(_emphasizedLoadId, false);
+      _emphasizedLoadId = loadId || null;
+      if (_emphasizedLoadId) _applyEmphasis(_emphasizedLoadId, true);
+    };
     window.__mapWidget = api;
     track(() => { if (window.__mapWidget === api) { try { delete window.__mapWidget; } catch { window.__mapWidget = undefined; } } });
 

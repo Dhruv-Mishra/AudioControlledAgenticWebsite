@@ -281,6 +281,30 @@ const STATIC_TOOL_DECLARATIONS = [
     }
   },
   {
+    name: 'get_live_state',
+    description:
+      'Read the live header ticker state: clock, count of loads currently in motion, carriers online, revenue booked today. Use to ground answers about "right now".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'get_ui_selection',
+    description:
+      'Return the user\'s current page, the currently-selected load or carrier (if any), and the focused form field with its current value. Use this any time the user says "this", "that", "the one I clicked".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'get_form_draft',
+    description:
+      'Return a snapshot of every form field on the current page (id → value). Excludes passwords, file inputs, credit-card fields, and anything marked data-private.',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'get_activity_feed',
+    description:
+      'Read the homepage activity feed: a chronological list of recent dispatch events (picked up, delayed, booked, delivered, posted, quoted, countered) with relative timestamps. Auto-refreshes every 5 minutes. Use to answer "what just happened?" or summarise recent ops.',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
     name: 'filter_carriers',
     description:
       'Filter the carrier directory. Params combine with AND.',

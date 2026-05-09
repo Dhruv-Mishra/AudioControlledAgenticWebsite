@@ -1,0 +1,252 @@
+/* enhancements.css — additions for live ticker, typewriter caret,
+   moving truck markers, list progress bars, selection highlight,
+   negotiation history, carrier monogram badge. */
+
+/* --- Map overlay (non-invasive: zero-size anchor inside Leaflet's overlayPane).
+   IMPORTANT: must be `overflow: visible` and zero-size so absolutely-positioned
+   children (translated by translate3d(layerPoint.x, layerPoint.y)) are not
+   clipped. Earlier `inset:0; overflow:hidden` clipped every truck. --- */
+.map-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 410;
+}
+.map-overlay.is-hidden { display: none; }
+
+/* --- Selected load emphasis on pickup/dropoff pins + lane polyline --- */
+.map-pin.is-selected-load {
+  outline: 2px solid var(--color-accent, #f6c177);
+  outline-offset: 2px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 6px rgba(246,177,119,0.28);
+  animation: mapPinSelectedPulse 1.6s ease-out infinite;
+}
+@keyframes mapPinSelectedPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(246,177,119,0.55); }
+  70%  { box-shadow: 0 0 0 12px rgba(246,177,119,0); }
+  100% { box-shadow: 0 0 0 0 rgba(246,177,119,0); }
+}
+/* Selection pulse runs even with reduced-motion (per project override). */
+.map-lane.is-selected-load {
+  stroke: #7df0c4 !important;
+  stroke-width: 5 !important;
+  stroke-opacity: 1 !important;
+  stroke-dasharray: none !important;
+  filter: drop-shadow(0 0 6px rgba(125,240,196,0.6));
+}
+.map-overlay-truck {
+  position: absolute;
+  top: 0; left: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-bg, #0c0c0d);
+  border: 1.5px solid var(--color-info, #60a5fa);
+  color: var(--color-info, #60a5fa);
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 0;
+  will-change: transform;
+  transition: box-shadow 180ms ease, border-color 180ms ease;
+  box-shadow: 0 0 0 4px rgba(96,165,250,0.18);
+}
+.map-overlay-truck[data-status="delayed"] {
+  border-color: var(--color-danger, #f87171);
+  color: var(--color-danger, #f87171);
+  box-shadow: 0 0 0 4px rgba(248,113,113,0.18);
+}
+.map-overlay-truck:hover, .map-overlay-truck.is-selected {
+  box-shadow: 0 0 0 6px rgba(96,165,250,0.32);
+}
+.map-overlay-truck.is-selected {
+  border-color: var(--color-accent, #f6c177);
+  color: var(--color-accent, #f6c177);
+}
+.map-overlay-truck svg { display: block; }
+
+/* --- Live ticker (header right rail) --- */
+.live-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.4em 0.85em;
+  margin-right: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--color-text, #f5f5f5);
+  background: var(--color-surface-2, rgba(255,255,255,0.06));
+  border: 1px solid var(--color-border, rgba(255,255,255,0.12));
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.live-strip-clock { color: var(--color-text, #fff); font-weight: 600; }
+.live-strip-metric { color: var(--color-text-dim, #c8c8c8); }
+.live-strip-metric .mono { color: var(--color-text, #fff); }
+.live-strip-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--color-ok, #4ade80);
+  box-shadow: 0 0 0 0 currentColor;
+  animation: liveStripPulse 1.6s ease-out infinite;
+}
+@keyframes liveStripPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74,222,128,0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(74,222,128,0); }
+  100% { box-shadow: 0 0 0 0 rgba(74,222,128,0); }
+}
+.live-strip-sep { opacity: 0.4; }
+@media (max-width: 720px) {
+  .live-strip-metric:not(:first-of-type), .live-strip-sep { display: none; }
+  .live-strip { padding: 0.3em 0.6em; font-size: 0.74rem; }
+}
+/* User override: ticker pulse runs even with reduced-motion. */
+
+/* --- Typewriter caret (animation runs always, per user override) --- */
+.tw-typing::after {
+  content: '';
+  display: inline-block;
+  width: 0.08em;
+  height: 0.95em;
+  margin-left: 0.06em;
+  vertical-align: -0.12em;
+  background: currentColor;
+  animation: twBlink 0.85s steps(1) infinite;
+  opacity: 0.85;
+}
+.tw-typing.tw-done::after { animation: none; opacity: 0; transition: opacity 0.4s ease; }
+@keyframes twBlink { 50% { opacity: 0; } }
+/* Map moving truck pin: GPU-composite hint so rapid setLatLng during the
+   1Hz tick doesn't trigger layout/paint on the main thread. */
+.map-pin--moving { will-change: transform; }
+
+/* --- Map list progress bar (under each in-transit load row) --- */
+.map-list-progress {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 0.3em;
+  background: var(--color-border, rgba(255,255,255,0.08));
+  border-radius: 999px;
+  overflow: visible;
+}
+.map-list-progress > span:first-child {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-info, #60a5fa);
+  transition: width 1s linear;
+}
+.map-list-progress[data-status="delayed"] > span:first-child { background: var(--color-danger, #f87171); }
+.map-list-progress[data-status="delivered"] > span:first-child { background: var(--color-ok, #4ade80); }
+.map-list-progress-sprite {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translate(-50%, -50%);
+  width: 14px; height: 14px;
+  background: var(--color-bg, #0c0c0d);
+  border: 1.5px solid var(--color-info, #60a5fa);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  color: var(--color-info, #60a5fa);
+  pointer-events: none;
+  transition: left 1s linear;
+  z-index: 2;
+}
+.map-list-progress-sprite::before {
+  content: '';
+  width: 0; height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+  margin-left: 1px;
+}
+.map-list-progress[data-status="delayed"] .map-list-progress-sprite { border-color: var(--color-danger, #f87171); color: var(--color-danger, #f87171); }
+.map-list-progress[data-status="delivered"] .map-list-progress-sprite { display: none; }
+.map-list-eta { font-size: 0.72rem; opacity: 0.75; margin-left: 0.3em; }
+
+/* --- Map: selected load highlight --- */
+.map-filter-list-item.is-selected {
+  outline: 2px solid var(--color-accent, #f6c177);
+  outline-offset: -2px;
+  background: var(--color-surface-2, rgba(255,255,255,0.04));
+}
+
+/* --- Map: moving truck marker --- */
+.map-pin--moving {
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  color: var(--color-info, #60a5fa);
+  background: var(--color-bg, #0c0c0d);
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgba(96,165,250,0.18);
+  transition: transform 1s linear, color 0.3s ease;
+}
+.map-pin--moving[data-status="delayed"] { color: var(--color-danger, #f87171); box-shadow: 0 0 0 4px rgba(248,113,113,0.18); }
+.map-pin--moving svg { width: 14px; height: 14px; }
+
+/* --- Negotiation history + hint + locked accept --- */
+.negotiate-suggested-line { font-size: 0.85rem; margin: 0 0 0.4rem; }
+.negotiate-hint {
+  min-height: 1.2em;
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.82rem;
+  color: var(--color-text-dim);
+}
+.negotiate-hint[data-kind="warn"] { color: var(--color-warn, #f59e0b); }
+.negotiate-hint[data-kind="ok"]   { color: var(--color-ok, #4ade80); }
+
+.negotiate-history {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 0.45rem;
+  max-height: 360px; overflow-y: auto;
+}
+.negotiate-history-item {
+  display: flex; flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--color-surface-2, rgba(255,255,255,0.03));
+  border: 1px solid var(--color-border, rgba(255,255,255,0.06));
+  border-radius: 8px;
+  font-size: 0.82rem;
+}
+.negotiate-history-item[data-kind="accept"] { border-color: rgba(74,222,128,0.35); }
+.negotiate-history-item[data-kind="reject"], .negotiate-history-item[data-kind="error"] { border-color: rgba(248,113,113,0.35); }
+.negotiate-history-meta { font-size: 0.72rem; opacity: 0.7; }
+.negotiate-history-body { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.negotiate-history-empty { padding: 0.5rem; }
+
+.btn--locked {
+  background: var(--color-ok, #4ade80) !important;
+  color: var(--color-bg, #0c0c0d) !important;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* --- Carrier card monogram badge --- */
+.carrier-card-thumb { position: relative; }
+.carrier-card-monogram {
+  position: absolute;
+  top: 0.5rem; left: 0.5rem;
+  display: inline-grid; place-items: center;
+  width: 34px; height: 34px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-text, #fff);
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  pointer-events: none;
+  text-transform: uppercase;
+}

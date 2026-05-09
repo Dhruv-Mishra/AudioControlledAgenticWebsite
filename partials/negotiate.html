@@ -2,13 +2,13 @@
      numerals echo the negotiation table below. -->
 <div class="hero-band hero-band--negotiate">
   <picture>
-    <source srcset="/public/images/hero/dispatch-console.webp" type="image/webp" />
-    <img src="/public/images/hero/dispatch-console.webp"
-         alt="Dispatch console at night"
+    <source srcset="/public/images/hero/container-yard.webp" type="image/webp" />
+    <img src="/public/images/hero/container-yard.webp"
+         alt="Intermodal container yard at dusk with stacked boxes"
          width="1600" height="600"
          loading="eager" fetchpriority="high"
          decoding="async"
-         data-agent-description="A wide-angle photo of a dispatch console at night, with multiple monitors showing fleet maps and lane analytics." />
+         data-agent-description="An intermodal container yard at dusk with stacked boxes — the closing point of every successful negotiation." />
   </picture>
   <div class="hero-overlay" data-agent-id="negotiate.hero.overlay">
     <p class="eyebrow">The desk</p>
@@ -39,6 +39,10 @@
         </div>
       </div>
 
+      <p class="negotiate-suggested-line muted">Suggested for this lane: <strong id="negotiate-suggested" class="mono">—</strong> &middot; offers within ±25% accepted.</p>
+      <p id="negotiate-hint" class="negotiate-hint" role="status" aria-live="polite"></p>
+      <span id="negotiate-live" class="sr-only" role="status" aria-live="polite"></span>
+
       <div class="form-grid">
         <div class="field">
           <label class="field-label" for="field-pickup">Pickup</label>
@@ -66,7 +70,7 @@
         </div>
         <div class="field--wide">
           <div class="row" role="group" aria-label="Negotiation actions">
-            <button class="btn btn--primary" type="submit" data-agent-id="negotiate.submit">Submit quote</button>
+            <button class="btn btn--primary" type="submit" id="negotiate-submit" data-agent-id="negotiate.submit">Submit offer</button>
             <button class="btn" type="button" id="btn-counter" data-agent-id="negotiate.counter">Log carrier counter</button>
             <button class="btn btn--ghost" type="button" id="btn-accept" data-agent-id="negotiate.accept">Accept</button>
           </div>
@@ -75,13 +79,13 @@
     </div>
   </form>
 
-  <aside class="panel" aria-label="Negotiation log">
+  <aside class="panel" aria-label="Negotiation history">
     <header class="panel-header">
-      <div class="panel-title">Negotiation log</div>
+      <div class="panel-title">History</div>
       <span class="muted">Newest first</span>
     </header>
     <div class="panel-body">
-      <div class="convo-log" id="convo-log" data-agent-id="negotiate.log" aria-live="polite"></div>
+      <ol id="negotiate-history" class="negotiate-history" data-agent-id="negotiate.log"></ol>
     </div>
   </aside>
 </div>
@@ -99,9 +103,9 @@
   <ul class="lane-card-grid" data-agent-id="negotiate.lanes.cards">
     <li class="lane-card" data-agent-id="negotiate.lane.midwest">
       <figure>
-        <img src="/public/images/lanes/i80-corridor.webp" alt="I-80 corridor traffic"
+        <img src="/public/images/hero/highway-signage.webp" alt="Interstate highway signage at sunset"
              loading="lazy" decoding="async" width="800" height="533"
-             data-agent-description="I-80 corridor traffic, representative of the Chicago-to-Dallas dry-van lane mix." />
+             data-agent-description="Highway signage at sunset, representative of midwest dry-van traffic on I-80." />
         <figcaption>
           <span class="lane-tag">I-80</span>
           <strong>Chicago &rarr; Dallas</strong>
@@ -111,9 +115,9 @@
     </li>
     <li class="lane-card" data-agent-id="negotiate.lane.southeast">
       <figure>
-        <img src="/public/images/lanes/i95-spine.webp" alt="I-95 spine traffic"
+        <img src="/public/images/ambient/port-yard.webp" alt="Port yard with stacked containers"
              loading="lazy" decoding="async" width="800" height="533"
-             data-agent-description="I-95 spine traffic representative of Atlanta-to-Newark spot freight." />
+             data-agent-description="Port yard with stacked containers — representative of Atlanta-to-Newark spot freight feeding east-coast ports." />
         <figcaption>
           <span class="lane-tag">I-95</span>
           <strong>Atlanta &rarr; Newark</strong>
@@ -123,9 +127,9 @@
     </li>
     <li class="lane-card" data-agent-id="negotiate.lane.westcoast">
       <figure>
-        <img src="/public/images/lanes/i5-reefer.webp" alt="Pacific coastal highway reefer traffic"
+        <img src="/public/images/ambient/paper-logbook.webp" alt="Driver paper logbook"
              loading="lazy" decoding="async" width="800" height="533"
-             data-agent-description="Pacific coastal highway scene representative of LA-to-Seattle reefer freight." />
+             data-agent-description="A driver's paper logbook — representative of the long-haul reefer runs the LA-to-Seattle lane requires." />
         <figcaption>
           <span class="lane-tag">I-5 reefer</span>
           <strong>Los Angeles &rarr; Seattle</strong>

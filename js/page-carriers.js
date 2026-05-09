@@ -50,12 +50,14 @@ function renderGrid() {
     // generic truck silhouette so a missing slug doesn't 404.
     const slug = c.imageSlug || 'truck-generic';
     const imgSrc = `/public/images/carriers/${escapeHtml(slug)}.webp`;
+    const initials = (c.name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
     card.innerHTML = `
       <a class="carrier-card-thumb" href="#" data-agent-id="carriers.card.${c.id}.thumb"
          aria-label="${escapeHtml(c.name)} truck photo"
          data-agent-description="Truck photo for ${escapeHtml(c.name)} (${escapeHtml(c.equipment.join(', '))}).">
         <img src="${imgSrc}" alt="${escapeHtml(c.name)} ${escapeHtml(c.equipment[0] || 'truck')}"
              loading="lazy" decoding="async" width="320" height="180" />
+        <span class="carrier-card-monogram" aria-hidden="true">${escapeHtml(initials)}</span>
         <span class="carrier-card-thumb-eq">${escapeHtml(c.equipment[0] || 'Equipment')}</span>
       </a>
       <div class="carrier-card-body">

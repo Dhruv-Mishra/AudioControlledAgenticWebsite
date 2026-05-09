@@ -69,6 +69,25 @@ export async function enter(root, { voiceAgent }) {
     instance = await createMap(mapRoot, data, (earlyApi) => {
       instance = { api: earlyApi, destroy: earlyApi.destroy };
     });
+    // --- Non-invasive overlay: trucks + list progress + click selection.
+    // Mounted AFTER createMap resolves, hooks via widget._getLeafletMap()
+    // exposed for this purpose. Errors here MUST NOT break the map.
+    try {
+      const { mountOverlay } = await import('./map-overlay.js');
+      const widgetApi = instance && instance.api;
+      if (widgetApi) {
+        const destroyOverlay = mountOverlay({ widgetApi, root: mapRoot, loads: data.loads });
+        if (instance && typeof destroyOverlay === 'function') {
+          const origDestroy = instance.destroy;
+          instance.destroy = () => {
+            try { destroyOverlay(); } catch {}
+            try { origDestroy && origDestroy(); } catch {}
+          };
+        }
+      }
+    } catch (overlayErr) {
+      console.warn('[page-map] overlay mount failed (non-fatal)', overlayErr);
+    }
   } catch (err) {
     console.error('[page-map] createMap failed', err);
     renderErrorBanner(mapRoot, 'Map failed to mount: ' + (err && err.message || err));

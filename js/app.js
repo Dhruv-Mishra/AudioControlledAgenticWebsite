@@ -14,6 +14,11 @@ import { bootstrapVoiceShell } from './ui.js';
 import { Router } from './router.js';
 import { applyDispatchFilters, applyCarrierFilters } from './tool-registry.js';
 import { setActivityNote } from './activity-indicator.js';
+import { startLiveUi, getLiveState } from './live-ui.js';
+import { autoApplyTypewriter } from './typewriter.js';
+import {
+  getSelection, recordFormInput, recordFormFocus, getFormDraft, getFocusedField
+} from './page-state.js';
 
 function onIdle(fn) {
   const run = () => { try { fn(); } catch (err) { console.error('[app] idle task failed', err); } };
@@ -43,12 +48,49 @@ async function main() {
       if (agent && typeof agent.handleRouteChange === 'function') {
         agent.handleRouteChange({ path });
       }
+      // Re-apply typewriter to the new route's primary heading.
+      try {
+        requestAnimationFrame(() => autoApplyTypewriter(target));
+      } catch {}
     }
   });
   window.__router = router;
 
+  // Live header ticker — starts once, ticks every second.
+  try { startLiveUi(); } catch (err) { console.error('[app] live-ui', err); }
+
+  // One-time cleanup: a previous build registered a tile-caching Service
+  // Worker at /public/sw-tiles.js. That file no longer exists; unregister
+  // any cached registration so users coming from the old build aren't
+  // served from a stale SW that intercepts tile requests.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations?.().then((regs) => {
+      regs.forEach((r) => {
+        const url = (r.active && r.active.scriptURL) || (r.installing && r.installing.scriptURL) || '';
+        if (/sw-tiles\.js$/.test(url)) r.unregister().catch(() => {});
+      });
+    }).catch(() => {});
+  }
+
+
+  // Delegated form-draft + focus capture so the agent always knows what
+  // the user is currently typing / focused on. Skips passwords + cc-* +
+  // [data-private] (see page-state.js).
+  document.addEventListener('input', (ev) => {
+    const el = ev.target;
+    if (!(el instanceof Element)) return;
+    if (el.matches('input, textarea, select')) recordFormInput(el);
+  }, true);
+  document.addEventListener('focusin', (ev) => {
+    const el = ev.target;
+    if (el instanceof Element && el.matches('input, textarea, select')) recordFormFocus(el);
+  });
+  document.addEventListener('focusout', () => recordFormFocus(null));
+
   // First render — `replace: true` so we don't push a history entry.
   await router.navigate(location.pathname, { replace: true });
+  // Initial typewriter pass after first render.
+  try { requestAnimationFrame(() => autoApplyTypewriter(target)); } catch {}
 
   // --- Map tools: registered eagerly so they work the moment the agent
   // connects (before onIdle fires). Every handler validates args FIRST,
@@ -161,6 +203,18 @@ async function main() {
       // in their own page-*.js). These are DOM-scoped via known agent_ids.
       agent.toolRegistry.registerDomain('filter_loads', (args) => applyDispatchFilters(args || {}));
       agent.toolRegistry.registerDomain('filter_carriers', (args) => applyCarrierFilters(args || {}));
+
+      // --- Awareness tools (Task 1 + Task 3) ---
+      agent.toolRegistry.registerDomain('get_live_state', () => getLiveState());
+      agent.toolRegistry.registerDomain('get_ui_selection', () => ({
+        page: location.pathname,
+        selection: getSelection(),
+        focused_field: getFocusedField()
+      }));
+      agent.toolRegistry.registerDomain('get_form_draft', () => ({
+        page: location.pathname,
+        fields: getFormDraft()
+      }));
       agent.toolRegistry.registerDomain('set_captions', (args) => {
         const enabled = !!(args && args.enabled);
         const mode = agent.setCaptionsEnabled(enabled);

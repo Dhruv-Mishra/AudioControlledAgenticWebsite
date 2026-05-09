@@ -274,39 +274,57 @@ function renderActivityFeed() {
   const ul = document.getElementById('activity-feed');
   if (!ul) return;
   const loads = state.loads || [];
-  // Synthesize a chronological event stream from the load snapshot.
-  const events = [];
-  loads.forEach((l) => {
-    if (l.status === 'in_transit') {
-      events.push({ kind: 'transit', when: l.eta ? new Date(l.eta).getTime() - 1000 * 60 * 60 * 6 : Date.now(), load: l });
-    } else if (l.status === 'delayed') {
-      events.push({ kind: 'delayed', when: Date.now() - Math.random() * 1000 * 60 * 90, load: l });
-    } else if (l.status === 'booked') {
-      events.push({ kind: 'booked', when: Date.now() - Math.random() * 1000 * 60 * 240, load: l });
-    } else if (l.status === 'delivered') {
-      events.push({ kind: 'delivered', when: Date.now() - Math.random() * 1000 * 60 * 60 * 18, load: l });
-    } else if (l.status === 'pending') {
-      events.push({ kind: 'pending', when: Date.now() - Math.random() * 1000 * 60 * 30, load: l });
-    }
-  });
-  events.sort((a, b) => b.when - a.when);
-  const fmtRel = (ts) => {
-    const mins = Math.max(0, Math.round((Date.now() - ts) / 60000));
-    if (mins < 1) return 'just now';
-    if (mins < 60) return mins + 'm ago';
-    const hrs = Math.round(mins / 60);
-    if (hrs < 24) return hrs + 'h ago';
-    return Math.round(hrs / 24) + 'd ago';
-  };
+  // Build the initial event stream once per page mount, then mutate it
+  // in-place via tickActivityFeed() so the agent's `get_activity_feed`
+  // tool can read a stable, growing list.
+  if (!state._activityEvents) {
+    const events = [];
+    loads.forEach((l) => {
+      if (l.status === 'in_transit') {
+        events.push({ kind: 'transit', when: l.eta ? new Date(l.eta).getTime() - 1000 * 60 * 60 * 6 : Date.now(), load: l });
+      } else if (l.status === 'delayed') {
+        events.push({ kind: 'delayed', when: Date.now() - Math.random() * 1000 * 60 * 90, load: l });
+      } else if (l.status === 'booked') {
+        events.push({ kind: 'booked', when: Date.now() - Math.random() * 1000 * 60 * 240, load: l });
+      } else if (l.status === 'delivered') {
+        events.push({ kind: 'delivered', when: Date.now() - Math.random() * 1000 * 60 * 60 * 18, load: l });
+      } else if (l.status === 'pending') {
+        events.push({ kind: 'pending', when: Date.now() - Math.random() * 1000 * 60 * 30, load: l });
+      }
+    });
+    events.sort((a, b) => b.when - a.when);
+    state._activityEvents = events;
+  }
+  // Mirror to a window global so the agent tool can read without
+  // crossing module boundaries.
+  try { window.__activityFeed = state._activityEvents; } catch {}
+  paintActivityFeed();
+}
+
+function relTimeText(ts) {
+  const mins = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + ' min ago';
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + ' hr ago';
+  return Math.round(hrs / 24) + ' d ago';
+}
+
+function paintActivityFeed() {
+  const ul = document.getElementById('activity-feed');
+  if (!ul || !state || !Array.isArray(state._activityEvents)) return;
   const labels = {
     transit:   { dot: 'info',    text: 'Picked up' },
     delayed:   { dot: 'danger',  text: 'Delayed' },
     booked:    { dot: 'ok',      text: 'Carrier booked' },
     delivered: { dot: 'neutral', text: 'Delivered' },
-    pending:   { dot: 'warn',    text: 'Posted' }
+    pending:   { dot: 'warn',    text: 'Posted' },
+    countered: { dot: 'warn',    text: 'Carrier countered' },
+    quoted:    { dot: 'info',    text: 'Quote submitted' },
+    available: { dot: 'ok',      text: 'Carrier available' }
   };
   ul.replaceChildren();
-  events.slice(0, 12).forEach((ev) => {
+  state._activityEvents.slice(0, 12).forEach((ev) => {
     const meta = labels[ev.kind] || labels.pending;
     const li = document.createElement('li');
     li.className = 'activity-item';
@@ -323,13 +341,41 @@ function renderActivityFeed() {
         <div class="activity-meta muted">
           ${escapeHtml(ev.load.carrier || 'Unassigned')} &middot;
           ${ev.load.rate ? '$' + ev.load.rate.toLocaleString('en-US') : '—'} &middot;
-          <time datetime="${new Date(ev.when).toISOString()}">${fmtRel(ev.when)}</time>
+          <time datetime="${new Date(ev.when).toISOString()}" data-rel-time="${ev.when}">${escapeHtml(relTimeText(ev.when))}</time>
         </div>
       </div>
     `;
     li.addEventListener('click', () => selectLoad(ev.load.id));
     ul.appendChild(li);
   });
+}
+
+// Cheap text-only refresh — runs every 30s to keep "4 min ago" honest
+// without rebuilding the whole list.
+function tickActivityRelTimes() {
+  const ul = document.getElementById('activity-feed');
+  if (!ul) return;
+  ul.querySelectorAll('time[data-rel-time]').forEach((t) => {
+    const ts = Number(t.getAttribute('data-rel-time'));
+    if (Number.isFinite(ts)) t.textContent = relTimeText(ts);
+  });
+}
+
+// Inject a fresh synthetic event every 5 min so the feed feels live.
+// Cycles deterministically through a small pool of templates and the
+// available loads/carriers — no randomness so reload stays stable.
+function tickActivityInjector() {
+  if (!state || !Array.isArray(state._activityEvents)) return;
+  const loads = state.loads || [];
+  if (!loads.length) return;
+  const pool = ['transit', 'booked', 'quoted', 'countered', 'available', 'delayed'];
+  const minute = Math.floor(Date.now() / 60000);
+  const kind = pool[minute % pool.length];
+  const load = loads[minute % loads.length];
+  state._activityEvents.unshift({ kind, when: Date.now(), load });
+  if (state._activityEvents.length > 24) state._activityEvents.length = 24;
+  try { window.__activityFeed = state._activityEvents; } catch {}
+  paintActivityFeed();
 }
 
 function bindFilters() {
@@ -371,7 +417,27 @@ export async function enter(root, { voiceAgent }) {
   bindMapCard();
   bindFilters();
 
+  // Live timers: refresh "X min ago" labels every 30s, inject a fresh
+  // event every 5 minutes. Cleared in exit().
+  if (state._relTimer) clearInterval(state._relTimer);
+  if (state._injectTimer) clearInterval(state._injectTimer);
+  state._relTimer = setInterval(tickActivityRelTimes, 30_000);
+  state._injectTimer = setInterval(tickActivityInjector, 5 * 60_000);
+
   if (voiceAgent && voiceAgent.toolRegistry) {
+    voiceAgent.toolRegistry.registerDomain('get_activity_feed', () => {
+      const list = (state && state._activityEvents) || [];
+      return {
+        ok: true,
+        events: list.slice(0, 12).map((ev) => ({
+          kind: ev.kind,
+          load_id: ev.load && ev.load.id,
+          summary: `${ev.kind} on ${ev.load && ev.load.id} (${ev.load && ev.load.pickup} → ${ev.load && ev.load.dropoff})`,
+          ago_text: relTimeText(ev.when),
+          timestamp_iso: new Date(ev.when).toISOString()
+        }))
+      };
+    });
     voiceAgent.toolRegistry.registerDomain('get_load', (args) => {
       const l = state.loads.find((x) => x.id === String(args.load_id || '').trim());
       if (!l) return { ok: false, error: `No load ${args.load_id}` };
@@ -417,7 +483,12 @@ export async function enter(root, { voiceAgent }) {
 }
 
 export function exit() {
+  if (state) {
+    if (state._relTimer) clearInterval(state._relTimer);
+    if (state._injectTimer) clearInterval(state._injectTimer);
+  }
   if (agentRef && agentRef.toolRegistry && typeof agentRef.toolRegistry.unregisterDomain === 'function') {
+    agentRef.toolRegistry.unregisterDomain('get_activity_feed');
     agentRef.toolRegistry.unregisterDomain('get_load');
     agentRef.toolRegistry.unregisterDomain('assign_carrier');
     agentRef.toolRegistry.unregisterDomain('submit_quote');

@@ -124,23 +124,6 @@
   flex-shrink: 0;
 }
 
-/* v3 icon slot — replaces the bare dot with a 24×24 SVG glyph
- * (route arrow for loads, truck silhouette for carriers). currentColor
- * is set inline by JS to the row's status colour. */
-.map-filter-list-item .map-list-icon {
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-muted);
-}
-.map-filter-list-item .map-list-icon svg { display: block; }
-.map-filter-list-item:hover .map-list-icon {
-  filter: drop-shadow(0 0 6px color-mix(in oklab, currentColor 50%, transparent));
-}
-
 .map-filter-list-item .meta {
   display: block;
   font-family: var(--font-mono);
@@ -168,10 +151,6 @@
   background: var(--color-map-bg);
   position: relative;
   isolation: isolate;
-  /* Containment: tells the browser this subtree's paint and layout don't
-   * affect anything outside, so Leaflet's per-frame tile movements + lane
-   * animations don't trigger style recalcs on the rest of the SPA. */
-  contain: layout paint style;
   transition: opacity var(--dur-base) var(--ease-out-expo);
 }
 
@@ -182,16 +161,6 @@
 [data-theme="light"] .map-canvas .leaflet-tile {
   filter: saturate(0.95) brightness(1.02);
 }
-
-/* Tile fade-in tuning. Leaflet's default `fadeAnimation` ramps each tile's
- * opacity 0 → 1 over ~200 ms, which on slow networks reads as flicker /
- * tiling against the previous-zoom backdrop. We cut it to a 90 ms ease so
- * loaded tiles snap in cleanly while still hiding the raw paint. */
-.map-canvas .leaflet-tile {
-  transition: opacity 90ms linear !important;
-  will-change: opacity;
-}
-.map-canvas .leaflet-tile-loaded { opacity: 1 !important; }
 
 .map-canvas[aria-hidden="true"] {
   opacity: 0;
@@ -365,40 +334,24 @@
 }
 
 /* ============================================================
- * 7. Lane polylines — animated traveling dash on active routes.
- * The pending lanes use the warn token + a wider static dash; active
- * lanes ride a 12 px stroke-dashoffset loop so the route reads as
- * "freight in motion" instead of a static highlight. SVG `pathLength`
- * is irrelevant here — Leaflet doesn't expose it — so we lean on a
- * simple dasharray + animated offset, which the GPU compositor handles
- * cheaply. Reduced-motion freezes the dash entirely.
+ * 7. Lane polylines — lime active, warn pending, 3 px round
  * ============================================================ */
 
-@keyframes map-lane-flow {
-  from { stroke-dashoffset: 0; }
-  to   { stroke-dashoffset: -24; }
-}
-
 .leaflet-interactive.map-lane {
-  stroke: var(--color-map-polyline);
+  stroke: #e0b35a;
   stroke-width: 3px;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 14 10;
-  animation: map-lane-flow 1400ms linear infinite;
+  stroke-dasharray: 1 9;
+  stroke-opacity: 0.95;
 }
 .leaflet-interactive.map-lane--pending {
-  stroke: var(--color-map-polyline-pending);
+  stroke: #c9a26a;
   stroke-width: 3px;
-  stroke-dasharray: 6 6;
-  animation-duration: 2200ms;
+  stroke-dasharray: 1 9;
+  stroke-opacity: 0.85;
 }
 .leaflet-interactive.map-lane:hover { stroke-width: 4px; }
-
-@media (prefers-reduced-motion: reduce) {
-  .leaflet-interactive.map-lane,
-  .leaflet-interactive.map-lane--pending { animation: none; }
-}
 
 /* ============================================================
  * 8. Popups — M3 tonal container

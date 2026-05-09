@@ -91,3 +91,112 @@ export function clear(routeName) {
   if (routeName) store.delete(routeName);
   else store.clear();
 }
+
+// ---------------------------------------------------------------------------
+// UI selection + form draft (agent-aware context).
+//
+// Survives SPA route switches via in-memory state, persists across hard
+// refreshes via sessionStorage so clicking a load on the map and then
+// hitting F5 keeps that load selected.
+// ---------------------------------------------------------------------------
+
+const SEL_KEY = 'jarvis.selection';
+const DRAFT_KEY = 'jarvis.formDraft';
+
+function readJson(key) {
+  try { const raw = sessionStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+function writeJson(key, v) {
+  try { sessionStorage.setItem(key, JSON.stringify(v)); } catch {}
+}
+
+const selection = readJson(SEL_KEY) || { loadId: null, carrierId: null, kind: null, label: null, at: null };
+let formDraftCache = readJson(DRAFT_KEY) || {};
+const subscribers = new Set();
+let lastFocusedField = null;
+
+function notify() {
+  subscribers.forEach((fn) => { try { fn(getSelection()); } catch {} });
+}
+
+export function getSelection() {
+  return { ...selection };
+}
+
+export function selectLoad(id, label) {
+  if (!id) return;
+  selection.kind = 'load';
+  selection.loadId = String(id);
+  selection.carrierId = null;
+  selection.label = label || String(id);
+  selection.at = new Date().toISOString();
+  writeJson(SEL_KEY, selection);
+  notify();
+  try { window.dispatchEvent(new CustomEvent('jarvis:selection', { detail: getSelection() })); } catch {}
+}
+
+export function selectCarrier(id, label) {
+  if (!id) return;
+  selection.kind = 'carrier';
+  selection.carrierId = String(id);
+  selection.loadId = null;
+  selection.label = label || String(id);
+  selection.at = new Date().toISOString();
+  writeJson(SEL_KEY, selection);
+  notify();
+  try { window.dispatchEvent(new CustomEvent('jarvis:selection', { detail: getSelection() })); } catch {}
+}
+
+export function clearSelection() {
+  selection.kind = null;
+  selection.loadId = null;
+  selection.carrierId = null;
+  selection.label = null;
+  selection.at = null;
+  writeJson(SEL_KEY, selection);
+  notify();
+}
+
+export function subscribeSelection(fn) {
+  subscribers.add(fn);
+  return () => subscribers.delete(fn);
+}
+
+// Form-draft: a delegated 'input' listener installed in app.js feeds this.
+export function recordFormInput(el) {
+  if (!el || el.type === 'password' || el.type === 'file') return;
+  if (el.dataset && el.dataset.private === 'true') return;
+  const ac = (el.getAttribute && el.getAttribute('autocomplete')) || '';
+  if (/^cc-/.test(ac)) return;
+  const key = el.id || el.name;
+  if (!key) return;
+  let value;
+  if (el.type === 'checkbox' || el.type === 'radio') value = !!el.checked;
+  else value = String(el.value || '').slice(0, 500);
+  const page = location.pathname || '/';
+  if (!formDraftCache[page]) formDraftCache[page] = {};
+  formDraftCache[page][key] = value;
+  writeJson(DRAFT_KEY, formDraftCache);
+}
+
+export function recordFormFocus(el) {
+  if (!el) { lastFocusedField = null; return; }
+  if (el.type === 'password' || el.type === 'file') { lastFocusedField = null; return; }
+  const key = el.id || el.name;
+  if (!key) { lastFocusedField = null; return; }
+  lastFocusedField = {
+    name: key,
+    type: el.type || el.tagName.toLowerCase(),
+    value: (el.type === 'checkbox' || el.type === 'radio') ? !!el.checked : String(el.value || '').slice(0, 200),
+    page: location.pathname || '/'
+  };
+}
+
+export function getFormDraft() {
+  const page = location.pathname || '/';
+  return formDraftCache[page] || {};
+}
+
+export function getFocusedField() {
+  return lastFocusedField ? { ...lastFocusedField } : null;
+}
