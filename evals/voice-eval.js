@@ -48,12 +48,15 @@ const DISPATCH_ELEMENTS = [
 ];
 
 const NEGOTIATE_ELEMENTS = [
-  { id: 'negotiate.form.pickup', role: 'input', label: 'Pickup' },
-  { id: 'negotiate.form.dropoff', role: 'input', label: 'Dropoff' },
+  { id: 'negotiate.form.pickup', role: 'select', label: 'Pickup' },
+  { id: 'negotiate.form.dropoff', role: 'select', label: 'Dropoff' },
+  { id: 'negotiate.form.commodity', role: 'select', label: 'Commodity' },
   { id: 'negotiate.form.target_rate', role: 'input', label: 'Target rate (USD)' },
+  { id: 'negotiate.form.agent_max_rate', role: 'input', label: 'Jarvis max rate' },
   { id: 'negotiate.form.note', role: 'input', label: 'Note for carrier' },
   { id: 'negotiate.submit', role: 'button', label: 'Submit quote' },
-  { id: 'negotiate.counter', role: 'button', label: 'Log carrier counter' }
+  { id: 'negotiate.counter', role: 'button', label: 'Ask seller' },
+  { id: 'negotiate.agent.take_turn', role: 'button', label: 'Jarvis negotiate' }
 ];
 
 const CARRIER_ELEMENTS = [

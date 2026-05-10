@@ -182,13 +182,23 @@ body.is-modal-open {
 /* Actions — pinned at end of flex column, with top divider */
 .load-modal-actions {
   flex-shrink: 0;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
   gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-5);
   padding-bottom: max(var(--sp-3), env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-elev-3);
+}
+.load-modal-actions .btn {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 40px;
+  padding-block: var(--sp-2);
+  white-space: normal;
+  line-height: 1.15;
+  text-align: center;
 }
 
 /* Mobile — viewport bottom sheet. The sheet overlays the dock/list/map
@@ -246,13 +256,6 @@ body.is-modal-open {
   }
   .load-modal-actions .btn {
     min-height: 44px;
-    flex: 1 1 calc(50% - var(--sp-2));
-  }
-}
-
-@media (max-width: 380px) {
-  .load-modal-actions .btn {
-    flex-basis: 100%;
   }
 }
 

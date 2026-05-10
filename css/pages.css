@@ -667,6 +667,30 @@
 
 .form-grid .field--wide { grid-column: 1 / -1; }
 
+.negotiate-form-panel .select {
+  background-color: var(--md-sys-color-surface-container-low);
+}
+
+.negotiate-form-panel .row {
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.negotiate-form-panel .row .btn {
+  flex: 1 1 148px;
+  min-width: 0;
+  height: auto;
+  min-height: 40px;
+  padding-block: var(--sp-2);
+  line-height: 1.15;
+  white-space: normal;
+  text-align: center;
+}
+
+.negotiate-form-panel .row .btn--primary {
+  flex-basis: 180px;
+}
+
 /* Rate readout — number + unit + pill progress. No conic-gradient dial. */
 .rate-readout {
   display: flex;

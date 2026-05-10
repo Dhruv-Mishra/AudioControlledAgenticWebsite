@@ -46,15 +46,15 @@
       <div class="form-grid">
         <div class="field">
           <label class="field-label" for="field-pickup">Pickup</label>
-          <input id="field-pickup" name="pickup" class="input" type="text" data-agent-id="negotiate.form.pickup" />
+          <select id="field-pickup" name="pickup" class="select" data-agent-id="negotiate.form.pickup"></select>
         </div>
         <div class="field">
           <label class="field-label" for="field-dropoff">Dropoff</label>
-          <input id="field-dropoff" name="dropoff" class="input" type="text" data-agent-id="negotiate.form.dropoff" />
+          <select id="field-dropoff" name="dropoff" class="select" data-agent-id="negotiate.form.dropoff"></select>
         </div>
         <div class="field">
           <label class="field-label" for="field-commodity">Commodity</label>
-          <input id="field-commodity" name="commodity" class="input" type="text" data-agent-id="negotiate.form.commodity" />
+          <select id="field-commodity" name="commodity" class="select" data-agent-id="negotiate.form.commodity"></select>
         </div>
         <div class="field">
           <label class="field-label" for="field-weight">Weight (lb)</label>
@@ -65,28 +65,21 @@
           <input id="field-target-rate" name="target_rate" class="input" type="number" min="0" step="0.01" placeholder="1850" data-agent-id="negotiate.form.target_rate" />
         </div>
         <div class="field">
+          <label class="field-label" for="field-agent-max-rate">Jarvis max rate</label>
+          <input id="field-agent-max-rate" class="input" type="number" min="0" step="0.01" placeholder="Your ceiling" data-agent-id="negotiate.form.agent_max_rate" />
+        </div>
+        <div class="field field--wide">
           <label class="field-label" for="field-note">Note for carrier</label>
           <input id="field-note" name="note" class="input" type="text" placeholder="Optional context" data-agent-id="negotiate.form.note" />
-        </div>
-        <div class="field--wide negotiator-agent-controls" aria-label="Agent negotiation controls">
-          <label class="negotiate-checkline" for="field-agent-delegate">
-            <input id="field-agent-delegate" type="checkbox" data-agent-id="negotiate.form.agent_delegate" />
-            <span>Let Jarvis act on my behalf</span>
-          </label>
-          <label class="field-label negotiator-max" for="field-agent-max-rate">
-            Max rate
-            <input id="field-agent-max-rate" class="input" type="number" min="0" step="0.01" placeholder="No ceiling" data-agent-id="negotiate.form.agent_max_rate" disabled />
-          </label>
-          <div class="negotiator-agent-buttons">
-            <button class="btn btn--outlined" type="button" id="negotiate-agent-propose" data-agent-id="negotiate.agent.propose">Jarvis propose</button>
-            <button class="btn" type="button" id="negotiate-agent-run" data-agent-id="negotiate.agent.take_turn">Jarvis take turn</button>
-          </div>
         </div>
         <div class="field--wide">
           <div class="row" role="group" aria-label="Negotiation actions">
             <button class="btn btn--primary" type="submit" id="negotiate-submit" data-agent-id="negotiate.submit">Submit offer</button>
-            <button class="btn" type="button" id="btn-counter" data-agent-id="negotiate.counter">Log carrier counter</button>
+            <button class="btn" type="button" id="btn-counter" data-agent-id="negotiate.counter">Ask seller</button>
+            <button class="btn btn--outlined" type="button" id="negotiate-agent-propose" data-agent-id="negotiate.agent.propose">Jarvis propose</button>
+            <button class="btn" type="button" id="negotiate-agent-run" data-agent-id="negotiate.agent.take_turn">Jarvis negotiate</button>
             <button class="btn btn--ghost" type="button" id="btn-accept" data-agent-id="negotiate.accept">Accept</button>
+            <button class="btn btn--outlined" type="button" id="btn-new-negotiation" data-agent-id="negotiate.new" hidden>New negotiation</button>
           </div>
         </div>
       </div>

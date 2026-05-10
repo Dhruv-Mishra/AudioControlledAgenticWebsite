@@ -20,13 +20,18 @@ let load = null;        // selected load
 let suggestedRate = 0;
 let lastSubmitAt = 0;
 const THROTTLE_MS = 1500;
-const CARRIER_RESPONSE_DELAY_MS = 1800;
-const AGENT_REACTION_DELAY_MS = 1500;
+const CARRIER_RESPONSE_DELAY_MS = 2800;
+const CARRIER_RESPONSE_JITTER_MS = 2200;
+const AGENT_REACTION_DELAY_MS = 600;
+const AUTO_NEGOTIATION_TURN_DELAY_MS = 1900;
+const AUTO_NEGOTIATION_MAX_ROUNDS = 6;
 const TYPEWRITER_STEP_MS = 18;
 let inflight = null;    // { id, controller }
 let carrierTyping = null;
 let pendingTypewriterHistoryId = null;
 let agentReactionTimer = null;
+let autoNegotiationTimer = null;
+let autoNegotiation = { active: false, maxRate: null, rounds: 0 };
 const completedTypewriterHistoryIds = new Set();
 let unsubAccept = null;
 let unsubOffer = null;
@@ -36,6 +41,53 @@ let unsubStore = null;
 let unsubDelegate = null;
 let unsubAgentPropose = null;
 let unsubAgentRun = null;
+let unsubNewNegotiation = null;
+
+const CITY_OPTIONS = [
+  'Atlanta, GA', 'Austin, TX', 'Charlotte, NC', 'Chicago, IL', 'Dallas, TX',
+  'Denver, CO', 'Detroit, MI', 'Houston, TX', 'Indianapolis, IN', 'Jacksonville, FL',
+  'Kansas City, MO', 'Las Vegas, NV', 'Los Angeles, CA', 'Memphis, TN',
+  'Miami, FL', 'Minneapolis, MN', 'Nashville, TN', 'Newark, NJ', 'New Orleans, LA',
+  'New York, NY', 'Orlando, FL', 'Philadelphia, PA', 'Phoenix, AZ', 'Portland, OR',
+  'Salt Lake City, UT', 'San Francisco, CA', 'Seattle, WA', 'St. Louis, MO'
+];
+
+const CITY_COORDS = Object.freeze({
+  'Atlanta, GA': { lat: 33.7490, lng: -84.3880 },
+  'Austin, TX': { lat: 30.2672, lng: -97.7431 },
+  'Charlotte, NC': { lat: 35.2271, lng: -80.8431 },
+  'Chicago, IL': { lat: 41.8781, lng: -87.6298 },
+  'Dallas, TX': { lat: 32.7767, lng: -96.7970 },
+  'Denver, CO': { lat: 39.7392, lng: -104.9903 },
+  'Detroit, MI': { lat: 42.3314, lng: -83.0458 },
+  'Houston, TX': { lat: 29.7604, lng: -95.3698 },
+  'Indianapolis, IN': { lat: 39.7684, lng: -86.1581 },
+  'Jacksonville, FL': { lat: 30.3322, lng: -81.6557 },
+  'Kansas City, MO': { lat: 39.0997, lng: -94.5786 },
+  'Las Vegas, NV': { lat: 36.1699, lng: -115.1398 },
+  'Los Angeles, CA': { lat: 34.0522, lng: -118.2437 },
+  'Memphis, TN': { lat: 35.1495, lng: -90.0490 },
+  'Miami, FL': { lat: 25.7617, lng: -80.1918 },
+  'Minneapolis, MN': { lat: 44.9778, lng: -93.2650 },
+  'Nashville, TN': { lat: 36.1627, lng: -86.7816 },
+  'Newark, NJ': { lat: 40.7357, lng: -74.1724 },
+  'New Orleans, LA': { lat: 29.9511, lng: -90.0715 },
+  'New York, NY': { lat: 40.7128, lng: -74.0060 },
+  'Orlando, FL': { lat: 28.5383, lng: -81.3792 },
+  'Philadelphia, PA': { lat: 39.9526, lng: -75.1652 },
+  'Phoenix, AZ': { lat: 33.4484, lng: -112.0740 },
+  'Portland, OR': { lat: 45.5152, lng: -122.6784 },
+  'Salt Lake City, UT': { lat: 40.7608, lng: -111.8910 },
+  'San Francisco, CA': { lat: 37.7749, lng: -122.4194 },
+  'Seattle, WA': { lat: 47.6062, lng: -122.3321 },
+  'St. Louis, MO': { lat: 38.6270, lng: -90.1994 }
+});
+
+const COMMODITY_OPTIONS = [
+  'Auto parts', 'Consumer electronics', 'Food-grade dry freight', 'Industrial chemicals',
+  'Machinery', 'Packaged foods', 'Packaged goods', 'Paper products', 'Pharmaceuticals',
+  'Refrigerated produce', 'Retail fixtures', 'Steel coils'
+];
 
 const NEGOTIATOR_TYPES = [
   {
@@ -117,6 +169,66 @@ const NEGOTIATOR_TYPES = [
     quickRange: [1.05, 1.12],
     concession: 0.1,
     read: 'May close the window if the haggling feels unserious.'
+  },
+  {
+    name: 'Elena Marsh',
+    role: 'Produce carrier owner-operator',
+    description: 'Runs a small reefer fleet and knows exactly where temperature-control risk eats margin. She will move for clean appointments and fast payment.',
+    experience: '14 years moving refrigerated freight',
+    fleet: '9 reefers / 3 dry vans',
+    primaryLanes: 'West Coast produce and mountain-state grocery lanes',
+    anchorAccount: 'Regional grocers and cold-storage consolidators',
+    operatingPressure: 'Protecting reefer hours while produce season tightens capacity',
+    negotiationPosture: 'Flexible on backhauls, firm when temperature risk or mountain miles are in play.',
+    stance: 'risk priced',
+    mood: 'careful',
+    patience: 0.58,
+    sensitivity: 0.46,
+    floorRange: [0.98, 1.07],
+    targetRange: [1.12, 1.28],
+    quickRange: [1.06, 1.15],
+    concession: 0.18,
+    read: 'Will bargain, but reefer risk has to be respected.'
+  },
+  {
+    name: 'Marcus Reed',
+    role: 'Spot-market broker carrier rep',
+    description: 'Covers a mixed network of partner trucks and watches margin, reload timing, and whether the dispatcher sounds serious.',
+    experience: '7 years on spot boards',
+    fleet: 'Brokered partner network across 16 markets',
+    primaryLanes: 'Cross-country dry van and opportunistic reloads',
+    anchorAccount: 'National retail replenishment desk',
+    operatingPressure: 'Keeping partner trucks committed before another broker books them',
+    negotiationPosture: 'Tests the buyer early, then moves quickly if the money is credible.',
+    stance: 'opportunistic margin',
+    mood: 'probing',
+    patience: 0.5,
+    sensitivity: 0.64,
+    floorRange: [0.95, 1.04],
+    targetRange: [1.12, 1.26],
+    quickRange: [1.05, 1.13],
+    concession: 0.2,
+    read: 'Will reward credible movement, but punishes unserious counters.'
+  },
+  {
+    name: 'Nora Feld',
+    role: 'Heavy freight dispatch manager',
+    description: 'Coordinates heavier shipments where detention, dock time, and driver availability matter as much as mileage.',
+    experience: '16 years dispatching industrial freight',
+    fleet: '31 tractors with dry van and flatbed partners',
+    primaryLanes: 'Industrial Midwest, Gulf, and Northeast lanes',
+    anchorAccount: 'Manufacturing and building-material shippers',
+    operatingPressure: 'Avoiding cheap freight that ties up a driver for a full shift',
+    negotiationPosture: 'Measured and practical, but the floor rises when weight or dock risk is high.',
+    stance: 'practical floor',
+    mood: 'steady',
+    patience: 0.67,
+    sensitivity: 0.42,
+    floorRange: [0.96, 1.05],
+    targetRange: [1.09, 1.22],
+    quickRange: [1.04, 1.11],
+    concession: 0.24,
+    read: 'Will meet a fair number when the operational risk is covered.'
   }
 ];
 
@@ -124,25 +236,75 @@ const REACTIONS = {
   accept: [
     'That works if we can lock it now.',
     'I can get my driver moving on that number.',
-    'Good enough for this lane. Let us book it.'
+    'Good enough for this lane. Let us book it.',
+    'We are aligned on that rate from my side.',
+    'That number gets it done for us.',
+    'I can accept that and hold the truck.',
+    'That is close enough. I am good to move forward.'
   ],
   counter: [
     'I am close, but I need a little more to protect the truck.',
     'We are not far apart. Meet me here and I can keep this moving.',
     'That is moving in the right direction, but I still have risk on the lane.',
-    'I can sharpen it once more, but I need a serious next move.'
+    'I can sharpen it once more, but I need a serious next move.',
+    'I can give some ground, just not all the way to that number.',
+    'There is room to work here, but I need the rate to carry the linehaul.',
+    'If you can move a bit, I can keep this truck warm for you.',
+    'I am willing to meet you partway, but I cannot make that exact rate work.'
+  ],
+  nearMiss: [
+    'We are basically there. Give me a little cover and I can accept.',
+    'That is very close. I need a small bump to protect the driver.',
+    'I can almost sign off there, but not quite at that number.',
+    'We are close enough that I do not want to lose the load over a small gap.'
+  ],
+  angryCounter: [
+    'You came back the wrong direction, so my number is going up now.',
+    'That move tells me the truck is being squeezed. I need more than my last ask.',
+    'I was moving toward you, but that counter backs us up.',
+    'If we are resetting the conversation, I have to reset the price too.'
   ],
   reject: [
     'That is too thin for the miles and timing.',
     'I cannot take that back to the driver with a straight face.',
     'We are below where this truck needs to be.',
-    'That number tells me we may be solving different problems.'
+    'That number tells me we may be solving different problems.',
+    'I do not have a path to cover this truck at that rate.',
+    'That is not a workable offer for this lane.',
+    'I would rather decline than hold the truck on a number that light.'
   ],
   walkaway: [
     'I am going to pass before this burns more time.',
     'We are too far apart, so I am closing this out.',
     'I have another load that fits better. I am stepping away.',
-    'The haggling is not worth holding the truck. We are done here.'
+    'The haggling is not worth holding the truck. We are done here.',
+    'I need to release this truck to another option.',
+    'This is not coming together fast enough for me to keep capacity held.'
+  ],
+  longHaul: [
+    'That is a long pull, and fuel exposure is doing most of the work here.',
+    'For that much road time, I need the rate to cover more than just miles.',
+    'Cross-country exposure keeps my floor higher on this one.'
+  ],
+  shortHaul: [
+    'For a short move like this, accessorials matter more than mileage.',
+    'The local timing and dock risk are what I am pricing here.',
+    'Short haul does not mean cheap if the truck gets tied up.'
+  ],
+  reefer: [
+    'With temperature control in play, I need more protection in the rate.',
+    'Reefer freight carries risk I cannot price like standard dry van.',
+    'The cold-chain piece keeps my floor tighter.'
+  ],
+  sensitive: [
+    'That commodity needs cleaner handling than a basic dry-van move.',
+    'The handling profile on this freight keeps my floor higher.',
+    'I need some margin for the service risk on that commodity.'
+  ],
+  heavy: [
+    'At that weight, I need to protect the driver and equipment time.',
+    'This is heavy enough that I cannot chase the very bottom of the market.',
+    'Weight is part of the rate here, not just mileage.'
   ]
 };
 
@@ -179,6 +341,114 @@ function pick(list) {
 
 function between(min, max) {
   return min + Math.random() * (max - min);
+}
+
+function randomInt(min, max) {
+  return Math.round(between(min, max));
+}
+
+function uniqueStrings(values) {
+  return Array.from(new Set(values.map((v) => String(v || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function writeFieldValue(id, value) {
+  const el = $(id);
+  if (!el) return;
+  el.value = value == null ? '' : String(value);
+}
+
+function fillSelect(id, values, selected) {
+  const el = $(id);
+  if (!el || el.tagName !== 'SELECT') return;
+  const opts = uniqueStrings(values);
+  const current = selected == null ? el.value : String(selected || '');
+  el.innerHTML = opts.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('');
+  if (current && opts.includes(current)) el.value = current;
+}
+
+function populateLaneSelects(loadRows) {
+  const rows = Array.isArray(loadRows) ? loadRows : [];
+  fillSelect('field-pickup', CITY_OPTIONS.concat(rows.map((row) => row.pickup)), load && load.pickup);
+  fillSelect('field-dropoff', CITY_OPTIONS.concat(rows.map((row) => row.dropoff)), load && load.dropoff);
+  fillSelect('field-commodity', COMMODITY_OPTIONS.concat(rows.map((row) => row.commodity)), load && load.commodity);
+}
+
+function haversineMiles(a, b) {
+  const toRad = (x) => (x * Math.PI) / 180;
+  const R = 3958.8;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const x = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) *
+    Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+function estimateLaneMiles(pickup, dropoff) {
+  const from = CITY_COORDS[pickup];
+  const to = CITY_COORDS[dropoff];
+  if (!from || !to) return Number(load && load.miles) || null;
+  return Math.round(haversineMiles(from, to) * 1.18);
+}
+
+function getLaneDraft() {
+  const pickup = ($('field-pickup') && $('field-pickup').value) || (load && load.pickup) || '';
+  const dropoff = ($('field-dropoff') && $('field-dropoff').value) || (load && load.dropoff) || '';
+  const commodity = ($('field-commodity') && $('field-commodity').value) || (load && load.commodity) || '';
+  const weight = Number(($('field-weight') && $('field-weight').value) || (load && load.weight) || 0) || null;
+  const miles = estimateLaneMiles(pickup, dropoff);
+  return { pickup, dropoff, commodity, weight, miles };
+}
+
+function getLanePressureComments(lane) {
+  const comments = [];
+  const commodity = String(lane && lane.commodity || '').toLowerCase();
+  if (lane && lane.miles >= 1800) comments.push(...REACTIONS.longHaul);
+  else if (lane && lane.miles && lane.miles <= 400) comments.push(...REACTIONS.shortHaul);
+  if (/reefer|refrigerated|produce|food|pharma|pharmaceutical/.test(commodity)) comments.push(...REACTIONS.reefer);
+  if (/chemical|electronics|pharma|steel|machinery|auto/.test(commodity)) comments.push(...REACTIONS.sensitive);
+  if (Number(lane && lane.weight) >= 39000) comments.push(...REACTIONS.heavy);
+  return comments;
+}
+
+function buildSellerComment(kind, { profile, amount, counterAmount, angry = false, near = false } = {}) {
+  const lane = getLaneDraft();
+  const pool = [];
+  if (angry) pool.push(...REACTIONS.angryCounter);
+  if (near) pool.push(...REACTIONS.nearMiss);
+  pool.push(...(REACTIONS[kind] || REACTIONS.counter));
+  pool.push(...getLanePressureComments(lane));
+  if (lane.pickup && lane.dropoff && lane.miles >= 1800) {
+    pool.push(`${lane.pickup} to ${lane.dropoff} is a cross-country haul, so I need the rate to carry fuel and hours.`);
+  }
+  if (profile && profile.mood === 'irritated') {
+    pool.push('I need a cleaner move than that if we are going to keep talking.');
+  }
+  const base = pick(pool);
+  if (kind === 'counter' && Number.isFinite(Number(counterAmount)) && Number.isFinite(Number(amount))) {
+    const gap = Number(counterAmount) - Number(amount);
+    if (gap > 0 && gap <= 75) return base + ' We are close.';
+  }
+  return base;
+}
+
+function buildThinkingMessage(intent) {
+  const lane = getLaneDraft();
+  if (intent === 'accept') return 'Seller is confirming the close';
+  const options = ['Seller is checking margin', 'Seller is reviewing the lane', 'Seller is weighing the counter'];
+  if (lane.miles >= 1800) options.push('Seller is checking fuel and hours on the long haul');
+  if (/reefer|refrigerated|produce|pharma/i.test(lane.commodity)) options.push('Seller is checking temperature-control risk');
+  if (Number(lane.weight) >= 39000) options.push('Seller is checking weight and dock time');
+  return pick(options);
+}
+
+function getCarrierResponseDelay(intent) {
+  const lane = getLaneDraft();
+  let delay = CARRIER_RESPONSE_DELAY_MS + randomInt(0, CARRIER_RESPONSE_JITTER_MS);
+  if (intent === 'accept') delay += 500;
+  if (lane.miles >= 1800) delay += 650;
+  if (/reefer|refrigerated|produce|pharma/i.test(lane.commodity)) delay += 450;
+  return delay;
 }
 
 function createNegotiatorProfile() {
@@ -237,17 +507,23 @@ function publicNegotiatorProfile() {
   };
 }
 
-function readDelegation() {
-  const enabled = !!($('field-agent-delegate') && $('field-agent-delegate').checked);
+function readAgentMaxRate() {
   const maxEl = $('field-agent-max-rate');
   const maxRate = maxEl && Number(maxEl.value) > 0 ? Number(maxEl.value) : null;
+  return maxRate;
+}
+
+function readDelegation() {
+  const maxRate = readAgentMaxRate();
   return {
-    enabled,
+    enabled: !!maxRate,
     max_rate: maxRate,
-    can_submit_without_each_turn: enabled,
-    instruction: enabled
-      ? 'Jarvis may propose and submit offers within the user max rate.'
-      : 'Jarvis should confirm before submitting offers.'
+    auto_active: !!autoNegotiation.active,
+    rounds_completed: Number(autoNegotiation.rounds) || 0,
+    can_submit_without_each_turn: !!maxRate,
+    instruction: maxRate
+      ? 'Jarvis may negotiate multiple rounds within max_rate, but must ask the user before closing a seller-accepted deal.'
+      : 'Jarvis must ask the user for a maximum rate before negotiating independently.'
   };
 }
 
@@ -267,6 +543,7 @@ function getNegotiationContext() {
     load_id: (state && state.loadId) || (load && load.id) || null,
     suggested_rate: currentSuggestedRate,
     quote_rules: 'Any positive dollar amount is valid. There is no multiple-of-25 rule and no fixed percent band.',
+    lane: getLaneDraft(),
     negotiator: publicNegotiatorProfile(),
     agent_delegation: readDelegation(),
     last_offer: state && state.latestOffer ? state.latestOffer : null,
@@ -340,7 +617,7 @@ function delayWithAbort(ms, signal) {
 
 function describeOutcome(outcome) {
   if (!outcome) return 'Carrier responded.';
-  if (outcome.kind === 'accept') return `Carrier accepted at $${money(outcome.amount)}.`;
+  if (outcome.kind === 'accept') return `Seller accepted at $${money(outcome.amount)}.`;
   if (outcome.kind === 'counter') return `Carrier countered at $${money(outcome.amount)}. ${outcome.note || ''}`.trim();
   if (outcome.kind === 'walkaway') return `Carrier closed the negotiation. ${outcome.note || ''}`.trim();
   if (outcome.kind === 'reject') return `Carrier declined the offer. ${outcome.note || ''}`.trim();
@@ -352,7 +629,11 @@ function scheduleAgentResponseTrigger(detail) {
   agentReactionTimer = setTimeout(() => {
     agentReactionTimer = null;
     if (!agentRef || typeof agentRef.sendAppEvent !== 'function') return;
-    agentRef.sendAppEvent('negotiator_response_arrived', detail);
+    agentRef.sendAppEvent('negotiator_response_arrived', detail, {
+      deferUntilSpeechEnd: true,
+      label: 'app_event:negotiator_response_arrived',
+      reason: 'negotiator_response'
+    });
   }, AGENT_REACTION_DELAY_MS);
 }
 
@@ -378,9 +659,12 @@ function renderHistory() {
     el.innerHTML = '<li class="negotiate-history-empty muted">No offers yet.</li>';
     return;
   }
+  const thinkingText = carrierTyping && carrierTyping.message
+    ? carrierTyping.message
+    : 'Seller is reviewing your offer';
   const pending = carrierTyping ? `<li class="negotiate-history-item negotiate-history-item--pending" data-kind="pending" aria-live="polite" aria-busy="true">
       <span class="negotiate-history-meta"><span class="mono">now</span> &middot; Carrier</span>
-      <span class="negotiate-history-body"><span class="chip chip--info">Reviewing</span> <span class="typing-line"><span class="typing-text">Negotiator is reviewing your offer</span><span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span></span></span>
+      <span class="negotiate-history-body"><span class="chip chip--info">Thinking</span> <span class="typing-line"><span class="typing-text">${escapeHtml(thinkingText)}</span><span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span></span></span>
     </li>` : '';
   const rows = state.history.slice().reverse().map((h) => {
     const t = new Date(h.at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -443,26 +727,32 @@ function renderState() {
   const target = $('field-target-rate');
   const agentRun = $('negotiate-agent-run');
   const agentPropose = $('negotiate-agent-propose');
+  const newNegotiation = $('btn-new-negotiation');
   const submitting = state.status === 'submitting';
+  const sellerAccepted = state.status === 'seller_accepted';
   const terminal = fsm.isTerminal(state);
   const rejected = state.status === 'rejected';
   // Rejected is RECOVERABLE — inputs stay live so the user can craft a
   // new counter. Only `accepted` (and the unused `expired`) hard-lock.
-  const lockInputs = submitting || (terminal && !rejected);
+  const lockInputs = submitting || sellerAccepted || (terminal && !rejected);
 
   if (submit) {
     submit.disabled = lockInputs;
     submit.textContent = submitting && state.intent === 'offer' ? 'Submitting…'
+      : sellerAccepted ? 'Seller accepted'
       : terminal && !rejected ? 'Closed'
       : rejected ? 'Send new counter'
       : 'Submit offer';
   }
   if (accept) {
     // Can't accept a rejection — there's no live offer on the table.
-    accept.disabled = lockInputs || rejected;
-    if (state.status === 'accepted') {
+    accept.disabled = (lockInputs && !sellerAccepted) || rejected;
+    if (sellerAccepted) {
+      accept.classList.remove('btn--locked');
+      accept.textContent = 'Close deal';
+    } else if (state.status === 'accepted') {
       accept.classList.add('btn--locked');
-      accept.textContent = 'Accepted ✓';
+      accept.textContent = 'Closed ✓';
     } else if (submitting && state.intent === 'accept') {
       accept.textContent = 'Accepting…';
     } else {
@@ -474,17 +764,27 @@ function renderState() {
   if (target) target.disabled = lockInputs;
   if (agentRun) agentRun.disabled = lockInputs;
   if (agentPropose) agentPropose.disabled = lockInputs;
+  if (newNegotiation) {
+    newNegotiation.hidden = !(terminal || sellerAccepted || rejected);
+    newNegotiation.disabled = submitting;
+    newNegotiation.textContent = state.status === 'accepted'
+      ? 'New negotiation'
+      : 'Try another negotiation';
+  }
 
   const chip = document.querySelector('#negotiate-form .panel-header .chip');
   if (chip) {
     chip.className = 'chip ' + (
       state.status === 'accepted' ? 'chip--ok' :
+      state.status === 'seller_accepted' ? 'chip--ok' :
       state.status === 'walked_away' ? 'chip--danger' :
       state.status === 'rejected' ? 'chip--danger' :
       state.status === 'countered' ? 'chip--warn' :
       'chip--info'
     );
-    const label = state.status === 'walked_away'
+    const label = state.status === 'seller_accepted'
+      ? 'Seller accepted'
+      : state.status === 'walked_away'
       ? 'Walked away'
       : state.status[0].toUpperCase() + state.status.slice(1);
     chip.textContent = state._justReopened
@@ -494,9 +794,11 @@ function renderState() {
 
   if (rejected) {
     setHint('Carrier rejected — try a different price.', 'warn');
+  } else if (sellerAccepted) {
+    setHint(`Seller accepted at $${fmt(Math.round(state.latestOffer && state.latestOffer.amount))}. Close the deal when ready.`, 'ok');
   } else if (terminal) {
     setHint(state.status === 'accepted'
-      ? `Booked at $${fmt(Math.round(state.latestOffer && state.latestOffer.amount))}.`
+      ? `Deal closed at $${fmt(Math.round(state.latestOffer && state.latestOffer.amount))}.`
       : state.status === 'walked_away' ? 'Carrier closed the negotiation.'
       : `Negotiation ${state.status}.`, state.status === 'accepted' ? 'ok' : 'warn');
   }
@@ -517,27 +819,58 @@ function readNote() {
 }
 
 function updateDelegationUi() {
-  const enabled = !!($('field-agent-delegate') && $('field-agent-delegate').checked);
-  const max = $('field-agent-max-rate');
-  if (max) max.disabled = !enabled;
+  const maxRate = readAgentMaxRate();
+  if (autoNegotiation.active && maxRate) autoNegotiation.maxRate = maxRate;
   renderNegotiatorRead();
 }
 
-function proposeAgentOffer() {
+function latestDispatcherOfferAmount() {
+  if (!state || !Array.isArray(state.history)) return null;
+  for (let i = state.history.length - 1; i >= 0; i -= 1) {
+    const entry = state.history[i];
+    if (entry && entry.actor === 'dispatcher' && entry.type === 'offer' && Number(entry.amount) > 0) {
+      return Number(entry.amount);
+    }
+  }
+  return null;
+}
+
+function latestCarrierAskAmount() {
+  if (!state || !Array.isArray(state.history)) return null;
+  for (let i = state.history.length - 1; i >= 0; i -= 1) {
+    const entry = state.history[i];
+    if (entry && entry.actor === 'carrier' && entry.type === 'counter' && Number(entry.amount) > 0) {
+      return Number(entry.amount);
+    }
+  }
+  return null;
+}
+
+function proposeAgentOffer({ forAuto = false } = {}) {
   if (!state) return null;
-  const profile = ensureNegotiatorProfile();
   const delegation = readDelegation();
-  const current = readDraftAmount() || Number(suggestedRate) || Number(load && load.rate) || 1850;
-  const lastCarrier = state.latestOffer && state.latestOffer.by === 'carrier' ? Number(state.latestOffer.amount) : null;
+  const maxRate = delegation.max_rate;
+  const current = readDraftAmount() || Number(suggestedRate) || Number(load && load.rate) || maxRate || 1850;
+  const lastCarrier = latestCarrierAskAmount();
+  const lastDispatcher = latestDispatcherOfferAmount();
   let proposal;
   if (lastCarrier) {
-    proposal = Math.max(current + between(20, 90), lastCarrier - between(45, 160));
-  } else if (profile) {
-    proposal = current * between(0.98, 1.05) + (profile.target - current) * between(0.18, 0.34);
+    if (maxRate && lastCarrier > maxRate) {
+      proposal = Math.max(lastDispatcher || current, maxRate);
+    } else {
+      const floor = lastDispatcher || Math.min(current, maxRate || current);
+      const gap = Math.max(0, lastCarrier - floor);
+      proposal = floor + gap * between(forAuto ? 0.34 : 0.26, forAuto ? 0.5 : 0.42) + between(10, 35);
+      if (gap <= 90) proposal = Math.min(lastCarrier, floor + Math.max(25, gap * 0.75));
+    }
+  } else if (maxRate) {
+    proposal = Math.min(current || maxRate, maxRate * between(0.78, 0.86));
   } else {
-    proposal = current + between(75, 175);
+    proposal = current * between(0.94, 1.01);
   }
-  if (delegation.max_rate) proposal = Math.min(proposal, delegation.max_rate);
+  if (maxRate) proposal = Math.min(proposal, maxRate);
+  if (lastDispatcher && proposal <= lastDispatcher) proposal = lastDispatcher + between(25, 80);
+  if (maxRate) proposal = Math.min(proposal, maxRate);
   proposal = Math.max(1, Math.round(proposal));
   const target = $('field-target-rate');
   const note = $('field-note');
@@ -546,10 +879,12 @@ function proposeAgentOffer() {
     target.dispatchEvent(new Event('input', { bubbles: true }));
   }
   if (note && !note.value.trim()) {
-    note.value = 'Jarvis is testing a firm but closeable number.';
+    note.value = forAuto
+      ? 'Jarvis is moving up gradually while staying under the max.'
+      : 'Jarvis is testing a firm but closeable number.';
     note.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  setHint(`Jarvis proposed $${fmt(proposal)} based on the negotiator read.`, 'ok');
+  setHint(`Jarvis proposed $${fmt(proposal)}${maxRate ? ` within the $${fmt(maxRate)} max` : ''}.`, 'ok');
   return proposal;
 }
 
@@ -562,38 +897,66 @@ function setNegotiatorMood(profile, mood, comment) {
   profile.lastComment = comment || profile.lastComment;
 }
 
-function buildCounterAmount(profile, amount, turnCount) {
+function buildCounterAmount(profile, amount, turnCount, opts = {}) {
+  const lastCarrier = Number(opts.lastCarrierAmount) > 0 ? Number(opts.lastCarrierAmount) : null;
+  const lastDispatcher = Number(opts.lastDispatcherAmount) > 0 ? Number(opts.lastDispatcherAmount) : null;
+  const angry = opts.angry === true;
   const concession = Math.min(0.82, profile.concession * (turnCount + 1) + Math.random() * 0.16);
   const desired = profile.target - ((profile.target - profile.floor) * concession);
-  const bridge = amount + ((desired - amount) * between(0.45, 0.78));
-  const counter = Math.max(profile.floor, bridge, amount + between(35, 140));
+  const minimumGap = amount < profile.floor ? between(70, 170) : between(25, 85);
+  if (lastCarrier && angry) {
+    return Math.round(Math.max(amount + minimumGap, lastCarrier + between(35, 120)));
+  }
+  const bridge = amount + ((desired - amount) * between(0.36, 0.68));
+  let counter = Math.max(profile.floor, bridge, amount + minimumGap);
+  if (lastCarrier) {
+    const buyerImproved = !lastDispatcher || amount >= lastDispatcher - 1;
+    const concessionStep = buyerImproved ? between(35, 145) : between(0, 35);
+    counter = Math.min(counter, lastCarrier - concessionStep);
+    if (counter <= amount) counter = Math.min(lastCarrier, amount + Math.max(15, minimumGap * 0.5));
+    if (counter > lastCarrier) counter = lastCarrier;
+  }
   return Math.round(counter);
 }
 
 async function callCarrier({ amount, intent, note, signal }) {
-  await delayWithAbort(CARRIER_RESPONSE_DELAY_MS, signal);
+  await delayWithAbort(getCarrierResponseDelay(intent), signal);
   const profile = ensureNegotiatorProfile();
   if (intent === 'accept') {
-    return { kind: 'accept', amount: state.latestOffer ? state.latestOffer.amount : amount };
+    return {
+      kind: 'accept',
+      amount: state.latestOffer ? state.latestOffer.amount : amount,
+      note: 'Confirmed. I will mark this closed on our side.'
+    };
   }
   if (!profile) return { kind: 'counter', amount: Math.round(amount + 100), note: pick(REACTIONS.counter) };
 
   const history = state && Array.isArray(state.history) ? state.history : [];
   const turnCount = history.filter((entry) => entry.actor === 'dispatcher' && entry.type === 'offer').length;
+  const lastCarrier = latestCarrierAskAmount();
+  const lastDispatcher = latestDispatcherOfferAmount();
   const market = Number(suggestedRate) || Number(profile.target) || amount;
   const lowballSeverity = Math.max(0, (profile.floor - amount) / Math.max(1, market));
   const pressure = noteFeelsAggressive(note) ? 0.16 : 0;
-  profile.friction = Math.min(1, Number(profile.friction || 0) + (lowballSeverity * (0.9 + profile.sensitivity)) + pressure + (turnCount > 3 ? 0.08 : 0));
+  const backwardsMove = lastDispatcher && amount < lastDispatcher - 25;
+  profile.friction = Math.min(1, Number(profile.friction || 0) + (lowballSeverity * (0.9 + profile.sensitivity)) + pressure + (backwardsMove ? 0.18 : 0) + (turnCount > 3 ? 0.08 : 0));
+
+  const closeGap = lastCarrier ? lastCarrier - amount : Infinity;
+  if (lastCarrier && closeGap <= Math.max(35, lastCarrier * 0.018) && amount >= profile.floor * 0.96) {
+    const comment = buildSellerComment('accept', { profile, amount, near: true });
+    setNegotiatorMood(profile, 'aligned', comment);
+    return { kind: 'accept', amount, note: comment };
+  }
 
   const walkAwayChance = Math.max(0, profile.friction - profile.patience) * (0.55 + profile.sensitivity);
   if (turnCount > 1 && Math.random() < walkAwayChance) {
-    const comment = pick(REACTIONS.walkaway);
+    const comment = buildSellerComment('walkaway', { profile, amount });
     setNegotiatorMood(profile, 'done', comment);
     return { kind: 'walkaway', note: comment };
   }
 
   if (amount >= profile.quickClose) {
-    const comment = pick(REACTIONS.accept);
+    const comment = buildSellerComment('accept', { profile, amount });
     setNegotiatorMood(profile, 'ready to close', comment);
     return { kind: 'accept', amount, note: comment };
   }
@@ -603,20 +966,26 @@ async function callCarrier({ amount, intent, note, signal }) {
     ? Math.min(0.72, 0.18 + ((amount - profile.floor) / Math.max(1, profile.target - profile.floor)) * 0.58 + (profile.stance === 'quick close' ? 0.18 : 0))
     : 0;
   if (acceptable && Math.random() < acceptChance) {
-    const comment = pick(REACTIONS.accept);
+    const comment = buildSellerComment('accept', { profile, amount });
     setNegotiatorMood(profile, 'satisfied', comment);
     return { kind: 'accept', amount, note: comment };
   }
 
   if (amount < profile.floor * (0.9 + Math.random() * 0.05)) {
-    const comment = pick(REACTIONS.reject);
+    const comment = buildSellerComment('reject', { profile, amount });
     setNegotiatorMood(profile, profile.friction > 0.6 ? 'irritated' : 'guarded', comment);
     return { kind: 'reject', note: comment };
   }
 
-  const counterAmount = buildCounterAmount(profile, amount, turnCount);
-  const comment = pick(REACTIONS.counter);
-  setNegotiatorMood(profile, profile.friction > 0.55 ? 'strained' : 'engaged', comment);
+  const angerIncrease = !!lastCarrier && (backwardsMove || pressure > 0 || profile.friction > profile.patience + 0.28) && Math.random() < 0.48;
+  const counterAmount = buildCounterAmount(profile, amount, turnCount, {
+    lastCarrierAmount: lastCarrier,
+    lastDispatcherAmount: lastDispatcher,
+    angry: angerIncrease
+  });
+  const near = Number(counterAmount) - Number(amount) <= 100;
+  const comment = buildSellerComment('counter', { profile, amount, counterAmount, angry: angerIncrease, near });
+  setNegotiatorMood(profile, angerIncrease ? 'irritated' : (profile.friction > 0.55 ? 'strained' : 'engaged'), comment);
   return { kind: 'counter', amount: counterAmount, note: comment };
 }
 
@@ -626,6 +995,10 @@ async function doSubmit(intent, opts = {}) {
   // can submit a fresh counter without ceremony.
   if (intent === 'offer' && state.status === 'rejected') {
     try { fsm.reopen(state); fsm.save(state); } catch {}
+  }
+  if (intent === 'offer' && state.status === 'seller_accepted') {
+    setHint('Seller already accepted from their side. Close the deal or start a new negotiation.', 'ok');
+    return;
   }
   if (fsm.isTerminal(state) || fsm.isLocked(state)) return;
   const now = Date.now();
@@ -663,6 +1036,7 @@ async function doSubmit(intent, opts = {}) {
   if (intent === 'offer') fsm.recordOffer(state, amount, readNote());
   fsm.save(state);
   carrierTyping = intent === 'offer' ? { lockId, startedAt: Date.now() } : null;
+  if (carrierTyping) carrierTyping.message = buildThinkingMessage(intent);
   setHint('Submitting…', '');
   announce(intent === 'accept' ? 'Sending acceptance.' : `Sending offer of $${fmt(amount)}.`);
   renderState();
@@ -670,9 +1044,10 @@ async function doSubmit(intent, opts = {}) {
   const controller = new AbortController();
   inflight = { id: lockId, controller };
   let arrived = null;
+  let outcome = null;
 
   try {
-    const outcome = await callCarrier({ amount, intent, note: readNote(), signal: controller.signal });
+    outcome = await callCarrier({ amount, intent, note: readNote(), signal: controller.signal });
     fsm.resolveSubmit(state, lockId, outcome);
     carrierTyping = null;
     const carrierEntry = intent === 'offer' ? latestCarrierHistoryEntry() : null;
@@ -680,14 +1055,16 @@ async function doSubmit(intent, opts = {}) {
     fsm.save(state);
     lastSubmitAt = Date.now();
     setHint(
-      outcome.kind === 'accept' ? `Accepted at $${money(outcome.amount)}.`
+      outcome.kind === 'accept' && intent === 'offer' ? `Seller accepted at $${money(outcome.amount)}. Close the deal when ready.`
+      : outcome.kind === 'accept' ? `Deal closed at $${money(outcome.amount)}.`
       : outcome.kind === 'counter' ? `Carrier countered at $${money(outcome.amount)}. ${outcome.note || ''}`
       : outcome.kind === 'walkaway' ? `Carrier closed negotiation. ${outcome.note || ''}`
       : `Carrier declined. ${outcome.note || ''}`,
       outcome.kind === 'accept' ? 'ok' : (outcome.kind === 'reject' ? 'warn' : '')
     );
     announce(
-      outcome.kind === 'accept' ? `Carrier accepted at $${money(outcome.amount)}.`
+      outcome.kind === 'accept' && intent === 'offer' ? `Seller accepted at $${money(outcome.amount)}. Waiting for your close confirmation.`
+      : outcome.kind === 'accept' ? `Deal closed at $${money(outcome.amount)}.`
       : outcome.kind === 'counter' ? `Carrier countered at $${money(outcome.amount)}.`
       : outcome.kind === 'walkaway' ? 'Carrier closed the negotiation.'
       : 'Carrier declined the offer.'
@@ -705,7 +1082,141 @@ async function doSubmit(intent, opts = {}) {
     if (carrierTyping && carrierTyping.lockId === lockId) carrierTyping = null;
     renderState();
     if (arrived) notifyNegotiatorResponseArrived(arrived.outcome, arrived.entry);
+    if (opts.autoContinue) handleAutoNegotiationOutcome(outcome);
   }
+}
+
+function clearAutoNegotiation() {
+  if (autoNegotiationTimer) clearTimeout(autoNegotiationTimer);
+  autoNegotiationTimer = null;
+  autoNegotiation = { active: false, maxRate: null, rounds: 0 };
+}
+
+function stopAutoNegotiation(message, kind) {
+  clearAutoNegotiation();
+  if (message) {
+    setHint(message, kind || '');
+    announce(message);
+  }
+}
+
+function runAgentNegotiationTurn() {
+  if (!state || fsm.isLocked(state)) return;
+  const maxRate = readAgentMaxRate();
+  if (!maxRate) {
+    stopAutoNegotiation('Tell Jarvis your maximum rate first, then he can negotiate within it.', 'warn');
+    return;
+  }
+  if (state.status === 'seller_accepted') {
+    stopAutoNegotiation(`Seller accepted at $${fmt(state.latestOffer && state.latestOffer.amount)}. Close the deal when you are ready.`, 'ok');
+    return;
+  }
+  if (fsm.isTerminal(state)) {
+    stopAutoNegotiation('Negotiation is already closed. Start a new negotiation to keep going.', 'warn');
+    return;
+  }
+  const carrierAsk = latestCarrierAskAmount();
+  if (carrierAsk && carrierAsk > maxRate) {
+    stopAutoNegotiation(`Seller is at $${fmt(carrierAsk)}, above your $${fmt(maxRate)} max. Raise the max or hold firm.`, 'warn');
+    return;
+  }
+  if (autoNegotiation.rounds >= AUTO_NEGOTIATION_MAX_ROUNDS) {
+    stopAutoNegotiation('Jarvis reached the round limit without a close. Review the last counter before continuing.', 'warn');
+    return;
+  }
+  autoNegotiation.active = true;
+  autoNegotiation.maxRate = maxRate;
+  autoNegotiation.rounds += 1;
+  const proposal = proposeAgentOffer({ forAuto: true });
+  if (!proposal) {
+    stopAutoNegotiation('Jarvis could not build the next offer yet.', 'warn');
+    return;
+  }
+  if (proposal > maxRate) {
+    stopAutoNegotiation(`Jarvis will not offer $${fmt(proposal)} because your max is $${fmt(maxRate)}.`, 'warn');
+    return;
+  }
+  setHint(`Jarvis round ${autoNegotiation.rounds}: offering $${fmt(proposal)} within your $${fmt(maxRate)} max.`, 'ok');
+  void doSubmit('offer', { agent: true, autoContinue: true });
+}
+
+function scheduleAutoNegotiationNext() {
+  if (!autoNegotiation.active || autoNegotiationTimer) return;
+  autoNegotiationTimer = setTimeout(() => {
+    autoNegotiationTimer = null;
+    runAgentNegotiationTurn();
+  }, AUTO_NEGOTIATION_TURN_DELAY_MS);
+}
+
+function handleAutoNegotiationOutcome(outcome) {
+  if (!autoNegotiation.active || !outcome) return;
+  const maxRate = autoNegotiation.maxRate || readAgentMaxRate();
+  if (outcome.kind === 'counter') {
+    if (Number(outcome.amount) > Number(maxRate)) {
+      stopAutoNegotiation(`Seller countered at $${fmt(outcome.amount)}, above your $${fmt(maxRate)} max. Should we raise the limit or hold?`, 'warn');
+      return;
+    }
+    scheduleAutoNegotiationNext();
+    return;
+  }
+  if (outcome.kind === 'accept') {
+    stopAutoNegotiation(`Seller accepted at $${fmt(outcome.amount)}. Close the deal when you approve.`, 'ok');
+    return;
+  }
+  if (outcome.kind === 'reject') {
+    stopAutoNegotiation('Seller declined that number. Raise the max or try a different shipment.', 'warn');
+    return;
+  }
+  if (outcome.kind === 'walkaway') {
+    stopAutoNegotiation('Seller walked away. Try another negotiation when ready.', 'warn');
+  }
+}
+
+function pickNextLoad(loads) {
+  if (!Array.isArray(loads) || !loads.length) return null;
+  if (!load) return loads.find((l) => l.status === 'pending') || loads[0];
+  const idx = loads.findIndex((l) => l.id === load.id);
+  for (let offset = 1; offset <= loads.length; offset += 1) {
+    const candidate = loads[(idx + offset + loads.length) % loads.length];
+    if (candidate && candidate.id !== load.id) return candidate;
+  }
+  return loads[0];
+}
+
+function hydrateLoadIntoForm() {
+  if (!load) return;
+  populateLaneSelects(listLoads());
+  writeFieldValue('field-pickup', load.pickup);
+  writeFieldValue('field-dropoff', load.dropoff);
+  writeFieldValue('field-commodity', load.commodity);
+  writeFieldValue('field-weight', load.weight || '');
+  writeFieldValue('field-target-rate', state && state.latestOffer ? state.latestOffer.amount : '');
+  writeFieldValue('field-note', '');
+  const idEl = $('load-id-readout');
+  if (idEl) idEl.textContent = load.id;
+  const amt = $('rate-readout-amount');
+  const target = $('field-target-rate');
+  if (amt && target) amt.textContent = target.value ? `$${money(target.value)}` : '—';
+  const sug = $('negotiate-suggested');
+  if (sug) sug.textContent = `$${fmt(suggestedRate)}`;
+}
+
+function startNewNegotiation() {
+  if (state && state.loadId) fsm.clear(state.loadId);
+  clearAutoNegotiation();
+  completedTypewriterHistoryIds.clear();
+  carrierTyping = null;
+  pendingTypewriterHistoryId = null;
+  load = pickNextLoad(listLoads()) || load;
+  suggestedRate = Number(load && load.rate) || (load && load.miles ? Math.round(load.miles * 2.4) : 1850);
+  state = fsm.makeInitial(load && load.id, suggestedRate);
+  fsm.beginDrafting(state);
+  ensureNegotiatorProfile();
+  fsm.save(state);
+  hydrateLoadIntoForm();
+  setHint('New negotiation started with a fresh seller read.', 'ok');
+  announce('New negotiation ready.');
+  renderState();
 }
 
 function pickLoad(loads) {
@@ -722,6 +1233,7 @@ function refreshLoadFields() {
   const fresh = getLoad(load.id);
   if (!fresh) return;
   load = fresh;
+  populateLaneSelects(listLoads());
   const map = [
     ['field-pickup', load.pickup],
     ['field-dropoff', load.dropoff],
@@ -744,23 +1256,8 @@ export async function enter(root, { voiceAgent }) {
   if (state.status === 'idle') fsm.beginDrafting(state);
   ensureNegotiatorProfile();
 
-  if (load) {
-    const map = [
-      ['field-pickup', load.pickup],
-      ['field-dropoff', load.dropoff],
-      ['field-commodity', load.commodity],
-      ['field-weight', load.weight || ''],
-      ['field-target-rate', state.latestOffer ? state.latestOffer.amount : ((state.history[0] && state.history[0].amount) || '')]
-    ];
-    map.forEach(([id, v]) => { const el = $(id); if (el) el.value = v == null ? '' : v; });
-    const idEl = $('load-id-readout');
-    if (idEl) idEl.textContent = load.id;
-    const amt = $('rate-readout-amount');
-    const target = $('field-target-rate');
-    if (amt && target) amt.textContent = target.value ? `$${money(target.value)}` : '—';
-    const sug = $('negotiate-suggested');
-    if (sug) sug.textContent = `$${fmt(suggestedRate)}`;
-  }
+  populateLaneSelects(listLoads());
+  hydrateLoadIntoForm();
   unsubStore = subscribe('load:updated', (detail) => {
     if (!load) return;
     if (!detail || detail.id == null || detail.id === load.id) refreshLoadFields();
@@ -786,33 +1283,15 @@ export async function enter(root, { voiceAgent }) {
       if (!state || fsm.isTerminal(state) || fsm.isLocked(state)) return;
       const n = readDraftAmount();
       if (!Number.isFinite(n) || n <= 0) { setHint('Enter a target rate first.', 'warn'); return; }
-      const profile = ensureNegotiatorProfile();
-      const turnCount = state.history.filter((entry) => entry.actor === 'dispatcher' && entry.type === 'offer').length;
-      const counterAmount = profile ? buildCounterAmount(profile, n, turnCount) : Math.round(n + 100);
-      const comment = pick(REACTIONS.counter);
-      if (profile) setNegotiatorMood(profile, 'engaged', comment);
-      state.history.push({ actor: 'carrier', type: 'counter', amount: counterAmount, note: comment, at: new Date().toISOString() });
-      state.latestOffer = { amount: counterAmount, by: 'carrier' };
-      const entry = latestCarrierHistoryEntry();
-      if (entry) pendingTypewriterHistoryId = historyEntryId(entry);
-      fsm.save(state); renderState();
-      if (entry) notifyNegotiatorResponseArrived({ kind: 'counter', amount: counterAmount, note: comment }, entry);
+      void doSubmit('offer');
     });
   }
 
-  const delegate = $('field-agent-delegate');
   const maxRate = $('field-agent-max-rate');
-  if (delegate) {
-    const onDelegate = () => updateDelegationUi();
-    delegate.addEventListener('change', onDelegate);
-    unsubDelegate = () => delegate.removeEventListener('change', onDelegate);
-  }
   if (maxRate) {
     const onMax = () => renderNegotiatorRead();
     maxRate.addEventListener('input', onMax);
-    unsubDelegate = unsubDelegate
-      ? (() => { const prev = unsubDelegate; return () => { prev(); maxRate.removeEventListener('input', onMax); }; })()
-      : () => maxRate.removeEventListener('input', onMax);
+    unsubDelegate = () => maxRate.removeEventListener('input', onMax);
   }
   const agentPropose = $('negotiate-agent-propose');
   if (agentPropose) {
@@ -823,16 +1302,22 @@ export async function enter(root, { voiceAgent }) {
   const agentRun = $('negotiate-agent-run');
   if (agentRun) {
     const onRun = () => {
-      const delegation = readDelegation();
-      if (!delegation.enabled) {
-        setHint('Turn on Jarvis authority before letting the agent submit.', 'warn');
+      if (!readAgentMaxRate()) {
+        setHint('Enter your maximum rate so Jarvis can negotiate without crossing it.', 'warn');
         return;
       }
-      if (!readDraftAmount()) proposeAgentOffer();
-      void doSubmit('offer', { agent: true });
+      clearAutoNegotiation();
+      autoNegotiation = { active: true, maxRate: readAgentMaxRate(), rounds: 0 };
+      runAgentNegotiationTurn();
     };
     agentRun.addEventListener('click', onRun);
     unsubAgentRun = () => agentRun.removeEventListener('click', onRun);
+  }
+  const newNegotiation = $('btn-new-negotiation');
+  if (newNegotiation) {
+    const onNewNegotiation = () => startNewNegotiation();
+    newNegotiation.addEventListener('click', onNewNegotiation);
+    unsubNewNegotiation = () => newNegotiation.removeEventListener('click', onNewNegotiation);
   }
   updateDelegationUi();
 
@@ -924,11 +1409,12 @@ export async function enter(root, { voiceAgent }) {
 export function exit() {
   if (inflight) { try { inflight.controller.abort(); } catch {} inflight = null; }
   if (agentReactionTimer) { clearTimeout(agentReactionTimer); agentReactionTimer = null; }
+  clearAutoNegotiation();
   carrierTyping = null;
   pendingTypewriterHistoryId = null;
-  [unsubAccept, unsubOffer, unsubInput, unsubKey, unsubDelegate, unsubAgentPropose, unsubAgentRun].forEach((fn) => { try { fn && fn(); } catch {} });
+  [unsubAccept, unsubOffer, unsubInput, unsubKey, unsubDelegate, unsubAgentPropose, unsubAgentRun, unsubNewNegotiation].forEach((fn) => { try { fn && fn(); } catch {} });
   try { unsubStore && unsubStore(); } catch {}
-  unsubAccept = unsubOffer = unsubInput = unsubKey = unsubDelegate = unsubAgentPropose = unsubAgentRun = null;
+  unsubAccept = unsubOffer = unsubInput = unsubKey = unsubDelegate = unsubAgentPropose = unsubAgentRun = unsubNewNegotiation = null;
   unsubStore = null;
   if (agentRef && agentRef.toolRegistry && typeof agentRef.toolRegistry.unregisterDomain === 'function') {
     ['submit_quote', 'get_negotiation_context', 'get_load', 'assign_carrier', 'schedule_callback'].forEach((n) => agentRef.toolRegistry.unregisterDomain(n));

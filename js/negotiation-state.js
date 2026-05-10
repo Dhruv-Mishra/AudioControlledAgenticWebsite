@@ -2,10 +2,10 @@
 //
 // States:
 //   idle → drafting → submitting → countered → drafting (loop)
-//                                 → accepted   (terminal)
-//                                 → rejected   (terminal)
-//                                 → walked_away (terminal)
-//                                 → expired    (terminal)
+//                                 → seller_accepted → accepted (terminal)
+//                                 → rejected        (recoverable)
+//                                 → walked_away     (terminal)
+//                                 → expired         (terminal)
 //
 // Invariants:
 //   - Only one in-flight submission at a time (lockedBy tracks it).
@@ -22,8 +22,9 @@ const TERMINAL = new Set(['accepted', 'walked_away', 'expired']);
 const VALID = {
   idle:       new Set(['drafting']),
   drafting:   new Set(['submitting']),
-  submitting: new Set(['countered', 'accepted', 'rejected', 'walked_away', 'drafting' /* on failure */]),
+  submitting: new Set(['countered', 'seller_accepted', 'accepted', 'rejected', 'walked_away', 'drafting' /* on failure */]),
   countered:  new Set(['drafting', 'submitting' /* immediate accept on counter */, 'accepted', 'rejected']),
+  seller_accepted: new Set(['drafting', 'submitting', 'accepted']),
   rejected:   new Set(['drafting'] /* via reopen() */)
 };
 
@@ -105,7 +106,7 @@ export function validateOffer(amount, suggested, opts = {}) {
 /** Mark a submission as in-flight. Returns false if locked. */
 export function beginSubmit(state, lockId, intent) {
   if (state.lockedBy) return false;
-  if (state.status !== 'drafting' && state.status !== 'countered') {
+  if (state.status !== 'drafting' && state.status !== 'countered' && state.status !== 'seller_accepted') {
     if (state.status === 'idle') transition(state, 'drafting');
     else throw new Error(`Cannot submit from ${state.status}.`);
   }
@@ -121,9 +122,15 @@ export function resolveSubmit(state, lockId, outcome) {
   state.lockedBy = null;
   const { kind, amount, note } = outcome || {};
   if (kind === 'accept') {
-    appendHistory(state, { actor: state.intent === 'accept' ? 'dispatcher' : 'carrier', type: 'accept', amount, note });
-    state.latestOffer = { amount, by: 'agreed' };
-    transition(state, 'accepted');
+    if (state.intent === 'accept') {
+      appendHistory(state, { actor: 'dispatcher', type: 'accept', amount, note });
+      state.latestOffer = { amount, by: 'agreed' };
+      transition(state, 'accepted');
+    } else {
+      appendHistory(state, { actor: 'carrier', type: 'accept', amount, note });
+      state.latestOffer = { amount, by: 'carrier' };
+      transition(state, 'seller_accepted');
+    }
   } else if (kind === 'counter') {
     appendHistory(state, { actor: 'carrier', type: 'counter', amount, note });
     state.latestOffer = { amount, by: 'carrier' };

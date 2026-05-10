@@ -372,11 +372,14 @@ async function handleShowOnMap() {
   w.highlightLoad(load.id);
 }
 
-function handleCenterOnMap() {
+async function handleCenterOnMap() {
   const load = getCurrent();
   if (!load) return;
   close();
-  if (window.__mapWidget) window.__mapWidget.highlightLoad(load.id);
+  const w = window.__mapWidget;
+  if (!w) return;
+  try { await w.ready; } catch { return; }
+  if (typeof w.focusTarget === 'function') w.focusTarget(load.id);
 }
 
 function handleAssignCarrier() {

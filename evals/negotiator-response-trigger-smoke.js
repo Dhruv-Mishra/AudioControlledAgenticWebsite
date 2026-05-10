@@ -10,8 +10,9 @@ const voice = fs.readFileSync(path.join(root, 'js/voice-agent.js'), 'utf8');
 const bridge = fs.readFileSync(path.join(root, 'api/live-bridge.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'css/enhancements.css'), 'utf8');
 
-assert(/CARRIER_RESPONSE_DELAY_MS\s*=\s*1800/.test(page), 'carrier response delay should be deterministic');
-assert(/AGENT_REACTION_DELAY_MS\s*=\s*1500/.test(page), 'agent reaction delay should be deterministic');
+assert(/CARRIER_RESPONSE_DELAY_MS\s*=\s*2800/.test(page), 'carrier response delay should leave room for seller thinking');
+assert(/deferUntilSpeechEnd:\s*true/.test(page), 'negotiator response app events should use the speech-end queue');
+assert(/AGENT_REACTION_DELAY_MS\s*=\s*600/.test(page), 'agent reaction trigger should be quick after the queued seller event is ready');
 assert(/negotiator:response-arrived/.test(page), 'page should emit negotiator response arrival event');
 assert(/sendAppEvent\('negotiator_response_arrived'/.test(page), 'page should trigger voice agent after response arrival');
 assert(/sendAppEvent\(name, detail/.test(voice), 'VoiceAgent should expose sendAppEvent');

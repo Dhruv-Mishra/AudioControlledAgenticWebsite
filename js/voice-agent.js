@@ -2312,10 +2312,30 @@ export class VoiceAgent extends EventTarget {
     this._sendJson({ type: 'elements', page: this._currentPathname || location.pathname, elements });
   }
 
-  sendAppEvent(name, detail = {}) {
+  sendAppEvent(name, detail = {}, opts = {}) {
     const eventName = String(name || '').trim().slice(0, 80);
     if (!eventName || !this._callActive || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
       return false;
+    }
+    const shouldDefer = opts && opts.deferUntilSpeechEnd === true && this._pendingActions;
+    if (shouldDefer) {
+      const turnInFlight = this._callActive && (
+        this.state === STATES.MODEL_SPEAKING ||
+        this.state === STATES.MODEL_THINKING ||
+        this.state === STATES.TOOL_EXECUTING ||
+        this.pipeline.isAgentAudioPlaying()
+      );
+      if (turnInFlight) {
+        this._pendingActions.enqueue(() => {
+          this.sendAppEvent(eventName, detail);
+        }, {
+          label: opts.label || 'app_event:' + eventName,
+          reason: opts.reason || 'turn_in_flight',
+          dedupeKey: opts.dedupeKey || null
+        });
+        this._armPendingActionsTimer();
+        return true;
+      }
     }
     this._sendJson({
       type: 'app_event',
