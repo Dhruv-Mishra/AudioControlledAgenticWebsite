@@ -43,8 +43,8 @@ const VIEWPORTS = [
 
       // Assert: button ≥ 48px tall (tap target).
       const okTap = box && box.height >= 48;
-      // Assert: status says not connected.
-      const okStatus = /Not connected/i.test(status);
+      // Assert: status says the call has not started.
+      const okStatus = /Not connected|Stand by/i.test(status);
       // Assert: Place Call label.
       const okLabel = /Place Call/i.test(label);
 

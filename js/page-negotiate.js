@@ -32,6 +32,7 @@ let pendingTypewriterHistoryId = null;
 let agentReactionTimer = null;
 let autoNegotiationTimer = null;
 let autoNegotiation = { active: false, maxRate: null, rounds: 0 };
+let agentSuggestionCache = null;
 const completedTypewriterHistoryIds = new Set();
 let unsubAccept = null;
 let unsubOffer = null;
@@ -498,6 +499,10 @@ function updateSuggestedReadout(pricing) {
   sug.title = `${fmt(currentPricing.distance_miles)} mi, ${fmt(currentPricing.weight_lb)} lb, $${currentPricing.rate_per_mile}/mi`;
 }
 
+function clearAgentSuggestionCache() {
+  agentSuggestionCache = null;
+}
+
 function syncSuggestedRateFromLane({ resetProfile = false, render = false } = {}) {
   const lane = getLaneDraft();
   const pricing = getLanePricing(lane);
@@ -641,7 +646,7 @@ function readDelegation() {
     can_submit_without_each_turn: !!maxRate,
     instruction: maxRate
       ? 'Jarvis may negotiate multiple rounds within max_rate, but must ask the user before closing a seller-accepted deal.'
-      : 'Jarvis must ask the user for a maximum rate before negotiating independently.'
+      : 'Jarvis should suggest one realistic number and confirm each submitted amount with the user.'
   };
 }
 
@@ -853,6 +858,8 @@ function renderState() {
   const sellerAccepted = state.status === 'seller_accepted';
   const terminal = fsm.isTerminal(state);
   const rejected = state.status === 'rejected';
+  const canTryAnother = terminal || rejected;
+  const hasAcceptableOffer = !rejected && !!(state.latestOffer && Number(state.latestOffer.amount) > 0);
   // Rejected is RECOVERABLE — inputs stay live so the user can craft a
   // new counter. Only `accepted` (and the unused `expired`) hard-lock.
   const lockInputs = submitting || sellerAccepted || (terminal && !rejected);
@@ -866,19 +873,16 @@ function renderState() {
       : 'Submit offer';
   }
   if (accept) {
-    // Can't accept a rejection — there's no live offer on the table.
-    accept.disabled = (lockInputs && !sellerAccepted) || rejected;
-    if (sellerAccepted) {
-      accept.classList.remove('btn--locked');
-      accept.textContent = 'Close deal';
-    } else if (state.status === 'accepted') {
-      accept.classList.add('btn--locked');
-      accept.textContent = 'Closed ✓';
+    accept.classList.remove('btn--locked');
+    if (canTryAnother) {
+      accept.disabled = submitting;
+      accept.textContent = 'Try another';
     } else if (submitting && state.intent === 'accept') {
+      accept.disabled = true;
       accept.textContent = 'Accepting…';
     } else {
-      accept.classList.remove('btn--locked');
-      accept.textContent = 'Accept';
+      accept.disabled = !hasAcceptableOffer || (lockInputs && !sellerAccepted);
+      accept.textContent = 'Accept and try another';
     }
   }
   if (counter) counter.disabled = lockInputs;
@@ -967,11 +971,53 @@ function latestCarrierAskAmount() {
   return null;
 }
 
+function buildAgentSuggestionKey({ forAuto = false } = {}) {
+  const lane = getLaneDraft();
+  const latestAmount = state && state.latestOffer ? Number(state.latestOffer.amount) || null : null;
+  return JSON.stringify({
+    forAuto: !!forAuto,
+    loadId: state && state.loadId || load && load.id || null,
+    status: state && state.status || null,
+    suggestedRate: Number(suggestedRate) || null,
+    maxRate: readAgentMaxRate(),
+    lastCarrier: latestCarrierAskAmount(),
+    lastDispatcher: latestDispatcherOfferAmount(),
+    latestAmount,
+    pickup: lane.pickup,
+    dropoff: lane.dropoff,
+    commodity: lane.commodity,
+    weight: Number(lane.weight) || null,
+    miles: Number(lane.miles) || null
+  });
+}
+
+function applyAgentProposal(proposal, { forAuto = false, fromCache = false } = {}) {
+  const target = $('field-target-rate');
+  const note = $('field-note');
+  const maxRate = readAgentMaxRate();
+  if (target) {
+    target.value = String(proposal);
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  if (note && !note.value.trim()) {
+    note.value = forAuto
+      ? 'Jarvis is moving up gradually while staying under the max.'
+      : 'Jarvis is testing a firm but closeable number.';
+    note.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  setHint(`Jarvis ${fromCache ? 'kept' : 'suggested'} $${fmt(proposal)}${maxRate ? ` within the $${fmt(maxRate)} max` : ''}.`, 'ok');
+  return proposal;
+}
+
 function proposeAgentOffer({ forAuto = false } = {}) {
   if (!state) return null;
+  const suggestionKey = buildAgentSuggestionKey({ forAuto });
+  if (!forAuto && agentSuggestionCache && agentSuggestionCache.key === suggestionKey) {
+    return applyAgentProposal(agentSuggestionCache.proposal, { forAuto, fromCache: true });
+  }
   const delegation = readDelegation();
   const maxRate = delegation.max_rate;
-  const current = readDraftAmount() || Number(suggestedRate) || Number(load && load.rate) || maxRate || 1850;
+  const current = Number(suggestedRate) || Number(load && load.rate) || readDraftAmount() || maxRate || 1850;
   const lastCarrier = latestCarrierAskAmount();
   const lastDispatcher = latestDispatcherOfferAmount();
   let proposal;
@@ -993,20 +1039,8 @@ function proposeAgentOffer({ forAuto = false } = {}) {
   if (lastDispatcher && proposal <= lastDispatcher) proposal = lastDispatcher + between(25, 80);
   if (maxRate) proposal = Math.min(proposal, maxRate);
   proposal = Math.max(1, Math.round(proposal));
-  const target = $('field-target-rate');
-  const note = $('field-note');
-  if (target) {
-    target.value = String(proposal);
-    target.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-  if (note && !note.value.trim()) {
-    note.value = forAuto
-      ? 'Jarvis is moving up gradually while staying under the max.'
-      : 'Jarvis is testing a firm but closeable number.';
-    note.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-  setHint(`Jarvis proposed $${fmt(proposal)}${maxRate ? ` within the $${fmt(maxRate)} max` : ''}.`, 'ok');
-  return proposal;
+  if (!forAuto) agentSuggestionCache = { key: suggestionKey, proposal };
+  return applyAgentProposal(proposal, { forAuto });
 }
 
 function noteFeelsAggressive(note) {
@@ -1167,6 +1201,7 @@ async function doSubmit(intent, opts = {}) {
   inflight = { id: lockId, controller };
   let arrived = null;
   let outcome = null;
+  let startNextAfterAccept = false;
 
   try {
     outcome = await callCarrier({ amount, intent, note: readNote(), signal: controller.signal });
@@ -1192,6 +1227,7 @@ async function doSubmit(intent, opts = {}) {
       : 'Carrier declined the offer.'
     );
     if (carrierEntry) arrived = { outcome, entry: carrierEntry };
+    startNextAfterAccept = !!(opts.startNextOnAccept && intent === 'accept' && outcome && outcome.kind === 'accept');
   } catch (err) {
     if (err && err.message === 'aborted') return;
     carrierTyping = null;
@@ -1205,6 +1241,11 @@ async function doSubmit(intent, opts = {}) {
     renderState();
     if (arrived) notifyNegotiatorResponseArrived(arrived.outcome, arrived.entry);
     if (opts.autoContinue) handleAutoNegotiationOutcome(outcome);
+    if (startNextAfterAccept) {
+      window.setTimeout(() => {
+        if (state && fsm.isTerminal(state)) startNewNegotiation();
+      }, 700);
+    }
   }
 }
 
@@ -1325,6 +1366,7 @@ function hydrateLoadIntoForm() {
 function startNewNegotiation() {
   if (state && state.loadId) fsm.clear(state.loadId);
   clearAutoNegotiation();
+  clearAgentSuggestionCache();
   completedTypewriterHistoryIds.clear();
   carrierTyping = null;
   pendingTypewriterHistoryId = null;
@@ -1340,6 +1382,15 @@ function startNewNegotiation() {
   setHint('New negotiation started with a fresh seller read.', 'ok');
   announce('New negotiation ready.');
   renderState();
+}
+
+function handleAcceptOrTryAnother() {
+  if (!state) return;
+  if (fsm.isTerminal(state) || state.status === 'rejected') {
+    startNewNegotiation();
+    return;
+  }
+  void doSubmit('accept', { startNextOnAccept: true });
 }
 
 function pickLoad(loads) {
@@ -1396,7 +1447,7 @@ export async function enter(root, { voiceAgent }) {
 
   const accept = $('btn-accept');
   if (accept) {
-    const onAccept = () => doSubmit('accept');
+    const onAccept = () => handleAcceptOrTryAnother();
     accept.addEventListener('click', onAccept);
     unsubAccept = () => accept.removeEventListener('click', onAccept);
   }
@@ -1422,6 +1473,7 @@ export async function enter(root, { voiceAgent }) {
     .filter(Boolean);
   if (laneControls.length) {
     const onLaneInput = () => {
+      clearAgentSuggestionCache();
       syncSuggestedRateFromLane({ resetProfile: true, render: true });
       renderState();
     };
@@ -1536,14 +1588,9 @@ export async function enter(root, { voiceAgent }) {
 
   import('./quick-chips.js').then((chips) => {
     chips.registerChips(voiceAgent, [
-      { id: 'negotiate.counter_100', label: 'Bump +$100', run: () => {
-        const el = $('field-target-rate'); if (!el) return;
-        const curr = Number(el.value || 0) || (suggestedRate || 0);
-        el.value = String(Math.round(curr + 100));
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-      }},
-      { id: 'negotiate.accept', label: 'Accept', run: () => doSubmit('accept') },
-      { id: 'negotiate.submit', label: 'Submit offer', run: () => doSubmit('offer') }
+      { id: 'negotiate.submit', label: 'Submit offer', run: () => doSubmit('offer') },
+      { id: 'negotiate.accept_try_another', label: 'Accept and try another', run: () => handleAcceptOrTryAnother() },
+      { id: 'negotiate.agent.suggest', label: 'Jarvis suggest', run: () => proposeAgentOffer() }
     ]);
   }).catch(() => {});
 }

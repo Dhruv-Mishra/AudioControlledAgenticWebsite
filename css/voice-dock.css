@@ -409,7 +409,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 40px;
+  min-width: 48px;
+  height: 48px;
   padding: 0 18px;
   border-radius: var(--voice-radius-pill);
   border: 1px solid transparent;
@@ -540,17 +541,17 @@
 /* Expanded-state Call button grows per §8.3 (48 px) when in footer. The
  * button LIVES in the header always — we just promote it when expanded. */
 .voice-dock:not(.is-collapsed) .voice-call-btn {
-  height: 44px;
+  height: 48px;
   padding: 0 20px;
   font-size: 14px;
 }
 
-/* Reduce label visibility on very narrow mobile — icon-only 40×40. */
+/* Reduce label visibility on very narrow mobile — icon-only 48×48. */
 @media (max-width: 379px) {
   .voice-call-btn {
     padding: 0;
-    width: 40px;
-    height: 40px;
+    width: 48px;
+    height: 48px;
     justify-content: center;
   }
   .voice-call-btn-label { display: none; }
@@ -563,8 +564,8 @@
  * the full label. */
 .voice-dock.is-collapsed .voice-call-btn {
   padding: 0;
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   justify-content: center;
 }
 .voice-dock.is-collapsed .voice-call-btn .voice-call-btn-label {
@@ -1572,16 +1573,17 @@
 /* ============ 13. MOBILE BOTTOM-SHEET ============ */
 @media (max-width: 640px) {
   .voice-dock {
+    --voice-mobile-dock-bottom: max(env(safe-area-inset-bottom, 0px), var(--app-visual-viewport-bottom-inset, 0px));
     left: 16px;
     right: 16px;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0));
+    bottom: var(--voice-mobile-dock-bottom);
     width: auto;
     max-width: none;
   }
   .voice-dock.is-collapsed {
     left: 16px;
     right: 16px;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0));
+    bottom: var(--voice-mobile-dock-bottom);
     width: auto;
     max-width: none;
   }
@@ -1589,10 +1591,10 @@
     left: 8px;
     right: 8px;
     top: auto;
-    bottom: 0;
+    bottom: var(--voice-mobile-dock-bottom);
     width: auto;
     max-width: none;
-    height: min(80dvh, 640px);
+    height: min(80dvh, calc(var(--app-visual-viewport-height, 100dvh) - var(--voice-mobile-dock-bottom)), 640px);
     border-radius: 28px 28px 0 0;
     border-bottom: 0;
   }

@@ -63,8 +63,8 @@ const PAGE_GUIDES = {
       },
       {
         diagram: 'handoff',
-        title: 'Jarvis can negotiate for you.',
-        body: 'Enable agent authority, set a ceiling, and let Jarvis propose or submit a turn inside your limits.'
+        title: 'Jarvis can suggest the next number.',
+        body: 'Ask for one recommendation, review the amount, then submit or accept when the deal is right.'
       }
     ]
   },

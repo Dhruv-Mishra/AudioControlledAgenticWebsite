@@ -34,6 +34,35 @@ function onIdle(fn) {
   }
 }
 
+function bindViewportMetrics() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const root = document.documentElement;
+  let frame = 0;
+  const update = () => {
+    frame = 0;
+    const viewport = window.visualViewport;
+    const height = viewport && Number.isFinite(viewport.height) && viewport.height > 0
+      ? viewport.height
+      : window.innerHeight || root.clientHeight || 0;
+    const bottomInset = viewport
+      ? Math.max(0, (window.innerHeight || height) - viewport.height - viewport.offsetTop)
+      : 0;
+    if (height > 0) root.style.setProperty('--app-visual-viewport-height', `${Math.round(height)}px`);
+    root.style.setProperty('--app-visual-viewport-bottom-inset', `${Math.round(bottomInset)}px`);
+  };
+  const schedule = () => {
+    if (frame) return;
+    frame = window.requestAnimationFrame(update);
+  };
+  update();
+  window.addEventListener('resize', schedule, { passive: true });
+  window.addEventListener('orientationchange', schedule, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', schedule, { passive: true });
+    window.visualViewport.addEventListener('scroll', schedule, { passive: true });
+  }
+}
+
 function bindGlobalCarrierActions(router) {
   window.addEventListener('carrier-action', async (event) => {
     const detail = event.detail || {};
@@ -94,6 +123,8 @@ async function main() {
     console.error('[app] #route-target missing from shell document');
     return;
   }
+
+  bindViewportMetrics();
 
   // Bootstrap header, dock, voice agent. Returns the long-lived VoiceAgent.
   const agent = await bootstrapVoiceShell();

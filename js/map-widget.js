@@ -229,6 +229,7 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     highlightLoad: () => envelopeErr('not_ready', 'Map not mounted yet.'),
     focusCarrier: () => envelopeErr('not_ready', 'Map not mounted yet.'),
     setLayerVisible: () => envelopeErr('not_ready', 'Map not mounted yet.'),
+    resize: () => envelopeErr('not_ready', 'Map not mounted yet.'),
     destroy() {
       if (destroyed) return;
       destroyed = true;
@@ -1547,11 +1548,40 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
     }
 
     // Leaflet needs an explicit invalidateSize() when its container changes.
+    let invalidateFrame = 0;
+    const scheduleInvalidateSize = () => {
+      if (invalidateFrame) return;
+      invalidateFrame = requestAnimationFrame(() => {
+        invalidateFrame = 0;
+        try { applyMinZoomForCanvas(); } catch {}
+        try { map.invalidateSize(false); } catch {}
+      });
+    };
     const ro = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(() => { try { map.invalidateSize(); } catch {} })
+      ? new ResizeObserver(scheduleInvalidateSize)
       : null;
     if (ro && canvas) ro.observe(canvas);
-    track(() => { if (ro) { try { ro.disconnect(); } catch {} } });
+    track(() => {
+      if (invalidateFrame) cancelAnimationFrame(invalidateFrame);
+      if (ro) { try { ro.disconnect(); } catch {} }
+    });
+    if (typeof window !== 'undefined') {
+      const viewport = window.visualViewport;
+      if (viewport) {
+        viewport.addEventListener('resize', scheduleInvalidateSize, { passive: true });
+        viewport.addEventListener('scroll', scheduleInvalidateSize, { passive: true });
+      }
+      window.addEventListener('orientationchange', scheduleInvalidateSize, { passive: true });
+      track(() => {
+        if (viewport) {
+          try { viewport.removeEventListener('resize', scheduleInvalidateSize); } catch {}
+          try { viewport.removeEventListener('scroll', scheduleInvalidateSize); } catch {}
+        }
+        try { window.removeEventListener('orientationchange', scheduleInvalidateSize); } catch {}
+      });
+    }
+    scheduleInvalidateSize();
+    requestAnimationFrame(() => scheduleInvalidateSize());
 
     // Click-outside on mobile closes carrier panel
     if (carrierPanel) {
@@ -1664,6 +1694,15 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       if (destroyed) return envelopeErr('destroyed', 'Map has been torn down.');
       if (!readySettled) return envelopeErr('not_ready', 'Map not mounted yet.');
       return envelopeOk(refreshData(nextData || {}));
+    };
+
+    api.resize = function resize() {
+      if (destroyed) return envelopeErr('destroyed', 'Map has been torn down.');
+      if (!readySettled) return envelopeErr('not_ready', 'Map not mounted yet.');
+      try { applyMinZoomForCanvas(); } catch {}
+      try { map.invalidateSize(false); } catch {}
+      const box = canvas ? canvas.getBoundingClientRect() : null;
+      return envelopeOk({ width: box ? Math.round(box.width) : 0, height: box ? Math.round(box.height) : 0 });
     };
 
     api.getViewState = function getViewState() {

@@ -13,7 +13,7 @@
   <div class="hero-overlay" data-agent-id="negotiate.hero.overlay">
     <p class="eyebrow">The desk</p>
     <h1 class="hero-title">Quote it,<br/><em>counter it,</em> close it.</h1>
-    <p class="hero-sub">Live rate negotiation for load <span class="mono" id="load-id-readout" data-agent-id="negotiate.load_id">&mdash;</span>. Ask Jarvis to set a counter, submit, or accept.</p>
+    <p class="hero-sub">Live rate negotiation for load <span class="mono" id="load-id-readout" data-agent-id="negotiate.load_id">&mdash;</span>. Submit an offer, accept and move on, or ask Jarvis for one suggested price.</p>
     <ul class="hero-kpi-strip" aria-label="Lane benchmarks">
       <li><span class="kpi-num hero-numeral" data-kpi="loads.avg_rate_per_mile">&mdash;</span><span class="kpi-lbl">market avg / mi</span></li>
       <li data-static-kpi="true"><span class="kpi-num hero-numeral">$2.08</span><span class="kpi-lbl">7-day low</span></li>
@@ -63,10 +63,6 @@
           <label class="field-label" for="field-target-rate">Target rate (USD)</label>
           <input id="field-target-rate" name="target_rate" class="input" type="number" min="0" step="0.01" placeholder="1850" data-agent-id="negotiate.form.target_rate" />
         </div>
-        <div class="field">
-          <label class="field-label" for="field-agent-max-rate">Jarvis max rate</label>
-          <input id="field-agent-max-rate" class="input" type="number" min="0" step="0.01" placeholder="Your ceiling" data-agent-id="negotiate.form.agent_max_rate" />
-        </div>
         <div class="field field--wide">
           <label class="field-label" for="field-note">Note for carrier</label>
           <input id="field-note" name="note" class="input" type="text" placeholder="Optional context" data-agent-id="negotiate.form.note" />
@@ -74,11 +70,8 @@
         <div class="field--wide">
           <div class="row" role="group" aria-label="Negotiation actions">
             <button class="btn btn--primary" type="submit" id="negotiate-submit" data-agent-id="negotiate.submit">Submit offer</button>
-            <button class="btn" type="button" id="btn-counter" data-agent-id="negotiate.counter">Ask seller</button>
-            <button class="btn btn--outlined" type="button" id="negotiate-agent-propose" data-agent-id="negotiate.agent.propose">Jarvis propose</button>
-            <button class="btn" type="button" id="negotiate-agent-run" data-agent-id="negotiate.agent.take_turn">Jarvis negotiate</button>
-            <button class="btn btn--ghost" type="button" id="btn-accept" data-agent-id="negotiate.accept">Accept</button>
-            <button class="btn btn--outlined" type="button" id="btn-new-negotiation" data-agent-id="negotiate.new" hidden>New negotiation</button>
+            <button class="btn btn--outlined" type="button" id="btn-accept" data-agent-id="negotiate.accept_try_another">Accept and try another</button>
+            <button class="btn btn--ghost" type="button" id="negotiate-agent-propose" data-agent-id="negotiate.agent.suggest">Jarvis suggest</button>
           </div>
         </div>
       </div>
