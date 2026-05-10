@@ -65,6 +65,19 @@ let unsubscribeLoad = null;
 let unsubscribeCarrier = null;
 let scrollLockState = null;
 
+function ensureModalStyles() {
+  if (typeof document === 'undefined') return;
+  const href = '/css/load-modal.css';
+  if (document.head.querySelector(`link[href="${href}"], link[data-modal-css="${href}"]`)) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = href;
+  link.setAttribute('data-modal-css', href);
+  document.head.appendChild(link);
+}
+
+ensureModalStyles();
+
 const FOCUSABLE_SELECTOR = [
   'a[href]',
   'area[href]',

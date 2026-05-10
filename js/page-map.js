@@ -9,6 +9,27 @@ let instance = null;
 let agentRef = null;
 let unsubscribeStore = [];
 
+function loadStylesheetOnce(href) {
+  if (!href || typeof document === 'undefined') return Promise.resolve();
+  const existing = document.head.querySelector(`link[href="${href}"], link[data-route-css="${href}"]`);
+  if (existing) {
+    if (existing.sheet) return Promise.resolve();
+    return new Promise((resolve) => {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => resolve(), { once: true });
+    });
+  }
+  return new Promise((resolve) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    link.setAttribute('data-route-css', href);
+    link.addEventListener('load', () => resolve(), { once: true });
+    link.addEventListener('error', () => resolve(), { once: true });
+    document.head.appendChild(link);
+  });
+}
+
 async function loadData() {
   try {
     await initDataStore();
@@ -35,6 +56,7 @@ function renderErrorBanner(root, message) {
 
 export async function enter(root, { voiceAgent }) {
   agentRef = voiceAgent;
+  await loadStylesheetOnce('/css/map.css');
 
   // Make the surrounding <main> full-bleed while on the map page.
   const main = root && root.closest && root.closest('.app-main');

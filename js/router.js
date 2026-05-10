@@ -176,7 +176,7 @@ class Router extends EventTarget {
       // Load partial markup + module in parallel.
       this.target.setAttribute('aria-busy', 'true');
       const [html, mod] = await Promise.all([
-        fetch(route.partial, { cache: 'no-store' }).then((r) => {
+        fetch(route.partial, { cache: 'no-cache' }).then((r) => {
           if (!r.ok) throw new Error(`partial ${route.partial} → ${r.status}`);
           return r.text();
         }),

@@ -103,6 +103,33 @@ export function mountOverlay({ widgetApi, root, getLoads = listLoads, getCarrier
   let listPaintTimer = null;
   let mutObs = null;
 
+  function stopTimers() {
+    if (driftTimer) {
+      clearInterval(driftTimer);
+      driftTimer = null;
+    }
+    if (listPaintTimer) {
+      clearInterval(listPaintTimer);
+      listPaintTimer = null;
+    }
+  }
+
+  function startTimers() {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    if (!driftTimer) driftTimer = setInterval(reposition, 500);
+    if (!listPaintTimer) listPaintTimer = setInterval(paintListBars, 5000);
+  }
+
+  function onVisibilityChange() {
+    if (document.hidden) {
+      stopTimers();
+      return;
+    }
+    reposition();
+    paintListBars();
+    startTimers();
+  }
+
   function ensureTruckEl(load) {
     let entry = truckEls.get(load.id);
     if (entry) return entry;
@@ -199,8 +226,6 @@ export function mountOverlay({ widgetApi, root, getLoads = listLoads, getCarrier
   map.on('moveend',   onMoveEnd);
   map.on('resize',    onMoveEnd);
 
-  driftTimer = setInterval(reposition, 500);
-
   // --- Side-rail list bars + ETA
   function decorateListRow(li) {
     if (!li || li.dataset.overlayDecorated === 'true') return;
@@ -261,7 +286,8 @@ export function mountOverlay({ widgetApi, root, getLoads = listLoads, getCarrier
     mutObs = new MutationObserver(() => requestAnimationFrame(decorateAll));
     mutObs.observe(filterList, { childList: true, subtree: false });
   }
-  listPaintTimer = setInterval(paintListBars, 5000);
+  startTimers();
+  try { document.addEventListener('visibilitychange', onVisibilityChange); } catch {}
 
   // --- Selection broadcast
   function handleSelect(load) {
@@ -311,8 +337,8 @@ export function mountOverlay({ widgetApi, root, getLoads = listLoads, getCarrier
     try { map.off('zoomend',   onZoomEnd);   } catch {}
     try { map.off('moveend',   onMoveEnd);   } catch {}
     try { map.off('resize',    onMoveEnd);   } catch {}
-    if (driftTimer) clearInterval(driftTimer);
-    if (listPaintTimer) clearInterval(listPaintTimer);
+    stopTimers();
+    try { document.removeEventListener('visibilitychange', onVisibilityChange); } catch {}
     if (mutObs) { try { mutObs.disconnect(); } catch {} }
     try { unsubSelection(); } catch {}
     truckEls.forEach((entry) => { try { entry.el.remove(); } catch {} });

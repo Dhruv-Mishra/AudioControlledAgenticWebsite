@@ -1,4 +1,4 @@
-/* Expressive Console — M3 Expressive 2025 / lime primary on green-ink / Geist
+/* Expressive Console — M3 Expressive 2025 / lime primary on green-ink
  *
  * Single source of truth for design tokens. This file is consumed by:
  *  - css/base.css, css/components.css (Dev A)
@@ -121,7 +121,7 @@
   --color-map-highlight-ring:   color-mix(in oklab, var(--md-sys-color-primary) 80%, transparent);
 
   /* ============================================================
-   * TYPOGRAPHY — Geist + Geist Mono
+  * TYPOGRAPHY — Bricolage Grotesque + DM Mono
    * `--font-display` is aliased to `--font-sans` so existing rules that
    * referenced the Fraunces stack keep compiling.
    * ============================================================ */
@@ -131,7 +131,7 @@
   --font-serif:   "Instrument Serif", ui-serif, "Iowan Old Style", "Apple Garamond", "Baskerville", "Times New Roman", serif;
   --font-display: var(--font-sans);
 
-  /* Fluid type scale — tightened from v1, Geist x-height runs hotter. */
+  /* Fluid type scale — tuned for the current freight-console type system. */
   --fs-2xs:     clamp(10px, 0.68rem + 0.05vw, 11px);
   --fs-xs:      clamp(11px, 0.72rem + 0.10vw, 12px);
   --fs-sm:      clamp(13px, 0.82rem + 0.10vw, 13px);

@@ -46,6 +46,30 @@ function publish() {
   listeners.forEach((fn) => { try { fn(getLiveState()); } catch {} });
 }
 
+function stopTicker() {
+  if (tickHandle !== null) {
+    clearInterval(tickHandle);
+    tickHandle = null;
+  }
+}
+
+function startTicker() {
+  if (tickHandle !== null) return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  tickHandle = setInterval(() => {
+    publish();
+  }, 1000);
+}
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopTicker();
+    return;
+  }
+  publish();
+  startTicker();
+}
+
 function render(host) {
   if (!host) return;
   host.innerHTML = `
@@ -121,9 +145,8 @@ export function startLiveUi() {
     subscribe('store:reset', publish)
   ];
 
-  tickHandle = setInterval(() => {
-    publish();
-  }, 1000);
+  startTicker();
+  try { document.addEventListener('visibilitychange', handleVisibilityChange); } catch {}
 
   // Re-mount on SPA route changes in case anything clobbers the header.
   try {

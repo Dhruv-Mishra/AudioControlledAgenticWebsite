@@ -19,14 +19,10 @@
        fonts.googleapis.com / fonts.gstatic.com preconnects are gone. -->
   <link rel="preconnect" href="/" />
   <link rel="dns-prefetch" href="/api/ws-nonce" />
-  <!-- Warm the CARTO basemap CDN — four subdomains (a/b/c/d). The map
-       page lazy-loads Leaflet, so DNS+TLS to cartocdn.com normally costs
-       ~150-300 ms on the first /map.html navigation. Preconnecting at
-       shell load time pays that back into background. -->
-  <link rel="preconnect" href="https://a.basemaps.cartocdn.com" crossorigin />
-  <link rel="preconnect" href="https://b.basemaps.cartocdn.com" crossorigin />
-  <link rel="preconnect" href="https://c.basemaps.cartocdn.com" crossorigin />
-  <link rel="preconnect" href="https://d.basemaps.cartocdn.com" crossorigin />
+    <!-- Warm the OSM tile hosts used by the lazy map page. -->
+    <link rel="preconnect" href="https://a.tile.openstreetmap.org" crossorigin />
+    <link rel="preconnect" href="https://b.tile.openstreetmap.org" crossorigin />
+    <link rel="preconnect" href="https://c.tile.openstreetmap.org" crossorigin />
   <!-- Preload the two latin woff2 files used on first paint so we swap
        to the real faces immediately rather than running through the system
        fallback for ~200 ms. crossorigin is required for woff2 even when
@@ -43,8 +39,6 @@
   <link rel="stylesheet" href="/css/components.css" />
   <link rel="stylesheet" href="/css/pages.css" />
   <link rel="stylesheet" href="/css/voice-dock.css" />
-  <link rel="stylesheet" href="/css/map.css" />
-  <link rel="stylesheet" href="/css/load-modal.css" />
   <link rel="stylesheet" href="/css/enhancements.css" />
 </head>
 <body>

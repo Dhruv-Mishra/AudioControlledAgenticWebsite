@@ -514,19 +514,52 @@ function startLiveTimer(agent) {
   const el = $('#voice-live-timer');
   if (!el) return () => {};
   let running = true;
-  function tick() {
-    if (!running) return;
-    if (!agent.isInCall() && agent.getState() !== STATES.DIALING && agent.getState() !== STATES.RECONNECTING) {
-      el.textContent = '0:00';
-    } else {
-      const ms = agent.getMetrics().liveElapsedMs;
-      const s = Math.floor(ms / 1000);
-      el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-    }
-    setTimeout(tick, 500);
+  let timer = null;
+
+  function isTimerActive() {
+    const state = agent.getState && agent.getState();
+    return !!(agent.isInCall && agent.isInCall()) || state === STATES.DIALING || state === STATES.RECONNECTING;
   }
-  tick();
-  return () => { running = false; };
+
+  function render() {
+    if (!running) return;
+    if (!isTimerActive()) {
+      el.textContent = '0:00';
+      return;
+    }
+    const ms = agent.getMetrics().liveElapsedMs;
+    const s = Math.floor(ms / 1000);
+    el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  function stopTimer(reset) {
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+    if (reset) el.textContent = '0:00';
+  }
+
+  function syncTimer() {
+    if (!running) return;
+    const active = isTimerActive();
+    if (!active || document.hidden) {
+      stopTimer(!active);
+      return;
+    }
+    if (timer === null) timer = setInterval(render, 1000);
+    render();
+  }
+
+  agent.addEventListener('state', syncTimer);
+  document.addEventListener('visibilitychange', syncTimer);
+  syncTimer();
+  return () => {
+    running = false;
+    stopTimer(false);
+    agent.removeEventListener('state', syncTimer);
+    document.removeEventListener('visibilitychange', syncTimer);
+  };
 }
 
 // --- Error + playback-blocked banner ---
@@ -624,17 +657,48 @@ function wireVuMeter(agent) {
     return 0;
   }
 
+  let rafId = 0;
+  let running = true;
+
+  function isVuActive() {
+    const state = agent.getState && agent.getState();
+    return !document.hidden && (!!(agent.isInCall && agent.isInCall()) || state === STATES.DIALING || state === STATES.RECONNECTING);
+  }
+
+  function setIdleBars() {
+    bars.forEach((b) => { b.style.height = BAR_MIN + 'px'; });
+  }
+
   function tick() {
+    rafId = 0;
+    if (!running) return;
+    if (!isVuActive()) {
+      setIdleBars();
+      return;
+    }
     const level = readLevel();
     bars.forEach((b, i) => {
       const weight = WEIGHTS[i] != null ? WEIGHTS[i] : 1;
       const h = Math.max(BAR_MIN, Math.round(BAR_MIN + level * (BAR_MAX - BAR_MIN) * weight));
       b.style.height = h + 'px';
     });
-    requestAnimationFrame(tick);
+    rafId = requestAnimationFrame(tick);
   }
 
-  requestAnimationFrame(tick);
+  function syncVu() {
+    if (!running) return;
+    if (!isVuActive()) {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = 0;
+      setIdleBars();
+      return;
+    }
+    if (!rafId) rafId = requestAnimationFrame(tick);
+  }
+
+  agent.addEventListener('state', syncVu);
+  document.addEventListener('visibilitychange', syncVu);
+  syncVu();
 }
 
 // --- Persona buttons ---

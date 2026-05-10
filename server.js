@@ -198,14 +198,27 @@ async function serveFile(abs, req, res) {
       res.end();
       return;
     }
-    const data = await fsp.readFile(abs);
-    res.writeHead(200, {
+    const headers = {
       'Content-Type': MIME[ext] || 'application/octet-stream',
       'Cache-Control': cacheControlFor(relUrl),
       ETag: etag,
       'X-Content-Type-Options': 'nosniff'
+    };
+    res.writeHead(200, headers);
+    if (req.method === 'HEAD') {
+      res.end();
+      return;
+    }
+    const stream = fs.createReadStream(abs);
+    stream.on('error', () => {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Internal Server Error');
+        return;
+      }
+      res.destroy();
     });
-    res.end(data);
+    stream.pipe(res);
   } catch (err) {
     res.writeHead(404); res.end('Not Found');
   }
@@ -335,7 +348,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/transcript') return handleTranscript(req, res);
 
   // Static
-  if (req.method === 'GET') {
+  if (req.method === 'GET' || req.method === 'HEAD') {
     const abs = resolveStaticPath(pathname);
     if (abs) return serveFile(abs, req, res);
   }
