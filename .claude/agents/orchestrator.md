@@ -2,7 +2,6 @@
 name: orchestrator
 description: Coordinator for multi-step or multi-component website work. Use when a task spans 2+ roles, 3+ files, or mixes UI and AI. Decomposes the task, spawns an agent team (default) or sequential subagents, and synthesizes results. Run as the main session via `claude --agent orchestrator` so it has the authority to spawn teammates.
 tools: vscode/getProjectSetupInfo, vscode/installExtension, vscode/memory, vscode/newWorkspace, vscode/resolveMemoryFileUri, vscode/runCommand, vscode/vscodeAPI, vscode/extensions, vscode/askQuestions, vscode/toolSearch, execute/runNotebookCell, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/createAndRunTask, execute/runInTerminal, read/getNotebookSummary, read/problems, read/readFile, read/viewImage, read/readNotebookCellOutput, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, web/githubRepo, web/githubTextSearch, browser/openBrowserPage, todo
-model: opus
 effort: max
 ---
 
