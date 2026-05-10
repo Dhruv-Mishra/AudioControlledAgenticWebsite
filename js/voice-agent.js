@@ -109,6 +109,25 @@ const DEFAULT_TRANSCRIPT_MODE = 'full';
 // for mid-session resume — we just mirror it here too.
 const PERSONA_STORAGE_KEY = 'liveAgent.persona';
 
+const READ_ONLY_TOOL_NAMES = new Set([
+  'list_elements',
+  'read_text',
+  'read_modal',
+  'get_load',
+  'get_negotiation_context',
+  'get_live_state',
+  'get_ui_selection',
+  'get_form_draft',
+  'get_activity_feed'
+]);
+
+const QUIET_ACTION_TOOL_NAMES = new Set([
+  'highlight',
+  'set_activity_note',
+  'set_quick_actions',
+  'end_call'
+]);
+
 export const STATES = Object.freeze({
   IDLE: 'idle',
   ARMING: 'arming',
@@ -272,6 +291,8 @@ export class VoiceAgent extends EventTarget {
       // Note: `_pendingActions` is created later in the constructor;
       // guard against the early init order.
       this._setSpeakerEchoSuppression(false);
+      this._lastAgentPlaybackDrainedAt = Date.now();
+      if (this._agentEndingArmed) this._agentAudioDrained = true;
       if (this._pendingActions) this._maybeDrainPendingActions('audio_drained');
     });
     this.pipeline.addEventListener('agent-playback-started', () => {
@@ -440,6 +461,10 @@ export class VoiceAgent extends EventTarget {
     this._agentEndingTimer = null;
     this._agentEndingGraceTimer = null;
     this._agentEndingListeners = null;
+    this._agentSignoffHangupTimer = null;
+    this._lastTurnCompleteAt = 0;
+    this._lastAgentPlaybackDrainedAt = 0;
+    this._lastUserHangupIntentAt = 0;
     // Round-3 fix 1: label for the parallel-init `console.time` span.
     // Set at the top of placeCall; closed on setup_complete OR on any
     // teardown so the label never leaks between calls.
@@ -493,7 +518,7 @@ export class VoiceAgent extends EventTarget {
       sendTextMessage: (m) => this._sendJson(m),
       // The agent-driven navigate path now defers — see _onAgentNavigate.
       // External overrides (e.g. tests) keep the immediate path.
-      onNavigate: onNavigate || ((p) => { this._onAgentNavigate(p); }),
+      onNavigate: onNavigate || ((p) => this._onAgentNavigate(p)),
       onToolNote: (s) => this._logTool(s),
       // Live getter so the flag change after init() takes effect without
       // having to rebuild the registry.
@@ -514,8 +539,16 @@ export class VoiceAgent extends EventTarget {
     const captureToolResult = (m) => {
       if (m && m.type === 'tool_result' && m.ok === false) {
         this._lastToolResultOk = false;
+        this._lastToolFailure = {
+          name: m.name || '',
+          error: m.error || '',
+          code: m.code || '',
+          recovery: m.recovery || null,
+          at: Date.now()
+        };
       } else if (m && m.type === 'tool_result') {
         this._lastToolResultOk = true;
+        this._lastToolFailure = null;
       }
       origSendJson(m);
     };
@@ -525,7 +558,18 @@ export class VoiceAgent extends EventTarget {
       const name = (payload && payload.name) || '';
       this._publishEvent('tool-call-start', { name, id: payload && payload.id });
       try {
-        const result = await origHandle(payload);
+        const runTool = async () => {
+          if (this._shouldPlayToolPrelude(name)) await this._playQueuedToolPrelude(name);
+          return await origHandle(payload);
+        };
+        const result = this._shouldQueueToolCall(name)
+          ? await this._enqueuePendingAction(runTool, {
+            label: 'tool:' + name,
+            reason: 'tool_call',
+            dedupeKey: null,
+            waitForSpeech: true
+          })
+          : await runTool();
         // Tool-failure silence fallback: if the tool result was ok:false
         // and the model doesn't speak within 4 s, inject a notice.
         if (!this._lastToolResultOk) {
@@ -905,9 +949,44 @@ export class VoiceAgent extends EventTarget {
       dlog('endCall: user overrode pending agent_end_call wait');
       this._cancelAgentEndingWait('endCall_user_override');
     }
+    this._clearAgentSignoffHangupTimer();
     if (!this.isInCall() && this.state !== STATES.DIALING) return;
     dlog('endCall: user initiated');
     await this._gracefullyEndCall('user_end');
+  }
+
+  _clearToolFailureSilenceTimer() {
+    clearTimeout(this._toolFailureSilenceTimer);
+    this._toolFailureSilenceTimer = null;
+  }
+
+  _clearAgentSignoffHangupTimer() {
+    clearTimeout(this._agentSignoffHangupTimer);
+    this._agentSignoffHangupTimer = null;
+  }
+
+  _looksLikeUserHangupIntent(text) {
+    const t = String(text || '').toLowerCase();
+    return /\b(hang up|end (the )?call|disconnect|goodbye|good bye|bye|that'?s all|that is all)\b/.test(t);
+  }
+
+  _looksLikeAgentSignoff(text) {
+    const t = String(text || '').toLowerCase();
+    return /\b(goodbye|good bye|bye for now|take care|talk to you later|have a good (day|one)|have a great (day|one))\b/.test(t);
+  }
+
+  _scheduleAgentSignoffHangupFallback() {
+    if (!this._callActive || this._endingCall || this._agentEndingArmed) return;
+    if (Date.now() - this._lastUserHangupIntentAt > 12000) return;
+    this._clearAgentSignoffHangupTimer();
+    this._agentSignoffHangupTimer = setTimeout(() => {
+      this._agentSignoffHangupTimer = null;
+      if (!this._callActive || this._endingCall || this._agentEndingArmed) return;
+      if (Date.now() - this._lastUserHangupIntentAt > 14000) return;
+      // eslint-disable-next-line no-console
+      console.warn('[jarvis] agent sign-off fallback — no end_call tool arrived. Ending call locally.');
+      this._gracefullyEndCall('agent_end_call_fallback').catch(() => {});
+    }, 1800);
   }
 
   async _gracefullyEndCall(reason) {
@@ -921,6 +1000,8 @@ export class VoiceAgent extends EventTarget {
       return;
     }
     this._endingCall = true;
+    this._clearToolFailureSilenceTimer();
+    this._clearAgentSignoffHangupTimer();
     // Drop any deferred page-nav / disruptive tool effects queued
     // during the now-ending turn. Without this, the 8s safety timer
     // (or a late `turn_complete`) could fire `window.__router.navigate`
@@ -965,7 +1046,7 @@ export class VoiceAgent extends EventTarget {
     //     We DO NOT call `playCallClose()` at all. The latch is cleared
     //     naturally at the top of the NEXT `placeCall()`.
     //   • Skip straight to WS close + state reset. Same-frame teardown.
-    const isAgentPath = reason === 'agent_end_call' || reason === 'agent_end_call_timeout';
+    const isAgentPath = reason === 'agent_end_call' || reason === 'agent_end_call_timeout' || reason === 'agent_end_call_fallback';
 
     this.pipeline.setCapturePaused(true);
     this.preSetupBuffer = [];
@@ -1077,6 +1158,8 @@ export class VoiceAgent extends EventTarget {
     clearInterval(this.liveIdleTimer); this.liveIdleTimer = null;
     // Round-6 fix 2: cancel any armed deterministic end-call wait.
     this._cancelAgentEndingWait('_tearDownCall');
+    this._clearToolFailureSilenceTimer();
+    this._clearAgentSignoffHangupTimer();
     // Drop any deferred page-nav / disruptive tool effects — the call
     // is dead, the user does NOT want to be teleported to a page
     // queued before hangup.
@@ -1751,94 +1834,78 @@ export class VoiceAgent extends EventTarget {
         this.toolRegistry.handleToolCall(msg);
         return;
       case 'end_call_requested': {
-        // Round-6 fix 2: DETERMINISTIC end-call chain.
-        //
-        // No more timer guess (was 3 s). The model decides to hang up
-        // and produces its sign-off audio; we wait for two discrete,
-        // deterministic signals before proceeding:
-        //   1. `turn-complete` from Gemini — the model has finished
-        //      generating audio for this turn (i.e. "Have a nice day!"
-        //      is fully produced, including the trailing silence
-        //      Gemini puts at the end of a turn).
-        //   2. `agent-playback-drained` from the pipeline — every
-        //      scheduled AudioBufferSourceNode has drained (i.e. the
-        //      last PCM sample has left the speakers).
-        // When BOTH have fired, `_gracefullyEndCall` runs and plays
-        // the callClose chime.
-        //
-        // Idempotent: `_agentEndingArmed` latches on first fire so a
-        // duplicate frame is dropped.
-        //
-        // Safety timeout: 10 s wallclock after we arm. If Gemini
-        // silently dies between tool ack and turn_complete, we proceed
-        // with teardown so the call doesn't hang forever. Logged at
-        // error level so it's visible in DevTools.
-        //
-        // User kill during the wait: `endCall()` calls
-        // `_gracefullyEndCall` directly with `reason='user_end'` which
-        // short-circuits the wait (idempotent latch in
-        // `_gracefullyEndCall` means the second call is a no-op).
         dlog('end_call_requested reason=' + (msg.reason || '—'));
         if (this._agentEndingArmed) {
           dlog('end_call_requested duplicate — already armed');
           return;
         }
+        this._clearAgentSignoffHangupTimer();
         this._agentEndingArmed = true;
-        this._agentTurnComplete = false;
-        this._agentAudioDrained = !this.pipeline.isAgentAudioPlaying();
+        const now = Date.now();
+        const recentTurnComplete = now - this._lastTurnCompleteAt < 2500;
+        const recentAudioDrained = now - this._lastAgentPlaybackDrainedAt < 2500;
+        this._agentTurnComplete = recentTurnComplete;
+        this._agentAudioDrained = !this.pipeline.isAgentAudioPlaying() || recentAudioDrained;
         const reasonForLog = msg.reason || null;
         this._publishEvent('agent-end-call-pending', { reason: reasonForLog });
 
-        const tryFinish = (trigger) => {
+        // End-call is terminal: do not let stale navigation/fill actions
+        // queued during the previous turn sit ahead of the hangup finalizer.
+        if (this._pendingActions) this._pendingActions.clear('agent_end_call_supersedes');
+        this._clearPendingActionsTimer();
+
+        this._pendingActions.enqueue(async () => {
+          if (!this._agentEndingArmed) return;
+          clearTimeout(this._agentEndingTimer); this._agentEndingTimer = null;
+          clearTimeout(this._agentEndingGraceTimer); this._agentEndingGraceTimer = null;
+          this._agentEndingArmed = false;
+          dlog('agent-end-call queued fire');
+          await this._gracefullyEndCall('agent_end_call');
+        }, {
+          label: 'end_call',
+          reason: 'agent_end_call_requested',
+          dedupeKey: 'agent:end_call'
+        });
+        this._armPendingActionsTimer();
+
+        const drainQueuedEndCall = (trigger) => {
           if (!this._agentEndingArmed) return;
           if (!this._agentTurnComplete || !this._agentAudioDrained) {
-            dlog('agent-end-call waiting — turn=' + this._agentTurnComplete +
+            dlog('agent-end-call queued wait — turn=' + this._agentTurnComplete +
               ' drained=' + this._agentAudioDrained + ' via=' + trigger);
-            // end-call-latency: once audio has drained (user heard the
-            // last word), cap the additional wait for turn_complete.
-            // Gemini often sends turn_complete a few hundred ms AFTER
-            // audio generation finishes; without this cap, the user
-            // hears "Have a good day!" then a noticeable pause before
-            // the callClose chime. 300 ms is well under the perceptual
-            // threshold for a conversational turn and still gives the
-            // turn_complete frame ample time to arrive.
             if (this._agentAudioDrained && !this._agentTurnComplete && !this._agentEndingGraceTimer) {
               this._agentEndingGraceTimer = setTimeout(() => {
                 this._agentEndingGraceTimer = null;
                 if (!this._agentEndingArmed) return;
                 dlog('agent-end-call grace-expired — proceeding without turn_complete');
                 this._agentTurnComplete = true;
-                tryFinish('grace_timeout');
+                drainQueuedEndCall('grace_timeout');
               }, 300);
             }
             return;
           }
-          // Both gates closed — run teardown.
-          clearTimeout(this._agentEndingTimer); this._agentEndingTimer = null;
-          clearTimeout(this._agentEndingGraceTimer); this._agentEndingGraceTimer = null;
-          this._agentEndingArmed = false;
-          dlog('agent-end-call deterministic fire via=' + trigger);
-          this._gracefullyEndCall('agent_end_call').catch(() => {});
+          this._clearPendingActionsTimer();
+          this._pendingActions.drainAsync('agent_end_call:' + trigger).catch((err) => {
+            dlog('agent-end-call queued drain failed err=' + (err && err.message || err));
+          });
         };
-
         const onTurnComplete = () => {
           if (!this._agentEndingArmed) return;
           this._agentTurnComplete = true;
-          tryFinish('turn_complete');
+          drainQueuedEndCall('turn_complete');
         };
         const onAgentDrained = () => {
           if (!this._agentEndingArmed) return;
           this._agentAudioDrained = true;
-          tryFinish('agent_drained');
+          drainQueuedEndCall('agent_drained');
         };
         this.addEventListener('turn-complete', onTurnComplete);
         this.pipeline.addEventListener('agent-playback-drained', onAgentDrained);
         this._agentEndingListeners = { onTurnComplete, onAgentDrained };
-        this._agentEndingGraceTimer = null;
 
-        // Safety timeout: 3 s. If Gemini dies mid-turn, proceed anyway.
-        // Reduced from 10 s — that was a worst-case guard but meant the
-        // call could hang for ages if a signal genuinely failed.
+        // Safety timeout: 3 s. If Gemini dies before the normal
+        // speech-drain events arrive, proceed anyway so the call does
+        // not hang open forever.
         this._agentEndingTimer = setTimeout(() => {
           if (!this._agentEndingArmed) return;
           // eslint-disable-next-line no-console
@@ -1847,12 +1914,7 @@ export class VoiceAgent extends EventTarget {
           clearTimeout(this._agentEndingGraceTimer); this._agentEndingGraceTimer = null;
           this._gracefullyEndCall('agent_end_call_timeout').catch(() => {});
         }, 3000);
-
-        // If audio was ALREADY drained at the moment the tool fired
-        // (no sign-off was ever scheduled), we still wait for
-        // turn_complete — the model may not have emitted any audio
-        // parts but Gemini will still signal end-of-turn.
-        if (this._agentAudioDrained) tryFinish('already_drained');
+        drainQueuedEndCall('initial_state');
         return;
       }
       case 'transcript_delta':
@@ -1876,7 +1938,9 @@ export class VoiceAgent extends EventTarget {
         this._setState(STATES.LIVE_READY);
         return;
       case 'turn_complete':
+        this._lastTurnCompleteAt = Date.now();
         if (this.transcript) this.transcript.turnBreak();
+        if (this._agentEndingArmed) this._agentTurnComplete = true;
         // Reset resume grace on first turn_complete after resume.
         if (this._resumeGraceUntil > 0) this._resumeGraceUntil = 0;
         this._setState(STATES.LIVE_READY);
@@ -2117,9 +2181,10 @@ export class VoiceAgent extends EventTarget {
 
     const doNavigate = () => {
       if (typeof window !== 'undefined' && window.__router && typeof window.__router.navigate === 'function') {
-        window.__router.navigate(path);
+        return window.__router.navigate(path);
       } else {
         location.href = path;
+        return undefined;
       }
     };
 
@@ -2139,8 +2204,7 @@ export class VoiceAgent extends EventTarget {
       this.pipeline.isAgentAudioPlaying()
     );
     if (!turnInFlight) {
-      doNavigate();
-      return;
+      return doNavigate();
     }
     this._pendingActions.enqueue(doNavigate, {
       label: 'navigate:' + path,
@@ -2149,6 +2213,7 @@ export class VoiceAgent extends EventTarget {
       dedupeKey: 'navigate:' + path
     });
     this._armPendingActionsTimer();
+    return undefined;
   }
 
   /** Arm a safety timer that drains the pending-action queue if the
@@ -2163,7 +2228,9 @@ export class VoiceAgent extends EventTarget {
       if (this._pendingActions.isEmpty) return;
       // eslint-disable-next-line no-console
       console.warn('[jarvis] pending-actions timeout — draining anyway');
-      this._pendingActions.drain('timeout');
+      this._pendingActions.drainAsync('timeout').catch((err) => {
+        dlog('pending-actions timeout drain failed err=' + (err && err.message || err));
+      });
     }, this._PENDING_ACTIONS_MAX_WAIT_MS);
   }
 
@@ -2193,7 +2260,9 @@ export class VoiceAgent extends EventTarget {
       this.state === STATES.MODEL_THINKING;
     if (speaking) return;
     this._clearPendingActionsTimer();
-    this._pendingActions.drain('speech_end:' + via);
+    this._pendingActions.drainAsync('speech_end:' + via).catch((err) => {
+      dlog('pending-actions drain failed via=' + via + ' err=' + (err && err.message || err));
+    });
   }
 
   _tryInjectPageContext() {
@@ -2240,6 +2309,56 @@ export class VoiceAgent extends EventTarget {
     this._sendJson({ type: 'page_context', page, title, elements });
   }
 
+  _shouldQueueToolCall(name) {
+    if (!name || READ_ONLY_TOOL_NAMES.has(name) || QUIET_ACTION_TOOL_NAMES.has(name)) return false;
+    return true;
+  }
+
+  _shouldPlayToolPrelude(name) {
+    if (!name || READ_ONLY_TOOL_NAMES.has(name) || QUIET_ACTION_TOOL_NAMES.has(name)) return false;
+    return true;
+  }
+
+  _hasTurnAudioInFlight() {
+    return !!(this._callActive && (
+      this.state === STATES.MODEL_SPEAKING ||
+      this.state === STATES.MODEL_THINKING ||
+      (this.pipeline && this.pipeline.isAgentAudioPlaying && this.pipeline.isAgentAudioPlaying())
+    ));
+  }
+
+  _enqueuePendingAction(action, { label, reason, dedupeKey, waitForSpeech = true } = {}) {
+    if (!this._pendingActions || typeof action !== 'function') return Promise.resolve().then(action);
+    return new Promise((resolve, reject) => {
+      this._pendingActions.enqueue(async () => {
+        try {
+          resolve(await action());
+        } catch (err) {
+          reject(err);
+        }
+      }, {
+        label: label || 'pending-action',
+        reason: reason || '',
+        dedupeKey: dedupeKey || null
+      });
+      this._armPendingActionsTimer();
+      if (!waitForSpeech || !this._hasTurnAudioInFlight()) {
+        this._maybeDrainPendingActions('enqueue:' + (label || 'action'));
+      }
+    });
+  }
+
+  async _playQueuedToolPrelude(name) {
+    try {
+      this._publishEvent('tool-action-prelude', { name });
+      if (this.pipeline && this.pipeline.callAudio && typeof this.pipeline.callAudio.playKeyboardTyping === 'function') {
+        await this.pipeline.callAudio.playKeyboardTyping();
+      }
+    } catch (err) {
+      dlog('tool prelude skipped name=' + name + ' err=' + (err && err.message || err));
+    }
+  }
+
   _onServerError(msg) {
     const code = msg.code || 'error';
     this._setState(STATES.ERROR, code);
@@ -2262,22 +2381,40 @@ export class VoiceAgent extends EventTarget {
    *  doesn't speak (no agent transcript_delta) within that window, inject
    *  a synthetic notice so the user isn't left in dead air. */
   _startToolFailureSilenceTimer() {
-    clearTimeout(this._toolFailureSilenceTimer);
+    this._clearToolFailureSilenceTimer();
     this._toolFailureSilenceTimer = setTimeout(() => {
       this._toolFailureSilenceTimer = null;
       if (!this._callActive) return;
       // Only fire if the model hasn't started speaking.
       if (this.state === STATES.MODEL_SPEAKING) return;
-      this._announce({ from: 'system', text: 'Something didn\'t work — try asking me again.' });
+      const failure = this._lastToolFailure || {};
+      const recoveryText = failure.recovery
+        ? ' Recovery: ' + (typeof failure.recovery === 'string' ? failure.recovery : JSON.stringify(failure.recovery))
+        : '';
+      const text = failure.error
+        ? `Tool ${failure.name || 'call'} failed: ${failure.error}.${recoveryText}`
+        : 'A tool call failed and I did not get a spoken recovery.';
+      this.sendAppEvent('tool_failure_recovery_needed', {
+        tool: failure.name || '',
+        error: failure.error || '',
+        code: failure.code || '',
+        recovery: failure.recovery || null
+      });
+      this._announce({ from: 'system', text });
     }, 4000);
   }
 
   _onTranscriptDelta(msg) {
     const from = msg.from === 'agent' ? 'agent' : 'user';
+    const spokenText = String(msg.delta || msg.text || '');
     // Cancel tool-failure silence timer on any agent speech.
     if (from === 'agent' && this._toolFailureSilenceTimer) {
-      clearTimeout(this._toolFailureSilenceTimer);
-      this._toolFailureSilenceTimer = null;
+      this._clearToolFailureSilenceTimer();
+    }
+    if (from === 'user' && this._looksLikeUserHangupIntent(spokenText)) {
+      this._lastUserHangupIntentAt = Date.now();
+    } else if (from === 'agent' && this._looksLikeAgentSignoff(spokenText)) {
+      this._scheduleAgentSignoffHangupFallback();
     }
     // Barge-in dedup: suppress late-arriving user deltas after interruption.
     if (from === 'user' && Date.now() < this._suppressUserTxUntil) return;

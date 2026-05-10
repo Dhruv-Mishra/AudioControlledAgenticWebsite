@@ -25,12 +25,12 @@ assert(
   'system prompt should not close the static page block with </page_context>'
 );
 assert(
-  SYSTEM_PROMPT_SKELETON.includes('The static <current_page> block in your system prompt is just situational awareness'),
-  'rule 8 should explain that <current_page> is situational awareness only'
+  SYSTEM_PROMPT_SKELETON.includes('<current_page> is awareness only'),
+  'system prompt should explain that <current_page> is situational awareness only'
 );
 assert(
-  SYSTEM_PROMPT_SKELETON.includes('do NOT acknowledge it on its own'),
-  'rule 8 should forbid acknowledging static <current_page> by itself'
+  SYSTEM_PROMPT_SKELETON.includes('do not acknowledge it by itself'),
+  'system prompt should forbid acknowledging static <current_page> by itself'
 );
 
 const mapGreeting = buildCallInitiatedText({

@@ -21,9 +21,11 @@
 // Contract:
 //   • enqueue(action, {label, reason}) — schedule a thunk to run after
 //     speech completes. Returns the action's queued descriptor.
-//   • drain(reason) — synchronously execute every pending action in
-//     FIFO order, swallowing per-action errors so one bad thunk can't
-//     break the chain.
+//   • drain(reason) — starts executing every pending action in FIFO
+//     order, swallowing per-action errors so one bad thunk can't break
+//     the chain. Returns the count that was pending when drain began.
+//   • drainAsync(reason) — same drain, but resolves after async actions
+//     have finished.
 //   • clear(reason) — drop everything (used on call teardown).
 //   • size — how many actions are waiting.
 //   • addEventListener('drained', cb) — fired after each drain pass.
@@ -77,6 +79,22 @@ export class PendingActionQueue extends EventTarget {
       this._log('drain reentry ignored (reason=' + reason + ')');
       return 0;
     }
+    const pending = this._queue.length;
+    if (pending === 0) return 0;
+    this.drainAsync(reason).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[pending-queue] drain failed', err && err.message);
+    });
+    return pending;
+  }
+
+  /** Awaitable drain for queued async effects such as UI tool calls and
+   *  short transition sounds. */
+  async drainAsync(reason = 'drain') {
+    if (this._draining) {
+      this._log('drain reentry ignored (reason=' + reason + ')');
+      return 0;
+    }
     if (this._queue.length === 0) return 0;
     this._draining = true;
     const ran = [];
@@ -86,7 +104,8 @@ export class PendingActionQueue extends EventTarget {
         const waitedMs = Date.now() - entry.enqueuedAt;
         try {
           this._log('drain ' + entry.label + ' (waited=' + waitedMs + 'ms reason=' + reason + ')');
-          entry.action();
+          const result = entry.action();
+          if (result && typeof result.then === 'function') await result;
           ran.push(entry.label);
         } catch (err) {
           // eslint-disable-next-line no-console

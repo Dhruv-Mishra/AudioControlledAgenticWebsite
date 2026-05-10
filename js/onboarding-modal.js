@@ -1,4 +1,5 @@
 const GLOBAL_SKIP_KEY = 'jarvis.onboarding.skip_all.v1';
+const GLOBAL_SEEN_KEY = 'jarvis.onboarding.seen.any.v1';
 const PAGE_KEY_PREFIX = 'jarvis.onboarding.seen.';
 
 const PAGE_GUIDES = {
@@ -217,6 +218,14 @@ function ensureRoot() {
     if (name === 'prev') showSlide(activeIndex - 1);
     if (name === 'close') closeGuide({ completed: false });
     if (name === 'finish') closeGuide({ completed: true });
+    if (name === 'call') {
+      closeGuide({ completed: true });
+      window.setTimeout(() => {
+        const callButton = document.getElementById('voice-call-btn');
+        try { callButton && callButton.focus(); } catch {}
+        try { callButton && callButton.click(); } catch {}
+      }, 0);
+    }
     if (name === 'skip-all') {
       storageSet(GLOBAL_SKIP_KEY, '1');
       closeGuide({ completed: true });
@@ -229,27 +238,19 @@ function ensureRoot() {
 
 function render() {
   if (!root || !activeGuide) return;
-  const slide = activeGuide.guide.slides[activeIndex];
-  const isLast = activeIndex >= activeGuide.guide.slides.length - 1;
   root.innerHTML = `
     <div class="onboarding-backdrop"></div>
     <section class="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" aria-describedby="onboarding-copy">
       <header class="onboarding-head">
         <div>
-          <p class="eyebrow">${escapeHtml(activeGuide.guide.eyebrow)}</p>
-          <h2 id="onboarding-title">${escapeHtml(activeGuide.guide.title)}</h2>
+          <p class="eyebrow">Jarvis voice agent</p>
+          <h2 id="onboarding-title">Call Jarvis</h2>
         </div>
         <button class="icon-btn onboarding-close" type="button" aria-label="Close onboarding" data-onboarding-action="close" data-agent-id="onboarding.close">&times;</button>
       </header>
-      <div class="onboarding-slide" data-agent-id="onboarding.slide">
-        ${diagram(slide.diagram)}
-        <div class="onboarding-copy">
-          <h3>${escapeHtml(slide.title)}</h3>
-          <p id="onboarding-copy">${escapeHtml(slide.body)}</p>
-        </div>
-      </div>
-      <div class="onboarding-dots" role="group" aria-label="Onboarding slides">
-        ${activeGuide.guide.slides.map((_, index) => `<button type="button" data-onboarding-action="dot" data-index="${index}" aria-label="Show slide ${index + 1}" aria-current="${index === activeIndex ? 'step' : 'false'}"></button>`).join('')}
+      <div class="onboarding-copy" data-agent-id="onboarding.slide">
+        <p id="onboarding-copy">Tell Jarvis what you need. He can navigate, explain, fill fields, and handle the next step for this page.</p>
+        <p class="onboarding-note">You stay in control and can use the page normally at any time.</p>
       </div>
       <footer class="onboarding-actions">
         <label class="onboarding-check">
@@ -257,9 +258,8 @@ function render() {
           <span>Don't show guides again</span>
         </label>
         <div class="onboarding-button-row">
-          <button class="btn btn--ghost btn--sm" type="button" data-onboarding-action="skip-all" data-agent-id="onboarding.skip_all">Skip all</button>
-          <button class="btn btn--outlined btn--sm" type="button" data-onboarding-action="prev" ${activeIndex === 0 ? 'disabled' : ''}>Back</button>
-          <button class="btn btn--primary btn--sm" type="button" data-onboarding-action="${isLast ? 'finish' : 'next'}" data-agent-id="onboarding.next">${isLast ? 'I understand / try out' : 'Next'}</button>
+          <button class="btn btn--ghost btn--sm" type="button" data-onboarding-action="finish" data-agent-id="onboarding.skip_all">Maybe later</button>
+          <button class="btn btn--primary btn--sm" type="button" data-onboarding-action="call" data-agent-id="onboarding.call">Call Jarvis</button>
         </div>
       </footer>
     </section>
@@ -279,6 +279,7 @@ function closeGuide({ completed }) {
   const skipCheck = root.querySelector('#onboarding-skip-check');
   if (skipCheck) skipAllChecked = !!skipCheck.checked;
   if (skipAllChecked) storageSet(GLOBAL_SKIP_KEY, '1');
+  storageSet(GLOBAL_SEEN_KEY, '1');
   storageSet(pageKey(activeGuide.name), '1');
   root.hidden = true;
   root.innerHTML = '';
@@ -301,7 +302,7 @@ function openGuide(name, guide) {
   document.documentElement.classList.add('is-onboarding-open');
   document.body.classList.add('is-onboarding-open');
   document.addEventListener('keydown', handleOnboardingKeydown, true);
-  const button = el.querySelector('[data-onboarding-action="next"], [data-onboarding-action="finish"]');
+  const button = el.querySelector('[data-onboarding-action="call"], [data-onboarding-action="finish"]');
   try { button && button.focus(); } catch {}
 }
 
@@ -311,6 +312,7 @@ function maybeShow(path, force = false) {
   if (!found) return;
   const [name, guide] = found;
   if (!force && storageGet(GLOBAL_SKIP_KEY) === '1') return;
+  if (!force && storageGet(GLOBAL_SEEN_KEY) === '1') return;
   if (!force && storageGet(pageKey(name)) === '1') return;
   window.setTimeout(() => {
     if (!force && location.pathname !== targetPath) return;
@@ -330,6 +332,7 @@ export function initOnboarding({ router } = {}) {
     show: () => maybeShow(location.pathname, true),
     reset: () => {
       storageRemove(GLOBAL_SKIP_KEY);
+      storageRemove(GLOBAL_SEEN_KEY);
       Object.keys(PAGE_GUIDES).forEach((name) => storageRemove(pageKey(name)));
     }
   };

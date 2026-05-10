@@ -26,6 +26,14 @@
 //     MUST: playCallClose NEVER called; listeners cleaned up; timer
 //           cleared; user-path reason recorded.
 //
+//   Regressions:
+//     • end_call_requested can arrive after turn_complete/audio-drained;
+//       it must fire from the recorded recent gate state instead of
+//       hanging open.
+//     • terminal end-call clears stale queued UI actions ahead of it.
+//     • if the user asks to end and the agent signs off but the tool
+//       frame never arrives, the narrow local fallback ends the call.
+//
 // Uses the node-side VoiceAgent import with stub pipeline/WS. Builds
 // on the round-6 end-call-deterministic-smoke harness.
 //
@@ -220,6 +228,38 @@ async function main() {
     const armed2 = agent._agentEndingArmed;
     assert(armed1 === true && armed2 === true, 'armed stays true through duplicate');
     assert(agent.pipeline.stats.playCallCloseCalls === 0, 'no premature chime');
+    agent._cancelAgentEndingWait('test_cleanup');
+  }
+
+  // ===== REGRESSION: request arrives after both gates already fired =====
+  console.log('\n--- regression: end_call after recent gates still fires ---');
+  {
+    const agent = freshAgent();
+    let staleActionRan = false;
+    agent._pendingActions.enqueue(() => { staleActionRan = true; }, { label: 'stale-nav', reason: 'test' });
+    agent._lastTurnCompleteAt = Date.now();
+    agent._lastAgentPlaybackDrainedAt = Date.now();
+
+    agent._onServerMessage({ type: 'end_call_requested', reason: 'late-frame' });
+    await new Promise((r) => setTimeout(r, 120));
+
+    assert(staleActionRan === false, 'stale queued action cleared before terminal hangup');
+    assert(agent.pipeline.stats.playCallCloseCalls === 1, 'callClose called from initial gate state');
+    assert(agent._agentEndingArmed === false, 'wait disarmed');
+    assert(agent.state === 'idle', 'final state is IDLE');
+  }
+
+  // ===== REGRESSION: model signs off but tool frame never arrives =====
+  console.log('\n--- regression: sign-off fallback ends call without tool frame ---');
+  {
+    const agent = freshAgent();
+    agent._onTranscriptDelta({ from: 'user', delta: 'Goodbye, end the call.' });
+    agent._onTranscriptDelta({ from: 'agent', delta: 'Goodbye.' });
+    await new Promise((r) => setTimeout(r, 2200));
+
+    assert(agent.pipeline.stats.playCallCloseCalls === 1, 'fallback plays callClose once');
+    assert(agent._agentEndingArmed === false, 'no deterministic wait left armed');
+    assert(agent.state === 'idle', 'fallback final state is IDLE');
   }
 
   console.log('\n' + passes + ' PASS / ' + fails + ' FAIL');

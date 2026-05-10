@@ -46,15 +46,15 @@ const rule6 = SYSTEM_PROMPT_SKELETON.split('\n').find((line) => line.startsWith(
 assert(rule6 && rule6.includes('code'), 'rule 6 should mention code');
 assert(rule6 && rule6.includes('recovery'), 'rule 6 should mention recovery');
 
-const rule15 = SYSTEM_PROMPT_SKELETON.split('\n').find((line) => line.startsWith('15.'));
-assert(rule15, 'rule 15 should exist');
-assert(rule15.includes('get_negotiation_context'), 'rule 15 should mention get_negotiation_context');
-assert(/no fixed percent band/i.test(rule15), 'rule 15 should remove fixed percent band');
-assert(/agent_delegation/i.test(rule15), 'rule 15 should mention agent delegation');
-assert(/pricing\.distance_miles/.test(rule15), 'rule 15 should ground on distance-based pricing');
-assert(/pricing\.weight_lb/.test(rule15), 'rule 15 should ground on weight-based pricing');
-assert(/negotiator profile/i.test(rule15), 'rule 15 should ground on public negotiator profile');
-assert(/never mention hidden trait scores/i.test(rule15), 'rule 15 should hide internal trait scores');
-assert(/<app_event>/.test(rule15), 'rule 15 should mention trigger-based app events');
+const rule11 = SYSTEM_PROMPT_SKELETON.split('\n').find((line) => line.startsWith('11.'));
+assert(rule11, 'rule 11 should exist');
+assert(rule11.includes('get_negotiation_context'), 'rule 11 should mention get_negotiation_context');
+assert(/no fixed percent band/i.test(rule11), 'rule 11 should remove fixed percent band');
+assert(/agent_delegation/i.test(rule11), 'rule 11 should mention agent delegation');
+assert(/pricing\.distance_miles/.test(rule11), 'rule 11 should ground on distance-based pricing');
+assert(/pricing\.weight_lb/.test(rule11), 'rule 11 should ground on weight-based pricing');
+assert(/public negotiator profile/i.test(rule11), 'rule 11 should ground on public negotiator profile');
+assert(/Never mention hidden trait scores/i.test(rule11), 'rule 11 should hide internal trait scores');
+assert(/<app_event>/.test(rule11), 'rule 11 should mention trigger-based app events');
 
 console.log('PASS negotiation-context-smoke');

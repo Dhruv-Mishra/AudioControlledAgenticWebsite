@@ -9,6 +9,7 @@
 //   6. clear() drops everything without running.
 //   7. The 'drained' CustomEvent fires after a drain pass and lists
 //      every action label that ran.
+//   8. drainAsync awaits async actions in FIFO order.
 //
 // How it runs in Node: dynamic-imports the ESM module; provides a
 // minimal CustomEvent shim if one isn't already on globalThis.
@@ -123,6 +124,21 @@ if (typeof globalThis.CustomEvent !== 'function') {
       fail('drained ran labels wrong: ' + JSON.stringify(detail.ran));
     }
     ok('drained event fires with labels');
+  }
+
+  // 8. async actions are awaited in FIFO order.
+  {
+    const q = new PendingActionQueue();
+    const order = [];
+    q.enqueue(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      order.push('a');
+    }, { label: 'async-a' });
+    q.enqueue(() => { order.push('b'); }, { label: 'sync-b' });
+    const ran = await q.drainAsync('async-test');
+    if (ran !== 2) fail('async drain count ' + ran + ' != 2');
+    if (order.join(',') !== 'a,b') fail('async FIFO order broken: ' + order.join(','));
+    ok('drainAsync awaits FIFO');
   }
 
   console.log('PASS pending-action-queue-smoke');

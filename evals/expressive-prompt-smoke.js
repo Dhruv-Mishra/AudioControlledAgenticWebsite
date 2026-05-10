@@ -26,7 +26,7 @@ assert(
 
 // 2. Stage directions are explicitly forbidden from text/audio narration.
 assert(
-  /Never output, spell, caption, or say stage directions/i.test(SYSTEM_PROMPT_SKELETON),
+  /never output stage directions/i.test(SYSTEM_PROMPT_SKELETON),
   'skeleton forbids stage directions in spoken/caption text'
 );
 
@@ -43,7 +43,7 @@ const foundForbidden = forbiddenExamples.filter((example) => SYSTEM_PROMPT_SKELE
 assert(foundForbidden.length >= 3, 'forbidden marker examples present — found: ' + JSON.stringify(foundForbidden));
 
 // 5. Soft length cap preserves cache prefix.
-assert(SYSTEM_PROMPT_SKELETON.length <= 8000, 'skeleton length ' + SYSTEM_PROMPT_SKELETON.length + ' ≤ 8000 chars');
+assert(SYSTEM_PROMPT_SKELETON.length <= 2600, 'skeleton length ' + SYSTEM_PROMPT_SKELETON.length + ' <= 2600 chars');
 
 // 6. buildSystemInstruction preserves skeleton verbatim at the top.
 const built = buildSystemInstruction({ personaFragment: 'PERSONA_STUB', pageName: '/' });

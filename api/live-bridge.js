@@ -96,6 +96,23 @@ function safeDelimText(s, max = 140) {
     .slice(0, max);
 }
 
+function capabilitySummary(capabilities) {
+  if (!capabilities || typeof capabilities !== 'object') return 'read';
+  const tools = ['click', 'fill', 'select', 'check']
+    .filter((name) => capabilities[name] === true);
+  return tools.length ? tools.join('|') : 'read';
+}
+
+function elementPromptLine(element) {
+  const id = safeDelimText(element && element.id, 80);
+  if (!id) return '';
+  const label = safeDelimText(element && element.label, 60);
+  const role = safeDelimText(element && element.role, 30) || 'region';
+  const tools = capabilitySummary(element && element.capabilities);
+  const prefix = `- ${id} [role=${role}; tools=${tools}]`;
+  return label ? `${prefix} :: ${label}` : prefix;
+}
+
 /** Build the <call_initiated>...</call_initiated> block sent on the first
  *  `setup_complete` after the user places a call. The model is taught to
  *  respond immediately with one short greeting — introduce itself, ask how
@@ -130,10 +147,8 @@ function buildPageContextText({ page, title, elements }) {
   if (Array.isArray(elements) && elements.length) {
     lines.push('Visible agent-addressable elements (partial list):');
     for (const e of elements) {
-      const id = safeDelimText(e.id, 80);
-      const label = safeDelimText(e.label, 60);
-      if (!id) continue;
-      lines.push(label ? `- ${id} :: ${label}` : `- ${id}`);
+      const line = elementPromptLine(e);
+      if (line) lines.push(line);
     }
   } else {
     lines.push('No interactive elements detected yet on this page.');
@@ -148,9 +163,9 @@ function buildPageContextText({ page, title, elements }) {
   const budget = PAGE_CONTEXT_MAX_TEXT_BYTES - head.length - tail.length;
   let chunk = '';
   for (const e of elements) {
-    const id = safeDelimText(e.id, 80);
-    const label = safeDelimText(e.label, 60);
-    const line = (label ? `- ${id} :: ${label}` : `- ${id}`) + '\n';
+    const promptLine = elementPromptLine(e);
+    if (!promptLine) continue;
+    const line = promptLine + '\n';
     if (chunk.length + line.length > budget) break;
     chunk += line;
   }
@@ -190,6 +205,8 @@ function buildAppEventText({ name, page, detail }) {
     `Detail JSON: ${json}`,
     safeName === 'negotiator_response_arrived'
       ? 'The negotiator has replied in the UI. Check get_negotiation_context if needed, then speak one concise next-step reaction. Do not wait for the user to ask.'
+      : safeName === 'tool_failure_recovery_needed'
+        ? 'A tool failed and no spoken recovery followed. Speak one concise first-person recovery sentence using the error/recovery fields, then call the correct next tool only if the next tool is obvious. Do not apologize in third person and do not retry the same failing arguments.'
       : 'If useful, respond briefly; otherwise stay silent.',
     '</app_event>'
   ].join('\n');
@@ -461,9 +478,13 @@ function attach(browserWs, req, env) {
       role: e.role,
       label: String(e.label || '').slice(0, 140),
       page: e.page,
+      tag: e.tag,
+      capabilities: e.capabilities,
       value: e.state && e.state.value,
       checked: e.state && e.state.checked,
       disabled: e.state && e.state.disabled,
+      readonly: e.state && e.state.readonly,
+      input_type: e.state && e.state.input_type,
       options: Array.isArray(e.options) ? e.options.slice(0, 24) : undefined
     }));
   }

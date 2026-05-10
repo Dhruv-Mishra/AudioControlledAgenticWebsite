@@ -11,7 +11,7 @@
 //   - AbortController cancels in-flight on exit().
 
 import * as fsm from './negotiation-state.js';
-import { getSelection } from './page-state.js';
+import { getSelection, selectLoad as rememberSelectedLoad } from './page-state.js';
 import { assignCarrierToLoad, getLoad, initDataStore, listLoads, subscribe } from './data-store.js';
 
 let agentRef = null;
@@ -299,6 +299,26 @@ const REACTIONS = {
     'I need to release this truck to another option.',
     'This is not coming together fast enough for me to keep capacity held.'
   ],
+  walkawayClose: [
+    'We were close enough to close, but the penny-by-penny haggling burned the goodwill. Have some respect for the truck.',
+    'That was nearly there. I am not holding capacity while we argue over lunch money.',
+    'You had this in reach, then kept shaving it. This is freight, not a vegetable stand.',
+    'We were close, but I am not negotiating every last dollar like we are buying tomatoes at a market.',
+    'The rate was close. The way this dragged out is the problem, so I am releasing the truck.',
+    'At this point the money is close, but the respect is not. I am done holding the driver.',
+    'We could have booked this five minutes ago. I am not rewarding another tiny squeeze.',
+    'Close number, wrong energy. I am moving this truck to someone who can commit.'
+  ],
+  walkawayFar: [
+    'We are not in the same neighborhood on price, and I am not spending more clock on it.',
+    'That is still too far under the truck. Do not waste my time with that spread.',
+    'The gap is too wide for this lane. I am closing it out.',
+    'I cannot bridge that kind of distance without pretending the cost is not real.',
+    'We are miles apart on the money, so I am taking the truck elsewhere.',
+    'That number does not cover the work. I am done chasing it.',
+    'There is no clean path from your offer to my floor. I am stepping away.',
+    'This is too far off market for me to keep the conversation alive.'
+  ],
   longHaul: [
     'That is a long pull, and fuel exposure is doing most of the work here.',
     'For that much road time, I need the rate to cover more than just miles.',
@@ -533,11 +553,27 @@ function getLanePressureComments(lane) {
   return comments;
 }
 
+function getWalkawayPriceBand(profile, amount) {
+  const offer = Number(amount) || 0;
+  const floor = Number(profile && profile.floor) || 0;
+  const target = Number(profile && profile.target) || floor;
+  const lastCarrier = latestCarrierAskAmount();
+  const reference = Math.max(1, lastCarrier || floor || target || offer || 1);
+  const floorGap = floor > 0 ? floor - offer : Infinity;
+  const carrierGap = lastCarrier ? Math.abs(lastCarrier - offer) : Infinity;
+  const closeToFloor = floor > 0 && floorGap <= Math.max(85, reference * 0.045);
+  const closeToAsk = lastCarrier && carrierGap <= Math.max(100, reference * 0.04);
+  return closeToFloor || closeToAsk ? 'close' : 'far';
+}
+
 function buildSellerComment(kind, { profile, amount, counterAmount, angry = false, near = false } = {}) {
   const lane = getLaneDraft();
   const pool = [];
   if (angry) pool.push(...REACTIONS.angryCounter);
   if (near) pool.push(...REACTIONS.nearMiss);
+  if (kind === 'walkaway') {
+    pool.push(...(getWalkawayPriceBand(profile, amount) === 'close' ? REACTIONS.walkawayClose : REACTIONS.walkawayFar));
+  }
   pool.push(...(REACTIONS[kind] || REACTIONS.counter));
   pool.push(...getLanePressureComments(lane));
   if (lane.pickup && lane.dropoff && lane.miles >= 1800) {
@@ -1011,6 +1047,18 @@ function applyAgentProposal(proposal, { forAuto = false, fromCache = false } = {
 
 function proposeAgentOffer({ forAuto = false } = {}) {
   if (!state) return null;
+  if (fsm.isTerminal(state)) {
+    setHint('Negotiation is already closed. Start a new negotiation to make another offer.', 'warn');
+    return null;
+  }
+  if (state.status === 'seller_accepted') {
+    setHint(`Seller already accepted at $${fmt(state.latestOffer && state.latestOffer.amount)}. Close the deal or start a new negotiation.`, 'ok');
+    return null;
+  }
+  if (fsm.isLocked(state)) {
+    setHint('Already submitting. Wait for the seller to respond.', 'warn');
+    return null;
+  }
   const suggestionKey = buildAgentSuggestionKey({ forAuto });
   if (!forAuto && agentSuggestionCache && agentSuggestionCache.key === suggestionKey) {
     return applyAgentProposal(agentSuggestionCache.proposal, { forAuto, fromCache: true });
@@ -1156,7 +1204,12 @@ async function doSubmit(intent, opts = {}) {
     setHint('Seller already accepted from their side. Close the deal or start a new negotiation.', 'ok');
     return;
   }
-  if (fsm.isTerminal(state) || fsm.isLocked(state)) return;
+  if (fsm.isTerminal(state)) {
+    setHint('Negotiation is already closed. Start a new negotiation to make another offer.', 'warn');
+    announce('Negotiation is already closed.');
+    return;
+  }
+  if (fsm.isLocked(state)) return;
   const now = Date.now();
   if (now - lastSubmitAt < THROTTLE_MS) {
     setHint('Wait a moment between submissions…', 'warn');
@@ -1265,17 +1318,17 @@ function stopAutoNegotiation(message, kind) {
 
 function runAgentNegotiationTurn() {
   if (!state || fsm.isLocked(state)) return;
-  const maxRate = readAgentMaxRate();
-  if (!maxRate) {
-    stopAutoNegotiation('Tell Jarvis your maximum rate first, then he can negotiate within it.', 'warn');
-    return;
-  }
   if (state.status === 'seller_accepted') {
     stopAutoNegotiation(`Seller accepted at $${fmt(state.latestOffer && state.latestOffer.amount)}. Close the deal when you are ready.`, 'ok');
     return;
   }
   if (fsm.isTerminal(state)) {
     stopAutoNegotiation('Negotiation is already closed. Start a new negotiation to keep going.', 'warn');
+    return;
+  }
+  const maxRate = readAgentMaxRate();
+  if (!maxRate) {
+    stopAutoNegotiation('Tell Jarvis your maximum rate first, then he can negotiate within it.', 'warn');
     return;
   }
   const carrierAsk = latestCarrierAskAmount();
@@ -1363,6 +1416,43 @@ function hydrateLoadIntoForm() {
   syncSuggestedRateFromLane({ resetProfile: true, render: true });
 }
 
+function resetNegotiationViewForLoad(nextLoad) {
+  load = nextLoad;
+  clearAutoNegotiation();
+  clearAgentSuggestionCache();
+  completedTypewriterHistoryIds.clear();
+  carrierTyping = null;
+  pendingTypewriterHistoryId = null;
+  const pricing = getLanePricing(laneFromLoad(load));
+  suggestedRate = pricing.suggested_rate;
+  state = fsm.load(load.id) || fsm.makeInitial(load.id, suggestedRate);
+  if (state.status === 'idle') fsm.beginDrafting(state);
+  state.pricing = pricing;
+  ensureNegotiatorProfile();
+  hydrateLoadIntoForm();
+}
+
+export async function openLoadById(loadId, { source = 'agent' } = {}) {
+  await initDataStore();
+  const id = String(loadId || '').trim();
+  if (!id) return { ok: false, error: 'openLoadById requires load_id.' };
+  const nextLoad = getLoad(id);
+  if (!nextLoad) return { ok: false, error: `No load ${id}.` };
+  try { rememberSelectedLoad(nextLoad.id, `${nextLoad.pickup || ''} → ${nextLoad.dropoff || ''}`); } catch {}
+  resetNegotiationViewForLoad(nextLoad);
+  setHint(`Loaded ${nextLoad.id} for negotiation.`, 'ok');
+  announce(`Loaded ${nextLoad.id} for negotiation.`);
+  renderState();
+  return {
+    ok: true,
+    source,
+    load_id: nextLoad.id,
+    lane: `${nextLoad.pickup || ''} → ${nextLoad.dropoff || ''}`,
+    status: state && state.status,
+    suggested_rate: suggestedRate
+  };
+}
+
 function startNewNegotiation() {
   if (state && state.loadId) fsm.clear(state.loadId);
   clearAutoNegotiation();
@@ -1394,6 +1484,13 @@ function handleAcceptOrTryAnother() {
 }
 
 function pickLoad(loads) {
+  try {
+    const queryId = new URLSearchParams(location.search || '').get('load_id');
+    if (queryId) {
+      const found = loads.find((l) => String(l.id).toLowerCase() === String(queryId).toLowerCase());
+      if (found) return found;
+    }
+  } catch {}
   const sel = getSelection();
   if (sel && sel.loadId) {
     const found = loads.find((l) => l.id === sel.loadId);
@@ -1423,6 +1520,9 @@ function refreshLoadFields() {
 
 export async function enter(root, { voiceAgent }) {
   agentRef = voiceAgent;
+  if (typeof window !== 'undefined') {
+    window.__negotiatePage = { openLoadById };
+  }
   await initDataStore();
   load = pickLoad(listLoads());
   suggestedRate = getLanePricing(laneFromLoad(load)).suggested_rate;
@@ -1544,6 +1644,32 @@ export async function enter(root, { voiceAgent }) {
   if (voiceAgent && voiceAgent.toolRegistry) {
     voiceAgent.toolRegistry.registerDomain('submit_quote', (args) => {
       const context = getNegotiationContext();
+      if (!state) {
+        const err = new Error('No active negotiation is loaded. Navigate to the Rate Negotiation page and start a negotiation first.');
+        err.code = 'NEGOTIATION_NOT_READY';
+        err.recovery = { next_step: 'Start or load a negotiation before submitting a quote.' };
+        throw err;
+      }
+      if (fsm.isTerminal(state)) {
+        const err = new Error(`Negotiation is already closed with status "${state.status}". Do not submit another offer on this negotiation.`);
+        err.code = 'NEGOTIATION_CLOSED';
+        err.recovery = { next_step: 'Start a new negotiation before making another offer.' };
+        setHint('Negotiation is already closed. Start a new negotiation to make another offer.', 'warn');
+        throw err;
+      }
+      if (state.status === 'seller_accepted') {
+        const err = new Error('Seller already accepted from their side. Ask the user before closing the deal; do not submit another offer.');
+        err.code = 'SELLER_ALREADY_ACCEPTED';
+        err.recovery = { next_step: 'Ask the user whether to close the accepted deal or start a new negotiation.' };
+        setHint('Seller already accepted from their side. Close the deal or start a new negotiation.', 'ok');
+        throw err;
+      }
+      if (fsm.isLocked(state)) {
+        const err = new Error('A quote is already being submitted. Wait for the seller response before sending another offer.');
+        err.code = 'NEGOTIATION_BUSY';
+        err.recovery = { next_step: 'Wait for the current seller response.' };
+        throw err;
+      }
       const validation = fsm.validateOffer(args && args.target_rate);
       if (!validation.ok) {
         setHint(validation.error, 'warn');
@@ -1571,7 +1697,27 @@ export async function enter(root, { voiceAgent }) {
       };
     });
     voiceAgent.toolRegistry.registerDomain('get_negotiation_context', () => getNegotiationContext());
-    voiceAgent.toolRegistry.registerDomain('get_load', () => ({ ok: true, load: load ? getLoad(load.id) || load : null }));
+    voiceAgent.toolRegistry.registerDomain('get_load', (args = {}) => {
+      const requestedId = String(args.load_id || args.id || '').trim();
+      const targetLoad = requestedId ? getLoad(requestedId) : (load ? getLoad(load.id) || load : null);
+      if (!targetLoad) {
+        return {
+          ok: false,
+          error: `No load ${requestedId || '(current)'}`,
+          code: 'LOAD_NOT_FOUND',
+          recovery: { next_step: 'Ask for a valid load ID or use open_load with a known load_id.' }
+        };
+      }
+      return {
+        ok: true,
+        load: targetLoad,
+        current_load_id: load && load.id,
+        selected: !!(load && targetLoad.id === load.id),
+        recovery: load && targetLoad.id !== load.id
+          ? { next_step: `Use open_load({ load_id: "${targetLoad.id}", target_page: "negotiate" }) to make this the active negotiation load.` }
+          : undefined
+      };
+    });
     voiceAgent.toolRegistry.registerDomain('assign_carrier', (args) => {
       try {
         const result = assignCarrierToLoad(args.load_id, args.carrier_id, { source: 'agent' });
@@ -1607,6 +1753,9 @@ export function exit() {
   unsubStore = null;
   if (agentRef && agentRef.toolRegistry && typeof agentRef.toolRegistry.unregisterDomain === 'function') {
     ['submit_quote', 'get_negotiation_context', 'get_load', 'assign_carrier', 'schedule_callback'].forEach((n) => agentRef.toolRegistry.unregisterDomain(n));
+  }
+  if (typeof window !== 'undefined' && window.__negotiatePage && window.__negotiatePage.openLoadById === openLoadById) {
+    delete window.__negotiatePage;
   }
   import('./quick-chips.js').then((chips) => chips.clearChips()).catch(() => {});
   state = null; load = null; agentRef = null;

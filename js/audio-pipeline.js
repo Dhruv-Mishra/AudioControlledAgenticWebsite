@@ -62,10 +62,12 @@ const END_AUDIO_MAX_MS = 6000;
 // modern browsers while keeping iOS Safari working.
 //   • callOpen  = startCall (ring) + phonePick concatenated.
 //   • callClose = phoneCut + endCall concatenated.
+//   • keyboardTyping = short pre-action typing bed for queued tool effects.
 const CALL_AUDIO_SOURCES = {
   callOpen:   { webm: '/audio/callOpen.webm',   mp3: '/audio/callOpen.mp3' },
   background: { webm: '/audio/background.webm', mp3: '/audio/background.mp3' },
-  callClose:  { webm: '/audio/callClose.webm',  mp3: '/audio/callClose.mp3' }
+  callClose:  { webm: '/audio/callClose.webm',  mp3: '/audio/callClose.mp3' },
+  keyboardTyping: { webm: '/audio/keyboardTyping.webm', mp3: '/audio/keyboardTyping.mp3' }
 };
 
 let _webmOpusProbeResult = null;
@@ -141,12 +143,14 @@ class CallAudioController {
     // `_buffers` caches the decoded AudioBuffer per kind; populated by
     // `prepareBuffers`. `_activeOpenSource` / `_activeCloseSource` hold
     // the live source handle so `stopAllCallAudio` can kill them.
-    this._buffers = { callOpen: null, callClose: null };
+    this._buffers = { callOpen: null, callClose: null, keyboardTyping: null };
     this._buffersLoading = null;   // Promise<void> while decoding
     this._activeOpenSource = null;
     this._activeCloseSource = null;
+    this._activeTypingSource = null;
     this._activeOpenStopped = false;
     this._activeCloseStopped = false;
+    this._activeTypingStopped = false;
 
     // Background stays HTMLAudioElement (long-lived loop).
     this.backgroundAudio = this._buildAudio('background', { loop: true, volume: BACKGROUND_VOLUME });
@@ -155,6 +159,7 @@ class CallAudioController {
     this._openPlaying = false;
     this._backgroundPlaying = false;
     this._closePlaying = false;
+    this._typingPlaying = false;
     // audio-flow: latch set by `stopAllCallAudio()` — bars any further
     // playback kick-offs until the next call is placed. Prevents a stale
     // `startBackground()` or a scheduled `playCallClose()` from firing
@@ -188,7 +193,7 @@ class CallAudioController {
     if (this._buffersLoading) return this._buffersLoading;
     if (this._buffers.callOpen && this._buffers.callClose) return Promise.resolve();
     this._buffersLoading = (async () => {
-      const kinds = ['callOpen', 'callClose'];
+      const kinds = ['callOpen', 'callClose', 'keyboardTyping'];
       for (const kind of kinds) {
         if (this._buffers[kind]) continue;
         const url = pickCallAudioSrc(kind);
@@ -294,10 +299,11 @@ class CallAudioController {
    *  source + stopped flag so `stopAllCallAudio` can kill it.
    *  `playingFlag` is the property name we set to true on start and
    *  false on end, so `_checkAllStopped` tracks lifecycle correctly. */
-  _playBufferSource(bufferKey, activeHolderKey, stoppedFlagKey, playingFlagKey, maxWaitMs) {
+  _playBufferSource(bufferKey, activeHolderKey, stoppedFlagKey, playingFlagKey, maxWaitMs, opts = {}) {
     return new Promise((resolve) => {
       const ctx = this._pipeline && this._pipeline.ctx;
       const gain = this._pipeline && this._pipeline.playbackGain;
+      const clipGainValue = Number.isFinite(Number(opts.gain)) ? Math.max(0, Number(opts.gain)) : 1;
       if (!ctx || !gain) {
         // No AudioContext — pipeline wasn't unlocked. Return fallback
         // so the caller doesn't deadlock. Log so the regression is
@@ -328,7 +334,7 @@ class CallAudioController {
             // here so the recursion's own asserts aren't no-ops.
             this[playingFlagKey] = false;
             // Recurse once now that the buffer is ready.
-            this._playBufferSource(bufferKey, activeHolderKey, stoppedFlagKey, playingFlagKey, maxWaitMs)
+            this._playBufferSource(bufferKey, activeHolderKey, stoppedFlagKey, playingFlagKey, maxWaitMs, opts)
               .then(resolve);
           } else {
             this[playingFlagKey] = false;
@@ -346,7 +352,21 @@ class CallAudioController {
       src.buffer = buffer;
       // Connect to the playbackGain so the `setOutputVolume` control
       // and phone-compression crossfade apply uniformly.
-      src.connect(gain);
+      const clipGain = ctx.createGain();
+      const now = ctx.currentTime;
+      const fade = Math.min(0.025, Math.max(0.004, buffer.duration / 8));
+      try {
+        clipGain.gain.setValueAtTime(0.0001, now);
+        clipGain.gain.linearRampToValueAtTime(Math.max(0.0001, clipGainValue), now + fade);
+        if (buffer.duration > fade * 2) {
+          clipGain.gain.setValueAtTime(Math.max(0.0001, clipGainValue), now + buffer.duration - fade);
+        }
+        clipGain.gain.linearRampToValueAtTime(0.0001, now + Math.max(fade, buffer.duration));
+      } catch {
+        clipGain.gain.value = clipGainValue;
+      }
+      src.connect(clipGain);
+      clipGain.connect(gain);
       this[activeHolderKey] = src;
 
       let settled = false;
@@ -357,6 +377,7 @@ class CallAudioController {
         this[playingFlagKey] = false;
         if (this[activeHolderKey] === src) this[activeHolderKey] = null;
         try { src.disconnect(); } catch {}
+        try { clipGain.disconnect(); } catch {}
         this._checkAllStopped();
         resolve({ ok: reason === 'ended', reason });
       };
@@ -429,11 +450,17 @@ class CallAudioController {
     return this._playBufferSource('callClose', '_activeCloseSource', '_activeCloseStopped', '_closePlaying', END_AUDIO_MAX_MS);
   }
 
+  /** Play the short queued-action typing bed before an agent tool effect. */
+  playKeyboardTyping() {
+    if (this._hardKilled) return Promise.resolve({ ok: false, reason: 'hard_killed' });
+    return this._playBufferSource('keyboardTyping', '_activeTypingSource', '_activeTypingStopped', '_typingPlaying', 2500, { gain: 0.32 });
+  }
+
   /** audio-flow: emit the `all-stopped` event when every managed audio
    *  element is idle. UI uses it to flip the End Call button back to
    *  green only after the very last sample has played (requirement 6). */
   _checkAllStopped() {
-    if (this._openPlaying || this._backgroundPlaying || this._closePlaying) return;
+    if (this._openPlaying || this._backgroundPlaying || this._closePlaying || this._typingPlaying) return;
     try { this._onAllStopped(); } catch { /* never break the chain */ }
   }
 
@@ -460,6 +487,10 @@ class CallAudioController {
     if (this._activeCloseSource) {
       this._activeCloseStopped = true;
       try { this._activeCloseSource.stop(0); } catch {}
+    }
+    if (this._activeTypingSource) {
+      this._activeTypingStopped = true;
+      try { this._activeTypingSource.stop(0); } catch {}
     }
     this._checkAllStopped();
   }
@@ -619,7 +650,7 @@ class CallAudioController {
     // Background (HTMLAudioElement) — pause + unload.
     try { this.backgroundAudio.pause(); } catch {}
     try { this.backgroundAudio.removeAttribute('src'); this.backgroundAudio.load(); } catch {}
-    // callOpen + callClose (AudioBufferSourceNode) — stop if active.
+    // callOpen + callClose + keyboardTyping (AudioBufferSourceNode) — stop if active.
     if (this._activeOpenSource) {
       this._activeOpenStopped = true;
       try { this._activeOpenSource.stop(0); } catch {}
@@ -632,9 +663,16 @@ class CallAudioController {
       try { this._activeCloseSource.disconnect(); } catch {}
       this._activeCloseSource = null;
     }
+    if (this._activeTypingSource) {
+      this._activeTypingStopped = true;
+      try { this._activeTypingSource.stop(0); } catch {}
+      try { this._activeTypingSource.disconnect(); } catch {}
+      this._activeTypingSource = null;
+    }
     this._openPlaying = false;
     this._backgroundPlaying = false;
     this._closePlaying = false;
+    this._typingPlaying = false;
   }
 }
 

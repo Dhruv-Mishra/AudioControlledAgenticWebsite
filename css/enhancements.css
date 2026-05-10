@@ -503,18 +503,18 @@
 .onboarding-backdrop {
   position: absolute;
   inset: 0;
-  background: color-mix(in oklab, var(--color-bg) 72%, transparent);
-  backdrop-filter: blur(4px);
+  background: color-mix(in oklab, var(--color-bg) 62%, transparent);
+  backdrop-filter: blur(3px);
 }
 .onboarding-modal {
   position: relative;
-  width: min(620px, 100%);
-  max-height: min(760px, calc(100dvh - var(--sp-8)));
+  width: min(440px, 100%);
+  max-height: min(520px, calc(100dvh - var(--sp-8)));
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
-  padding: var(--sp-5);
+  gap: var(--sp-3);
+  padding: var(--sp-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--md-sys-color-surface-container-high);
@@ -525,12 +525,12 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: var(--sp-4);
+  gap: var(--sp-3);
 }
 .onboarding-head h2 {
   margin: var(--sp-1) 0 0;
-  font-size: var(--fs-xl);
-  line-height: var(--lh-xl);
+  font-size: var(--fs-lg);
+  line-height: var(--lh-lg);
   letter-spacing: 0;
 }
 .onboarding-close { flex: 0 0 auto; }
@@ -586,9 +586,16 @@
   letter-spacing: 0;
 }
 .onboarding-copy p {
-  margin: var(--sp-2) 0 0;
+  margin: 0;
   color: var(--color-text-muted);
   line-height: var(--lh-base);
+}
+.onboarding-copy {
+  display: grid;
+  gap: var(--sp-2);
+}
+.onboarding-note {
+  font-size: var(--fs-sm);
 }
 .onboarding-dots {
   display: flex;
@@ -614,7 +621,7 @@
   gap: var(--sp-3);
   flex-wrap: wrap;
   border-top: 1px solid var(--color-border);
-  padding-top: var(--sp-4);
+  padding-top: var(--sp-3);
 }
 .onboarding-check {
   display: inline-flex;
@@ -631,8 +638,14 @@
   justify-content: flex-end;
 }
 @media (max-width: 640px) {
-  .onboarding-root { padding: var(--sp-3); place-items: end center; }
-  .onboarding-modal { padding: var(--sp-4); max-height: calc(100dvh - var(--app-header-height, 64px) - var(--sp-5)); }
+  .onboarding-root { padding: var(--sp-3) var(--sp-3) 0; place-items: end center; }
+  .onboarding-modal {
+    width: 100%;
+    max-height: min(86dvh, 420px);
+    padding: var(--sp-4);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
   .onboarding-diagram {
     grid-template-columns: 1fr;
     min-height: 0;
@@ -644,12 +657,7 @@
   }
   .onboarding-diagram i::after { right: auto; left: 50%; top: auto; bottom: 0; transform: translateX(-50%) rotate(135deg); }
   .onboarding-actions {
-    position: sticky;
-    bottom: calc(var(--sp-4) * -1);
-    margin-inline: calc(var(--sp-4) * -1);
-    margin-bottom: calc(var(--sp-4) * -1);
-    padding: var(--sp-4);
-    background: var(--md-sys-color-surface-container-high);
+    align-items: stretch;
   }
   .onboarding-actions,
   .onboarding-button-row { align-items: stretch; flex-direction: column; width: 100%; }

@@ -18,8 +18,17 @@ import {
   selectBookedRevenue,
   selectLoadsInMotion
 } from './selectors.js';
+import { selectLoad as rememberSelectedLoad } from './page-state.js';
 
-const VALID_PATHS = new Set(['/', '/index.html', '/dispatch.html', '/carriers.html', '/negotiate.html', '/contact.html', '/map.html']);
+const VALID_PATH_LIST = ['/', '/index.html', '/dispatch.html', '/carriers.html', '/negotiate.html', '/contact.html', '/map.html'];
+const VALID_PATHS = new Set(VALID_PATH_LIST);
+
+function makeToolError(message, code, recovery) {
+  const err = new Error(message);
+  if (code) err.code = code;
+  if (recovery) err.recovery = recovery;
+  return err;
+}
 
 function textOf(el) {
   if (!el) return '';
@@ -71,15 +80,43 @@ function optionsOf(el) {
   return Array.from(el.options).map((o) => o.label || o.textContent || o.value).filter(Boolean);
 }
 
+function canFillElement(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA') return false;
+  const type = (el.getAttribute('type') || 'text').toLowerCase();
+  if (['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden'].includes(type)) return false;
+  return !el.disabled && !el.readOnly;
+}
+
+function capabilitiesOf(el) {
+  if (!el) return {};
+  const tag = el.tagName;
+  const inputType = tag === 'INPUT' ? (el.getAttribute('type') || 'text').toLowerCase() : '';
+  const role = roleOf(el);
+  return {
+    read: true,
+    click: tag === 'BUTTON' || tag === 'A' || role === 'button' || inputType === 'button' || inputType === 'submit',
+    fill: canFillElement(el),
+    select: tag === 'SELECT' && !el.disabled,
+    check: tag === 'INPUT' && (inputType === 'checkbox' || inputType === 'radio') && !el.disabled
+  };
+}
+
 function stateOf(el) {
   if (!el) return {};
   if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
-    return { checked: !!el.checked, disabled: !!el.disabled };
+    return { checked: !!el.checked, disabled: !!el.disabled, readonly: !!el.readOnly, input_type: el.type || 'checkbox' };
   }
   if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
-    return { value: (el.value || '').toString().slice(0, 200), disabled: !!el.disabled };
+    return {
+      value: (el.value || '').toString().slice(0, 200),
+      disabled: !!el.disabled,
+      readonly: !!el.readOnly,
+      input_type: el.tagName === 'SELECT' ? 'select' : (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase()
+    };
   }
-  return { disabled: !!el.disabled };
+  return { disabled: !!el.disabled, readonly: false };
 }
 
 function isVisible(el) {
@@ -103,11 +140,55 @@ export function scanAgentElements() {
       role: roleOf(el),
       label: labelOf(el),
       page: location.pathname,
+      tag: el.tagName.toLowerCase(),
+      capabilities: capabilitiesOf(el),
       state: stateOf(el),
       options: optionsOf(el)
     });
   }
   return out;
+}
+
+function parseNavigationTarget(rawPath) {
+  const raw = String(rawPath || '').trim();
+  if (!raw) {
+    throw makeToolError('navigate requires a non-empty path.', 'INVALID_NAVIGATION_PATH', {
+      valid_paths: VALID_PATH_LIST,
+      next_step: 'Choose one of the valid page paths.'
+    });
+  }
+  let url;
+  try {
+    const origin = (typeof location !== 'undefined' && location.origin) || 'http://localhost';
+    url = new URL(raw, origin);
+  } catch {
+    throw makeToolError(`Could not parse navigation path "${raw}".`, 'INVALID_NAVIGATION_PATH', {
+      valid_paths: VALID_PATH_LIST,
+      next_step: 'Use a path that starts with /, such as /negotiate.html.'
+    });
+  }
+  const origin = (typeof location !== 'undefined' && location.origin) || url.origin;
+  if (url.origin !== origin) {
+    throw makeToolError(`Refusing to navigate outside this app: "${raw}".`, 'INVALID_NAVIGATION_PATH', {
+      valid_paths: VALID_PATH_LIST,
+      next_step: 'Use one of the app page paths only.'
+    });
+  }
+  return {
+    requested: raw,
+    path: url.pathname || '/',
+    search: url.search || '',
+    params: url.searchParams
+  };
+}
+
+function currentPathname() {
+  try { return location.pathname || '/'; } catch { return '/'; }
+}
+
+function loadLabel(load) {
+  if (!load) return '';
+  return `${load.id} ${load.pickup || ''} → ${load.dropoff || ''}`.trim();
 }
 
 function findByAgentId(agentId) {
@@ -318,9 +399,10 @@ export class ToolRegistry {
       // (no WS reconnect, no AudioContext teardown). Fall back to a full
       // reload if, for any reason, the router isn't attached yet.
       if (typeof window !== 'undefined' && window.__router && typeof window.__router.navigate === 'function') {
-        window.__router.navigate(p);
+        return window.__router.navigate(p);
       } else {
         window.location.href = p;
+        return undefined;
       }
     });
     this.onToolNote = onToolNote || (() => {});
@@ -341,6 +423,47 @@ export class ToolRegistry {
   /** Remove a domain-specific tool handler. Safe to call with unknown names. */
   unregisterDomain(name) {
     this.domainHandlers.delete(name);
+  }
+
+  async _navigate(path) {
+    const result = this.onNavigate(path);
+    if (result && typeof result.then === 'function') await result;
+    return result;
+  }
+
+  async _selectKnownLoad(loadId) {
+    await initDataStore();
+    const id = String(loadId || '').trim();
+    if (!id) {
+      throw makeToolError('open_load requires load_id, for example LD-10824.', 'LOAD_ID_REQUIRED', {
+        next_step: 'Pass the exact load_id from the user or from get_load.'
+      });
+    }
+    const load = getLoad(id);
+    if (!load) {
+      throw makeToolError(`No load "${id}" exists.`, 'LOAD_NOT_FOUND', {
+        load_id: id,
+        next_step: 'Ask for a valid load ID or use filter_loads on the Dispatch page to find the lane first.'
+      });
+    }
+    rememberSelectedLoad(load.id, loadLabel(load));
+    return load;
+  }
+
+  async _openLoadForNegotiation(load) {
+    const negotiateApi = typeof window !== 'undefined' ? window.__negotiatePage : null;
+    if (currentPathname() === '/negotiate.html' && negotiateApi && typeof negotiateApi.openLoadById === 'function') {
+      const result = await negotiateApi.openLoadById(load.id, { source: 'agent_tool' });
+      if (result && result.ok === false) {
+        throw makeToolError(result.error || `Could not open load ${load.id} for negotiation.`, 'OPEN_LOAD_FAILED', {
+          load_id: load.id,
+          next_step: 'Use get_load to confirm the load, then retry open_load with target_page="negotiate".'
+        });
+      }
+      return { opened: 'negotiate', current_page: true, result };
+    }
+    await this._navigate('/negotiate.html');
+    return { opened: 'negotiate', navigated: '/negotiate.html' };
   }
 
   async handleToolCall({ id, name, args }) {
@@ -397,10 +520,52 @@ export class ToolRegistry {
   async _execute(name, args) {
     switch (name) {
       case 'navigate': {
-        const p = String(args.path || '').trim();
-        if (!VALID_PATHS.has(p)) throw new Error(`Unknown path "${p}".`);
-        this.onNavigate(p);
-        return { navigated: p };
+        const target = parseNavigationTarget(args.path);
+        if (!VALID_PATHS.has(target.path)) {
+          throw makeToolError(`Unknown path "${target.requested}". Valid paths: ${VALID_PATH_LIST.join(', ')}.`, 'INVALID_NAVIGATION_PATH', {
+            requested_path: target.requested,
+            valid_paths: VALID_PATH_LIST,
+            next_step: 'Navigate to /negotiate.html, then use open_load for a specific load.'
+          });
+        }
+        let selectedLoad = null;
+        const requestedLoadId = target.params.get('load_id') || target.params.get('load') || target.params.get('id');
+        if (target.path === '/negotiate.html' && requestedLoadId) {
+          selectedLoad = await this._selectKnownLoad(requestedLoadId);
+          if (currentPathname() === '/negotiate.html') {
+            const opened = await this._openLoadForNegotiation(selectedLoad);
+            return {
+              navigated: '/negotiate.html',
+              requested_path: target.requested,
+              selected_load: selectedLoad.id,
+              ...opened
+            };
+          }
+        }
+        await this._navigate(target.path);
+        const result = { navigated: target.path };
+        if (target.requested !== target.path) result.requested_path = target.requested;
+        if (selectedLoad) result.selected_load = selectedLoad.id;
+        if (target.search && !selectedLoad) result.query_ignored = target.search;
+        return result;
+      }
+      case 'open_load': {
+        const load = await this._selectKnownLoad(args.load_id || args.id);
+        const requestedTarget = String(args.target_page || args.page || args.target || '').trim().toLowerCase();
+        const wantsNegotiation = args.for_negotiation === true || currentPathname() === '/negotiate.html' || /negotiat|quote|rate/.test(requestedTarget);
+        const result = {
+          ok: true,
+          selected_load: load.id,
+          load: {
+            id: load.id,
+            pickup: load.pickup,
+            dropoff: load.dropoff,
+            status: load.status,
+            rate: load.rate
+          }
+        };
+        if (wantsNegotiation) Object.assign(result, await this._openLoadForNegotiation(load));
+        return result;
       }
       case 'click': {
         const el = findByAgentId(args.agent_id);
@@ -413,8 +578,15 @@ export class ToolRegistry {
       case 'fill': {
         const el = findByAgentId(args.agent_id);
         if (!el) throw new Error(`No element with data-agent-id="${args.agent_id}".`);
-        if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
-          throw new Error(`Element "${args.agent_id}" is not an input/textarea.`);
+        if (!canFillElement(el)) {
+          const caps = capabilitiesOf(el);
+          throw makeToolError(`Element "${args.agent_id}" is not a writable input or textarea; it is role="${roleOf(el)}" tag=<${el.tagName.toLowerCase()}>.`, 'ELEMENT_NOT_FILLABLE', {
+            agent_id: args.agent_id,
+            capabilities: caps,
+            next_step: args.agent_id === 'negotiate.load_id'
+              ? 'Use open_load({ load_id, target_page: "negotiate" }) to make a load active for negotiation. Do not fill negotiate.load_id; it is a read-only display.'
+              : 'Call list_elements and choose an element where capabilities.fill is true, or use a domain tool for this action.'
+          });
         }
         const rawValue = args.value == null ? '' : String(args.value);
         const inputType = el.tagName === 'TEXTAREA'
