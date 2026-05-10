@@ -10,7 +10,7 @@ const voice = fs.readFileSync(path.join(root, 'js/voice-agent.js'), 'utf8');
 const bridge = fs.readFileSync(path.join(root, 'api/live-bridge.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'css/enhancements.css'), 'utf8');
 
-assert(/CARRIER_RESPONSE_DELAY_MS\s*=\s*2800/.test(page), 'carrier response delay should leave room for seller thinking');
+assert(/CARRIER_RESPONSE_DELAY_MS\s*=\s*5000/.test(page), 'carrier response delay should wait around five seconds for seller thinking');
 assert(/deferUntilSpeechEnd:\s*true/.test(page), 'negotiator response app events should use the speech-end queue');
 assert(/AGENT_REACTION_DELAY_MS\s*=\s*600/.test(page), 'agent reaction trigger should be quick after the queued seller event is ready');
 assert(/negotiator:response-arrived/.test(page), 'page should emit negotiator response arrival event');
@@ -20,6 +20,7 @@ assert(/case 'app_event'/.test(bridge), 'live bridge should accept app_event fra
 assert(/sendRealtimeInput\(\{ text \}\)/.test(bridge), 'live bridge should inject app events as realtime input');
 assert(/typing-dots/.test(css), 'typing dots styles should exist');
 assert(/negotiate-dot-bounce/.test(css), 'typing dots animation should exist');
+assert(/\.typing-dots span\s*\{[\s\S]*display:\s*block/.test(css), 'typing dots should be transformable blocks');
 assert(!/Patience<\/span>|Sensitivity<\/span>/.test(page), 'negotiator UI should not render patience/sensitivity labels');
 
 console.log('PASS negotiator-response-trigger-smoke');

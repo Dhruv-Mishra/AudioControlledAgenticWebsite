@@ -20,8 +20,8 @@ let load = null;        // selected load
 let suggestedRate = 0;
 let lastSubmitAt = 0;
 const THROTTLE_MS = 1500;
-const CARRIER_RESPONSE_DELAY_MS = 2800;
-const CARRIER_RESPONSE_JITTER_MS = 2200;
+const CARRIER_RESPONSE_DELAY_MS = 5000;
+const CARRIER_RESPONSE_JITTER_MS = 900;
 const AGENT_REACTION_DELAY_MS = 600;
 const AUTO_NEGOTIATION_TURN_DELAY_MS = 1900;
 const AUTO_NEGOTIATION_MAX_ROUNDS = 6;
@@ -42,6 +42,7 @@ let unsubDelegate = null;
 let unsubAgentPropose = null;
 let unsubAgentRun = null;
 let unsubNewNegotiation = null;
+let unsubLaneInputs = null;
 
 const CITY_OPTIONS = [
   'Atlanta, GA', 'Austin, TX', 'Charlotte, NC', 'Chicago, IL', 'Dallas, TX',
@@ -88,6 +89,22 @@ const COMMODITY_OPTIONS = [
   'Machinery', 'Packaged foods', 'Packaged goods', 'Paper products', 'Pharmaceuticals',
   'Refrigerated produce', 'Retail fixtures', 'Steel coils'
 ];
+
+const PRICING_MODEL = Object.freeze({
+  baseFee: 235,
+  linehaulPerMile: 1.62,
+  fuelPerMile: 0.42,
+  weightPerMilePerThousandLb: 0.013,
+  handlingPerThousandLb: 6.5,
+  heavyThresholdLb: 34000,
+  heavyHandlingPerThousandLb: 15,
+  minimumBillableMiles: 120,
+  defaultWeightLb: 26000,
+  minimumRate: 650,
+  sellerFloorMargin: 1.04,
+  sellerTargetMargin: 1.14,
+  sellerQuickCloseMargin: 1.08
+});
 
 const NEGOTIATOR_TYPES = [
   {
@@ -391,6 +408,79 @@ function estimateLaneMiles(pickup, dropoff) {
   return Math.round(haversineMiles(from, to) * 1.18);
 }
 
+function roundToNearest25(value) {
+  return Math.round(Number(value || 0) / 25) * 25;
+}
+
+function commodityPricingAdjustment(commodity) {
+  const text = String(commodity || '').toLowerCase();
+  if (/reefer|refrigerated|produce|pharma|pharmaceutical/.test(text)) {
+    return { perMile: 0.18, flat: 135, note: 'temperature-control risk' };
+  }
+  if (/chemical|electronics|machinery|auto/.test(text)) {
+    return { perMile: 0.08, flat: 85, note: 'higher-value handling' };
+  }
+  if (/steel/.test(text)) {
+    return { perMile: 0.1, flat: 110, note: 'securement and weight risk' };
+  }
+  return { perMile: 0, flat: 0, note: '' };
+}
+
+function getLanePricing(lane) {
+  const miles = Math.max(
+    PRICING_MODEL.minimumBillableMiles,
+    Number(lane && lane.miles) || Number(load && load.miles) || PRICING_MODEL.minimumBillableMiles
+  );
+  const weight = Math.max(
+    1000,
+    Number(lane && lane.weight) || Number(load && load.weight) || PRICING_MODEL.defaultWeightLb
+  );
+  const weightThousands = weight / 1000;
+  const heavyThousands = Math.max(0, weight - PRICING_MODEL.heavyThresholdLb) / 1000;
+  const commodity = commodityPricingAdjustment(lane && lane.commodity);
+  const ratePerMile = PRICING_MODEL.linehaulPerMile +
+    PRICING_MODEL.fuelPerMile +
+    (weightThousands * PRICING_MODEL.weightPerMilePerThousandLb) +
+    commodity.perMile;
+  const raw = PRICING_MODEL.baseFee +
+    (miles * ratePerMile) +
+    (weightThousands * PRICING_MODEL.handlingPerThousandLb) +
+    (heavyThousands * PRICING_MODEL.heavyHandlingPerThousandLb) +
+    commodity.flat;
+  const suggested = roundToNearest25(Math.max(PRICING_MODEL.minimumRate, raw));
+  const sellerFloor = roundToNearest25(suggested * PRICING_MODEL.sellerFloorMargin);
+  const sellerTarget = roundToNearest25(suggested * PRICING_MODEL.sellerTargetMargin);
+  const sellerQuickClose = roundToNearest25(suggested * PRICING_MODEL.sellerQuickCloseMargin);
+  const notes = [];
+  if (miles >= 1800) notes.push('long-haul fuel and hours');
+  if (weight >= PRICING_MODEL.heavyThresholdLb) notes.push('heavy load handling');
+  if (commodity.note) notes.push(commodity.note);
+  return {
+    distance_miles: Math.round(miles),
+    weight_lb: Math.round(weight),
+    linehaul_per_mile: Number(ratePerMile.toFixed(2)),
+    rate_per_mile: Number((suggested / Math.max(1, miles)).toFixed(2)),
+    suggested_rate: suggested,
+    seller_floor: Math.max(sellerFloor, suggested),
+    seller_target: Math.max(sellerTarget, sellerFloor + 50),
+    seller_quick_close: Math.max(sellerQuickClose, sellerFloor),
+    notes
+  };
+}
+
+function laneFromLoad(row) {
+  if (!row) return { pickup: '', dropoff: '', commodity: '', weight: null, miles: null };
+  const pickup = row.pickup || '';
+  const dropoff = row.dropoff || '';
+  return {
+    pickup,
+    dropoff,
+    commodity: row.commodity || '',
+    weight: Number(row.weight) || null,
+    miles: Number(row.miles) || estimateLaneMiles(pickup, dropoff)
+  };
+}
+
 function getLaneDraft() {
   const pickup = ($('field-pickup') && $('field-pickup').value) || (load && load.pickup) || '';
   const dropoff = ($('field-dropoff') && $('field-dropoff').value) || (load && load.dropoff) || '';
@@ -398,6 +488,33 @@ function getLaneDraft() {
   const weight = Number(($('field-weight') && $('field-weight').value) || (load && load.weight) || 0) || null;
   const miles = estimateLaneMiles(pickup, dropoff);
   return { pickup, dropoff, commodity, weight, miles };
+}
+
+function updateSuggestedReadout(pricing) {
+  const currentPricing = pricing || getLanePricing(getLaneDraft());
+  const sug = $('negotiate-suggested');
+  if (!sug) return;
+  sug.textContent = `$${fmt(currentPricing.suggested_rate)}`;
+  sug.title = `${fmt(currentPricing.distance_miles)} mi, ${fmt(currentPricing.weight_lb)} lb, $${currentPricing.rate_per_mile}/mi`;
+}
+
+function syncSuggestedRateFromLane({ resetProfile = false, render = false } = {}) {
+  const lane = getLaneDraft();
+  const pricing = getLanePricing(lane);
+  suggestedRate = pricing.suggested_rate;
+  if (state) {
+    state.suggestedRate = suggestedRate;
+    state.pricing = pricing;
+    const canResetProfile = resetProfile &&
+      (!Array.isArray(state.history) || state.history.length === 0) &&
+      !fsm.isLocked(state) &&
+      !fsm.isTerminal(state);
+    if (canResetProfile) state.negotiator = createNegotiatorProfile();
+    fsm.save(state);
+  }
+  updateSuggestedReadout(pricing);
+  if (render) renderNegotiatorRead();
+  return pricing;
 }
 
 function getLanePressureComments(lane) {
@@ -453,10 +570,11 @@ function getCarrierResponseDelay(intent) {
 
 function createNegotiatorProfile() {
   const base = pick(NEGOTIATOR_TYPES);
-  const market = Math.max(500, Number(suggestedRate) || Number(load && load.rate) || 1850);
-  const floor = Math.round(market * between(base.floorRange[0], base.floorRange[1]));
-  const target = Math.max(floor + 40, Math.round(market * between(base.targetRange[0], base.targetRange[1])));
-  const quickClose = Math.max(floor, Math.round(market * between(base.quickRange[0], base.quickRange[1])));
+  const pricing = getLanePricing(getLaneDraft());
+  const market = Math.max(500, Number(pricing.suggested_rate) || Number(suggestedRate) || Number(load && load.rate) || 1850);
+  const floor = Math.max(pricing.seller_floor, Math.round(market * between(base.floorRange[0], base.floorRange[1])));
+  const target = Math.max(floor + 40, pricing.seller_target, Math.round(market * between(base.targetRange[0], base.targetRange[1])));
+  const quickClose = Math.max(floor, Math.min(target, pricing.seller_quick_close, Math.round(market * between(base.quickRange[0], base.quickRange[1]))));
   return {
     name: base.name,
     role: base.role,
@@ -537,13 +655,16 @@ function getSuggestedRate() {
 }
 
 function getNegotiationContext() {
+  const pricing = syncSuggestedRateFromLane();
   const currentSuggestedRate = getSuggestedRate();
   const history = state && Array.isArray(state.history) ? state.history : [];
+  const lane = getLaneDraft();
   return {
     load_id: (state && state.loadId) || (load && load.id) || null,
     suggested_rate: currentSuggestedRate,
-    quote_rules: 'Any positive dollar amount is valid. There is no multiple-of-25 rule and no fixed percent band.',
-    lane: getLaneDraft(),
+    quote_rules: 'Any positive dollar amount is valid. There is no multiple-of-25 rule and no fixed percent band. Suggested pricing is based on lane miles, weight, commodity risk, fuel, and handling.',
+    lane: { ...lane, pricing },
+    pricing,
     negotiator: publicNegotiatorProfile(),
     agent_delegation: readDelegation(),
     last_offer: state && state.latestOffer ? state.latestOffer : null,
@@ -921,6 +1042,7 @@ function buildCounterAmount(profile, amount, turnCount, opts = {}) {
 
 async function callCarrier({ amount, intent, note, signal }) {
   await delayWithAbort(getCarrierResponseDelay(intent), signal);
+  syncSuggestedRateFromLane({ resetProfile: false });
   const profile = ensureNegotiatorProfile();
   if (intent === 'accept') {
     return {
@@ -1197,8 +1319,7 @@ function hydrateLoadIntoForm() {
   const amt = $('rate-readout-amount');
   const target = $('field-target-rate');
   if (amt && target) amt.textContent = target.value ? `$${money(target.value)}` : '—';
-  const sug = $('negotiate-suggested');
-  if (sug) sug.textContent = `$${fmt(suggestedRate)}`;
+  syncSuggestedRateFromLane({ resetProfile: true, render: true });
 }
 
 function startNewNegotiation() {
@@ -1208,8 +1329,10 @@ function startNewNegotiation() {
   carrierTyping = null;
   pendingTypewriterHistoryId = null;
   load = pickNextLoad(listLoads()) || load;
-  suggestedRate = Number(load && load.rate) || (load && load.miles ? Math.round(load.miles * 2.4) : 1850);
+  const pricing = getLanePricing(laneFromLoad(load));
+  suggestedRate = pricing.suggested_rate;
   state = fsm.makeInitial(load && load.id, suggestedRate);
+  state.pricing = pricing;
   fsm.beginDrafting(state);
   ensureNegotiatorProfile();
   fsm.save(state);
@@ -1244,13 +1367,14 @@ function refreshLoadFields() {
     const el = $(id);
     if (el) el.value = value == null ? '' : value;
   });
+  syncSuggestedRateFromLane({ resetProfile: true, render: true });
 }
 
 export async function enter(root, { voiceAgent }) {
   agentRef = voiceAgent;
   await initDataStore();
   load = pickLoad(listLoads());
-  suggestedRate = Number(load && load.rate) || (load && load.miles ? Math.round(load.miles * 2.4) : 1850);
+  suggestedRate = getLanePricing(laneFromLoad(load)).suggested_rate;
 
   state = (load && fsm.load(load.id)) || fsm.makeInitial(load && load.id, suggestedRate);
   if (state.status === 'idle') fsm.beginDrafting(state);
@@ -1292,6 +1416,23 @@ export async function enter(root, { voiceAgent }) {
     const onMax = () => renderNegotiatorRead();
     maxRate.addEventListener('input', onMax);
     unsubDelegate = () => maxRate.removeEventListener('input', onMax);
+  }
+  const laneControls = ['field-pickup', 'field-dropoff', 'field-commodity', 'field-weight']
+    .map((id) => $(id))
+    .filter(Boolean);
+  if (laneControls.length) {
+    const onLaneInput = () => {
+      syncSuggestedRateFromLane({ resetProfile: true, render: true });
+      renderState();
+    };
+    laneControls.forEach((el) => {
+      el.addEventListener('input', onLaneInput);
+      el.addEventListener('change', onLaneInput);
+    });
+    unsubLaneInputs = () => laneControls.forEach((el) => {
+      el.removeEventListener('input', onLaneInput);
+      el.removeEventListener('change', onLaneInput);
+    });
   }
   const agentPropose = $('negotiate-agent-propose');
   if (agentPropose) {
@@ -1372,6 +1513,7 @@ export async function enter(root, { voiceAgent }) {
         scheduled: true,
         target_rate: validation.value,
         suggested_rate: context.suggested_rate,
+        pricing: context.pricing,
         negotiator: context.negotiator,
         agent_delegation: context.agent_delegation
       };
@@ -1412,9 +1554,9 @@ export function exit() {
   clearAutoNegotiation();
   carrierTyping = null;
   pendingTypewriterHistoryId = null;
-  [unsubAccept, unsubOffer, unsubInput, unsubKey, unsubDelegate, unsubAgentPropose, unsubAgentRun, unsubNewNegotiation].forEach((fn) => { try { fn && fn(); } catch {} });
+  [unsubAccept, unsubOffer, unsubInput, unsubKey, unsubDelegate, unsubAgentPropose, unsubAgentRun, unsubNewNegotiation, unsubLaneInputs].forEach((fn) => { try { fn && fn(); } catch {} });
   try { unsubStore && unsubStore(); } catch {}
-  unsubAccept = unsubOffer = unsubInput = unsubKey = unsubDelegate = unsubAgentPropose = unsubAgentRun = unsubNewNegotiation = null;
+  unsubAccept = unsubOffer = unsubInput = unsubKey = unsubDelegate = unsubAgentPropose = unsubAgentRun = unsubNewNegotiation = unsubLaneInputs = null;
   unsubStore = null;
   if (agentRef && agentRef.toolRegistry && typeof agentRef.toolRegistry.unregisterDomain === 'function') {
     ['submit_quote', 'get_negotiation_context', 'get_load', 'assign_carrier', 'schedule_callback'].forEach((n) => agentRef.toolRegistry.unregisterDomain(n));

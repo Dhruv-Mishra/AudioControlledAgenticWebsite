@@ -15,8 +15,8 @@
 
 import { LocalStt } from './local-stt.js';
 
-const VAD_RMS_THRESHOLD = 0.02;
-const VAD_SILENCE_MS = 400;
+const VAD_RMS_THRESHOLD = 0.026;
+const VAD_SILENCE_MS = 450;
 
 function detectWebGPU() {
   return typeof navigator !== 'undefined' && !!navigator.gpu;

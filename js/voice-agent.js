@@ -68,6 +68,9 @@ const MAX_RECONNECTS = 5;
 const LIVE_IDLE_TIMEOUT_MS = 3 * 60 * 1000;
 const PRESETUP_BUFFER_MAX_BYTES = 96 * 1024;
 const DIAL_TIMEOUT_MS = 15 * 1000; // if WS/setup doesn't complete in 15s → error
+const SPEAKER_ECHO_TAIL_MS = 900;
+const SPEAKER_ECHO_BARGE_IN_LEVEL = 0.15;
+const SPEAKER_ECHO_TAIL_BARGE_IN_LEVEL = 0.09;
 
 export const RESUME_WINDOW_MS = 10 * 60 * 1000;
 export const IDLE_EXPIRY_MS = 10 * 60 * 1000;
@@ -268,7 +271,11 @@ export class VoiceAgent extends EventTarget {
     this.pipeline.addEventListener('agent-playback-drained', () => {
       // Note: `_pendingActions` is created later in the constructor;
       // guard against the early init order.
+      this._setSpeakerEchoSuppression(false);
       if (this._pendingActions) this._maybeDrainPendingActions('audio_drained');
+    });
+    this.pipeline.addEventListener('agent-playback-started', () => {
+      this._setSpeakerEchoSuppression(true);
     });
     this.transcript = transcriptEl ? new TranscriptLog(transcriptEl) : null;
     // Round-8 test hook: if URL has `?r8hook=1`, stash this instance on
@@ -305,6 +312,9 @@ export class VoiceAgent extends EventTarget {
     this._suppressUserTxUntil = 0;
     // Transcription dedup: resume grace period.
     this._resumeGraceUntil = 0;
+    this._speakerEchoSuppressUntil = 0;
+    this._speakerEchoTranscriptionSuppressed = false;
+    this._speakerEchoTailTimer = null;
     try {
       const stored = localStorage.getItem('liveAgent.voice');
       if (stored && typeof stored === 'string') this.selectedVoice = stored;
@@ -1368,17 +1378,53 @@ export class VoiceAgent extends EventTarget {
     if (next === this.muted) return;
     this.muted = next;
     this.pipeline.setMuted(next);
-    // Local STT follows mute — no need to transcribe silence.
-    if (this.localStt && this.isInCall()) this.localStt.setMuted(next);
-    if (this._sttController && this.isInCall()) {
-      try { this._sttController.setMuted(next); } catch {}
-    }
+    // Local STT follows user mute plus temporary echo suppression.
+    this._applyLocalTranscriptionMute();
     if (next && this.setupComplete) {
       this._sendJson({ type: 'stream_end' });
     }
     this._publishEvent('mute-changed', { muted: this.muted });
   }
   toggleMuted() { this.setMuted(!this.muted); }
+
+  _applyLocalTranscriptionMute() {
+    const muted = !!this.muted || !!this._speakerEchoTranscriptionSuppressed;
+    if (this.localStt && this.isInCall()) this.localStt.setMuted(muted);
+    if (this._sttController && this.isInCall()) {
+      try { this._sttController.setMuted(muted); } catch {}
+    }
+  }
+
+  _setSpeakerEchoSuppression(active) {
+    if (this._speakerEchoTailTimer) {
+      clearTimeout(this._speakerEchoTailTimer);
+      this._speakerEchoTailTimer = null;
+    }
+    if (active) {
+      this._speakerEchoTranscriptionSuppressed = true;
+      this._speakerEchoSuppressUntil = Number.POSITIVE_INFINITY;
+      this._applyLocalTranscriptionMute();
+      return;
+    }
+    this._speakerEchoSuppressUntil = Date.now() + SPEAKER_ECHO_TAIL_MS;
+    this._speakerEchoTailTimer = setTimeout(() => {
+      this._speakerEchoTailTimer = null;
+      this._speakerEchoSuppressUntil = 0;
+      this._speakerEchoTranscriptionSuppressed = false;
+      this._applyLocalTranscriptionMute();
+    }, SPEAKER_ECHO_TAIL_MS);
+  }
+
+  _shouldSuppressMicFrameForEcho() {
+    const playing = !!(this.pipeline && this.pipeline.isAgentAudioPlaying && this.pipeline.isAgentAudioPlaying());
+    const tail = !playing && Date.now() < this._speakerEchoSuppressUntil;
+    if (!playing && !tail) return false;
+    const level = this.pipeline && typeof this.pipeline.readMicLevel === 'function'
+      ? this.pipeline.readMicLevel()
+      : 0;
+    const threshold = playing ? SPEAKER_ECHO_BARGE_IN_LEVEL : SPEAKER_ECHO_TAIL_BARGE_IN_LEVEL;
+    return level < threshold;
+  }
 
   requestReconnect() {
     if (!this._callActive) { this.placeCall(); return; }
@@ -2275,6 +2321,7 @@ export class VoiceAgent extends EventTarget {
   }
 
   _sendAudio(int16) {
+    if (this._shouldSuppressMicFrameForEcho()) return;
     // Feed PCM to the on-device STT controller FIRST (non-blocking).
     // The controller handles VAD gating internally.
     if (this._sttController && typeof this._sttController.feedPcm === 'function' && !this.muted) {

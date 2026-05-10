@@ -35,7 +35,7 @@ assert(
   'get_negotiation_context should have no required args'
 );
 assert.strictEqual(contextTool.response && contextTool.response.type, 'object');
-['suggested_rate', 'quote_rules', 'negotiator', 'agent_delegation', 'status'].forEach((field) => {
+['suggested_rate', 'pricing', 'quote_rules', 'negotiator', 'agent_delegation', 'status'].forEach((field) => {
   assert(
     contextTool.response.properties && contextTool.response.properties[field],
     `get_negotiation_context response should include ${field}`
@@ -51,6 +51,8 @@ assert(rule15, 'rule 15 should exist');
 assert(rule15.includes('get_negotiation_context'), 'rule 15 should mention get_negotiation_context');
 assert(/no fixed percent band/i.test(rule15), 'rule 15 should remove fixed percent band');
 assert(/agent_delegation/i.test(rule15), 'rule 15 should mention agent delegation');
+assert(/pricing\.distance_miles/.test(rule15), 'rule 15 should ground on distance-based pricing');
+assert(/pricing\.weight_lb/.test(rule15), 'rule 15 should ground on weight-based pricing');
 assert(/negotiator profile/i.test(rule15), 'rule 15 should ground on public negotiator profile');
 assert(/never mention hidden trait scores/i.test(rule15), 'rule 15 should hide internal trait scores');
 assert(/<app_event>/.test(rule15), 'rule 15 should mention trigger-based app events');

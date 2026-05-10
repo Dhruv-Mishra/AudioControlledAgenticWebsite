@@ -128,6 +128,7 @@ const STATIC_DIRS = ['css', 'js', 'public', 'data', 'partials', 'audio'];
 const SPA_ROUTES = new Set([
   '/',
   '/index.html',
+  '/dispatch.html',
   '/carriers.html',
   '/negotiate.html',
   '/contact.html',

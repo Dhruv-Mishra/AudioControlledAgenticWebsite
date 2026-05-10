@@ -936,6 +936,7 @@ export class AudioPipeline extends EventTarget {
     // triggers the ramp, and the controller no-ops on repeat targets.
     if (this.activePlaybackSources.size === 0) {
       try { this.callAudio.setBackgroundDuck(true); } catch {}
+      try { this.dispatchEvent(new CustomEvent('agent-playback-started')); } catch {}
     }
     this.activePlaybackSources.add(src);
     src.onended = () => {
@@ -962,12 +963,17 @@ export class AudioPipeline extends EventTarget {
    *  Called from `flushPlayback` consumers in VoiceAgent to kill any
    *  still-playing agent voice (round-1 req 7, round-2 teardown). */
   flushPlayback() {
+    const hadSources = this.activePlaybackSources.size > 0;
     for (const src of this.activePlaybackSources) {
       try { src.stop(); } catch {}
       try { src.disconnect(); } catch {}
     }
     this.activePlaybackSources.clear();
     this.nextStartTime = this.ctx ? this.ctx.currentTime : 0;
+    if (hadSources) {
+      try { this.callAudio.setBackgroundDuck(false); } catch {}
+      try { this.dispatchEvent(new CustomEvent('agent-playback-drained')); } catch {}
+    }
   }
 
   /** audio-flow: Total-audio kill-switch. Synchronously stops every

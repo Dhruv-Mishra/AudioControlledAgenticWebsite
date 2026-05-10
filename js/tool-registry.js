@@ -19,7 +19,7 @@ import {
   selectLoadsInMotion
 } from './selectors.js';
 
-const VALID_PATHS = new Set(['/', '/index.html', '/carriers.html', '/negotiate.html', '/contact.html', '/map.html']);
+const VALID_PATHS = new Set(['/', '/index.html', '/dispatch.html', '/carriers.html', '/negotiate.html', '/contact.html', '/map.html']);
 
 function textOf(el) {
   if (!el) return '';

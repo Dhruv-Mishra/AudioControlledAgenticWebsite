@@ -29,6 +29,12 @@ const ROUTES = Object.freeze({
     partial: '/partials/dispatch.html',
     load: () => import('./page-dispatch.js')
   },
+  '/dispatch.html': {
+    name: 'dispatch',
+    title: 'Dispatch Board — Dhruv FreightOps',
+    partial: '/partials/dispatch.html',
+    load: () => import('./page-dispatch.js')
+  },
   '/carriers.html': {
     name: 'carriers',
     title: 'Carriers — Dhruv FreightOps',
@@ -261,7 +267,7 @@ class Router extends EventTarget {
     links.forEach((a) => {
       const href = a.getAttribute('href');
       if (!href) return;
-      const match = href === path || (href === '/' && path === '/index.html');
+      const match = href === path || (href === '/' && (path === '/index.html' || path === '/dispatch.html'));
       if (match) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
     });

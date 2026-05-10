@@ -99,6 +99,7 @@ export function buildActions() {
     { id: 'nav.carriers',  section: 'Navigate', label: 'Go to Carriers',           keywords: 'carriers directory partners',              handler: navigate('/carriers.html') },
     { id: 'nav.negotiate', section: 'Navigate', label: 'Go to Rate Negotiation',   keywords: 'negotiate rate quote counter',             handler: navigate('/negotiate.html') },
     { id: 'nav.contact',   section: 'Navigate', label: 'Go to Contact',            keywords: 'contact support callback',                 handler: navigate('/contact.html') },
+    { id: 'nav.map',       section: 'Navigate', label: 'Go to Freight Map',         keywords: 'map loads lanes tracking geography',        handler: navigate('/map.html') },
 
     { id: 'transcript.off',       section: 'Transcript', label: 'Hide transcript',            keywords: 'transcript off hide',          handler: setTranscriptMode('off') },
     { id: 'transcript.captions',  section: 'Transcript', label: 'Show captions only',         keywords: 'captions subtitles slim',      handler: setTranscriptMode('captions') },

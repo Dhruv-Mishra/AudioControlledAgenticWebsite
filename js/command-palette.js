@@ -18,6 +18,14 @@ let lastFocused = null;
 
 const MAX_ROWS = 40;
 
+const ACTION_ALIASES = new Map([
+  ['navigate.dispatch', 'nav.dispatch'],
+  ['navigate.carriers', 'nav.carriers'],
+  ['navigate.negotiate', 'nav.negotiate'],
+  ['navigate.contact', 'nav.contact'],
+  ['navigate.map', 'nav.map']
+]);
+
 function matchScore(action, q) {
   if (!q) return 1;
   const hay = `${action.label} ${action.keywords || ''} ${action.section || ''}`.toLowerCase();
@@ -214,14 +222,16 @@ export function init({ voiceAgent } = {}) {
 }
 
 export function runActionById(id, runArgs = {}) {
-  const a = buildActions().find((x) => x.id === id);
-  if (!a) return { ok: false, error: `Unknown palette action: ${id}` };
+  const requested = String(id || '').trim();
+  const resolved = ACTION_ALIASES.get(requested) || requested;
+  const a = buildActions().find((x) => x.id === resolved);
+  if (!a) return { ok: false, error: `Unknown palette action: ${requested}` };
   try {
     const res = a.handler({ voiceAgent: voiceAgentRef, ...runArgs });
     if (res && typeof res.then === 'function') {
       res.catch((err) => console.error('[palette] async handler error', err));
     }
-    return { ok: true, ran: id };
+    return { ok: true, ran: resolved, alias: resolved === requested ? undefined : requested };
   } catch (err) {
     return { ok: false, error: (err && err.message) || String(err) };
   }
