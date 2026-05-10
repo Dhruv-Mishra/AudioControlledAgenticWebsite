@@ -1573,7 +1573,8 @@
 /* ============ 13. MOBILE BOTTOM-SHEET ============ */
 @media (max-width: 640px) {
   .voice-dock {
-    --voice-mobile-dock-bottom: max(env(safe-area-inset-bottom, 0px), var(--app-visual-viewport-bottom-inset, 0px));
+    --voice-mobile-dock-cushion: 6px;
+    --voice-mobile-dock-bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--app-visual-viewport-bottom-inset, 0px)) + var(--voice-mobile-dock-cushion));
     left: 16px;
     right: 16px;
     bottom: var(--voice-mobile-dock-bottom);

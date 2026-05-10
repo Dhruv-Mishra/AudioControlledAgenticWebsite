@@ -1569,13 +1569,11 @@ export async function createMap(root, { loads, carriers }, onEarlyApi) {
       const viewport = window.visualViewport;
       if (viewport) {
         viewport.addEventListener('resize', scheduleInvalidateSize, { passive: true });
-        viewport.addEventListener('scroll', scheduleInvalidateSize, { passive: true });
       }
       window.addEventListener('orientationchange', scheduleInvalidateSize, { passive: true });
       track(() => {
         if (viewport) {
           try { viewport.removeEventListener('resize', scheduleInvalidateSize); } catch {}
-          try { viewport.removeEventListener('scroll', scheduleInvalidateSize); } catch {}
         }
         try { window.removeEventListener('orientationchange', scheduleInvalidateSize); } catch {}
       });

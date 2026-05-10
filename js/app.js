@@ -38,6 +38,8 @@ function bindViewportMetrics() {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const root = document.documentElement;
   let frame = 0;
+  let lastHeight = '';
+  let lastBottomInset = '';
   const update = () => {
     frame = 0;
     const viewport = window.visualViewport;
@@ -47,14 +49,23 @@ function bindViewportMetrics() {
     const bottomInset = viewport
       ? Math.max(0, (window.innerHeight || height) - viewport.height - viewport.offsetTop)
       : 0;
-    if (height > 0) root.style.setProperty('--app-visual-viewport-height', `${Math.round(height)}px`);
-    root.style.setProperty('--app-visual-viewport-bottom-inset', `${Math.round(bottomInset)}px`);
+    const nextHeight = height > 0 ? `${Math.round(height)}px` : '';
+    const nextBottomInset = `${Math.round(bottomInset)}px`;
+    if (nextHeight && nextHeight !== lastHeight) {
+      lastHeight = nextHeight;
+      root.style.setProperty('--app-visual-viewport-height', nextHeight);
+    }
+    if (nextBottomInset !== lastBottomInset) {
+      lastBottomInset = nextBottomInset;
+      root.style.setProperty('--app-visual-viewport-bottom-inset', nextBottomInset);
+    }
   };
   const schedule = () => {
     if (frame) return;
     frame = window.requestAnimationFrame(update);
   };
   update();
+  window.addEventListener('scroll', schedule, { passive: true });
   window.addEventListener('resize', schedule, { passive: true });
   window.addEventListener('orientationchange', schedule, { passive: true });
   if (window.visualViewport) {

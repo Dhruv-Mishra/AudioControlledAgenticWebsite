@@ -737,12 +737,12 @@
 /* Mobile: detail panel = bottom sheet (28 px top radii) */
 @media (max-width: 640px) {
   .app-main.app-main--map {
-    --map-mobile-page-height: calc(var(--app-visual-viewport-height, var(--app-viewport-height, 100dvh)) - var(--app-header-height, 92px) - var(--app-mobile-dock-clearance));
-    flex: 0 0 auto;
+    --map-mobile-page-height: calc(var(--app-visual-viewport-height, var(--app-viewport-height, 100dvh)) - var(--app-header-height, 92px));
+    flex: 1 0 auto;
     min-height: max(360px, var(--map-mobile-page-height));
-    height: max(360px, var(--map-mobile-page-height));
+    height: auto;
     padding: 0;
-    overflow: hidden;
+    overflow: visible;
   }
   .app-main.app-main--map.app-main--map-list-open {
     min-height: calc(var(--app-visual-viewport-height, var(--app-viewport-height, 100dvh)) - var(--app-header-height, 92px));
